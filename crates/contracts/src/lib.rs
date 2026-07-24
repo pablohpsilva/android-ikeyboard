@@ -26,9 +26,11 @@ use core::fmt;
 pub enum Namespace {
     /// Per-user tap-geometry model (sole writer: `touch-model`, ADR-14).
     TouchModel,
-    /// Lexical learning: user dictionary (sole writer: `personalization`).
+    /// The user's lexical model — learned words + whitelist, persisted as one
+    /// atomic blob (sole writer: `personalization`).
     UserDict,
-    /// Lexical learning: personal n-gram counts (sole writer: `personalization`).
+    /// Reserved for a future dedicated personal n-gram store; not currently
+    /// written by any crate.
     PersonalLm,
     /// Clipboard history (sole writer: `clipboard-core`).
     Clipboard,

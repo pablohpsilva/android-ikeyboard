@@ -112,10 +112,10 @@ fn load_propagates_a_store_crypto_error() {
 }
 
 #[test]
-fn load_reports_corrupt_dictionary_bytes_as_backend_error() {
+fn load_reports_non_utf8_blob_as_backend_error() {
     let store = FakeStore::new();
-    // Non-UTF-8 bytes under the dictionary namespace: corruption, not a value.
-    store.seed(Namespace::PersonalLm, b"v1", &[0xff, 0xfe]);
+    // Non-UTF-8 bytes under the sole blob namespace: corruption, not a value.
+    store.seed(Namespace::UserDict, b"v1", &[0xff, 0xfe]);
     assert_eq!(
         Personalization::load(&store).err(),
         Some(StoreError::Backend)
@@ -123,9 +123,10 @@ fn load_reports_corrupt_dictionary_bytes_as_backend_error() {
 }
 
 #[test]
-fn load_reports_corrupt_whitelist_bytes_as_backend_error() {
+fn load_reports_a_corrupt_frequency_count_as_backend_error() {
     let store = FakeStore::new();
-    store.seed(Namespace::UserDict, b"v1", &[0xff, 0xfe]);
+    // A frequency line (has a tab) whose count is not a u32 is corruption.
+    store.seed(Namespace::UserDict, b"v1", b"NaN\tword");
     assert_eq!(
         Personalization::load(&store).err(),
         Some(StoreError::Backend)

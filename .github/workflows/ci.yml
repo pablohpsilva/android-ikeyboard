@@ -51,6 +51,11 @@ jobs:
         # (ARCH §6/§3.2, SEDD §5.5, ADR-12).
         run: python3 tools/fitness/check.py
 
+      - name: BDD traceability
+        # Every Gherkin scenario is @BR-tagged and every tag references a real
+        # requirement (SEDD BDD mandate). Specs cannot drift from the BRD.
+        run: python3 tools/bdd_check.py
+
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 

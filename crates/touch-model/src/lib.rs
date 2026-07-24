@@ -26,9 +26,12 @@ use featherkey_kernel::KeyId;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum TouchModelError {
-    /// `dx` or `dy` was `NaN` or infinite. Folding a non-finite sample into the
-    /// running mean would poison every future offset for that key, so the
-    /// sample is refused instead.
+    /// The observation could not be folded in while keeping the key's mean
+    /// finite. Either the incoming `dx`/`dy` was `NaN`/infinite, or folding an
+    /// otherwise-finite sample would have driven the *accumulated* running mean
+    /// non-finite (e.g. an intermediate overflow to infinity). Storing such a
+    /// mean would poison every future offset for that key, so the update is
+    /// refused and the prior mean is left unchanged.
     NonFiniteOffset,
 }
 
@@ -56,14 +59,30 @@ struct Mean {
 
 impl Mean {
     /// Fold one finite sample into the mean in O(1) using Welford's incremental
-    /// update: `mean += (sample - mean) / n`. Callers guarantee finiteness.
-    fn push(&mut self, dx: f32, dy: f32) {
+    /// update: `mean += (sample - mean) / n`. Callers guarantee the *inputs* are
+    /// finite; this method additionally guards the *result*.
+    ///
+    /// The candidate mean is computed first and committed only if it is finite.
+    /// Even with finite inputs the intermediate `sample - mean` can overflow to
+    /// infinity (e.g. a near-`MAX` mean minus a near-`-MAX` sample), which would
+    /// poison the stored offset. When that happens the accumulator is left
+    /// entirely unchanged and `false` is returned so the caller can reject the
+    /// observation.
+    #[must_use]
+    fn push(&mut self, dx: f32, dy: f32) -> bool {
         // Saturating so a pathological tap count can never wrap to zero and
         // divide-by-zero; at saturation the step size is ~0 and the mean holds.
-        self.count = self.count.saturating_add(1);
-        let n = self.count as f32;
-        self.dx += (dx - self.dx) / n;
-        self.dy += (dy - self.dy) / n;
+        let count = self.count.saturating_add(1);
+        let n = count as f32;
+        let ndx = self.dx + (dx - self.dx) / n;
+        let ndy = self.dy + (dy - self.dy) / n;
+        if !ndx.is_finite() || !ndy.is_finite() {
+            return false;
+        }
+        self.dx = ndx;
+        self.dy = ndy;
+        self.count = count;
+        true
     }
 }
 
@@ -104,15 +123,23 @@ impl TouchModel {
     /// keeping the fast-typing path non-blocking (BR-46).
     ///
     /// # Errors
-    /// [`TouchModelError::NonFiniteOffset`] if `dx` or `dy` is `NaN` or
-    /// infinite; the model is left unchanged so one bad sample cannot poison the
-    /// learned mean.
+    /// [`TouchModelError::NonFiniteOffset`] if `dx` or `dy` is `NaN`/infinite,
+    /// **or** if folding this (finite) sample would drive the key's accumulated
+    /// running mean non-finite. In either case the model is left unchanged so no
+    /// single sample can poison the learned mean.
     pub fn observe(&mut self, key: KeyId, dx: f32, dy: f32) -> Result<(), TouchModelError> {
         if !dx.is_finite() || !dy.is_finite() {
             return Err(TouchModelError::NonFiniteOffset);
         }
-        self.means.entry(key).or_default().push(dx, dy);
-        Ok(())
+        // `or_default` only materialises an entry for an unseen key, whose first
+        // fold (`mean = sample`) is finite whenever the sample is, so a rejected
+        // update never leaves a poisoned entry behind. An existing key that
+        // rejects keeps its prior mean untouched (`push` did not mutate).
+        if self.means.entry(key).or_default().push(dx, dy) {
+            Ok(())
+        } else {
+            Err(TouchModelError::NonFiniteOffset)
+        }
     }
 
     /// The learned bias for `key`: the mean `(dx, dy)` of every offset observed
@@ -227,6 +254,35 @@ mod tests {
         // A rejected first observation leaves the key entirely unseen.
         assert!(model.is_unbiased());
         assert_eq!(model.observations(A), 0);
+    }
+
+    #[test]
+    fn accumulated_mean_drift_to_non_finite_is_rejected() {
+        let mut model = TouchModel::unbiased();
+        // Two finite samples whose *difference* overflows f32 to infinity: the
+        // inputs pass the finiteness gate but the fold would poison the mean.
+        let big = 3.0e38_f32;
+        assert!(big.is_finite() && (-big).is_finite());
+        assert_eq!(model.observe(A, -big, -big), Ok(()));
+        let before = model.offset(A);
+        assert!(before.0.is_finite() && before.1.is_finite());
+
+        // The drifting update is refused, not stored.
+        assert_eq!(
+            model.observe(A, big, big),
+            Err(TouchModelError::NonFiniteOffset)
+        );
+        // Prior mean is untouched and still finite/usable.
+        assert_eq!(model.offset(A), before);
+        let (dx, dy) = model.offset(A);
+        assert!(dx.is_finite() && dy.is_finite());
+        assert_eq!(model.observations(A), 1);
+
+        // The model as a whole stays usable: further sane learning still lands.
+        assert_eq!(model.observe(B, 1.0, 1.0), Ok(()));
+        assert_eq!(model.offset(B), (1.0, 1.0));
+        assert_eq!(model.observe(A, -big, -big), Ok(()));
+        assert!(model.offset(A).0.is_finite() && model.offset(A).1.is_finite());
     }
 
     #[test]

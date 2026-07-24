@@ -26,6 +26,9 @@ run cargo test --workspace
 step "architectural fitness functions"
 run python3 tools/fitness/check.py
 
+step "BDD traceability (features <-> requirements)"
+run python3 tools/bdd_check.py
+
 step "coverage gate (line >= 98%)"
 if cargo llvm-cov --version >/dev/null 2>&1; then
     run cargo llvm-cov --workspace --fail-under-lines 98 --summary-only

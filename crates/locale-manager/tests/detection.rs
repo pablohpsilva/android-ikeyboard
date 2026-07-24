@@ -68,3 +68,56 @@ fn br17_manual_switch_is_instant_and_flips_the_hysteresis_winner() {
     .expect("valid active set");
     assert_eq!(mgr.detect("hello"), Some(LangId::new("pt")));
 }
+
+// --- three concurrent active languages (SEDD §6.1 "toward 3") ---------------
+
+/// English, then Portuguese, then German — all three active at once, with
+/// "hello" shared by every lexicon so it is a genuine 3-way tie. Each language
+/// also owns one exclusive word ("world" / "mundo" / "welt"). German's fixture
+/// is pre-sorted ("hallo" < "hello" < "welt").
+fn en_pt_de() -> LocaleManager {
+    LocaleManager::new(vec![
+        (LangId::new("en"), dict(&["hello", "world"])),
+        (LangId::new("pt"), dict(&["hello", "mundo"])),
+        (LangId::new("de"), dict(&["hallo", "hello", "welt"])),
+    ])
+    .expect("valid active set")
+}
+
+#[test]
+fn br16_three_languages_are_concurrently_active_in_order() {
+    // (c): active() reports all three, in preference order, with no toggling.
+    let mgr = en_pt_de();
+    let active: Vec<&str> = mgr.active().iter().map(LangId::as_str).collect();
+    assert_eq!(active, ["en", "pt", "de"]);
+}
+
+#[test]
+fn br19b_word_unique_to_one_of_three_languages_detects_that_language() {
+    // (a): each exclusive word must pick its own language out of the three,
+    // regardless of that language's position in the active order.
+    let mgr = en_pt_de();
+    assert_eq!(mgr.detect("world"), Some(LangId::new("en")));
+    assert_eq!(mgr.detect("mundo"), Some(LangId::new("pt")));
+    assert_eq!(mgr.detect("welt"), Some(LangId::new("de")));
+}
+
+#[test]
+fn br18_three_way_tie_resolves_to_the_most_recent_active_language() {
+    // (b): "hello" is contained by all three with identical prefix breadth (each
+    // lexicon has exactly one word starting with "hello"), so the scores tie
+    // three ways. Strict-`>` hysteresis keeps the first (most-recent) language.
+    let mgr = en_pt_de();
+    assert_eq!(mgr.detect("hello"), Some(LangId::new("en")));
+
+    // Re-ordering the identical active set proves the resolution follows the
+    // active order deterministically, not the language identity: de is now
+    // most-recent, so the same tie now lands on de.
+    let mgr = LocaleManager::new(vec![
+        (LangId::new("de"), dict(&["hallo", "hello", "welt"])),
+        (LangId::new("pt"), dict(&["hello", "mundo"])),
+        (LangId::new("en"), dict(&["hello", "world"])),
+    ])
+    .expect("valid active set");
+    assert_eq!(mgr.detect("hello"), Some(LangId::new("de")));
+}

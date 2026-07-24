@@ -4,8 +4,9 @@
 //! This crate owns **one** thing: what words *this user* uses. It keeps an
 //! in-memory user dictionary (`word -> frequency count`) plus a whitelist of
 //! words the user has explicitly marked as correct, and it is the *only*
-//! component that writes the lexical namespaces ([`Namespace::UserDict`] and
-//! [`Namespace::PersonalLm`]). Persistence, encryption and I/O are **not** done
+//! component that writes the lexical user-dictionary namespace
+//! ([`Namespace::UserDict`]), where it persists the whole model as one atomic
+//! blob. Persistence, encryption and I/O are **not** done
 //! here — they belong to `secure-store`, reached only through the
 //! [`SecureStore`] port (SEDD §5.4, ADR-12 Dependency Rule). This crate depends
 //! on the *trait*, never the adapter, so the composition root injects the
@@ -28,8 +29,9 @@ use featherkey_contracts::{Namespace, SecureStore, StoreError};
 
 mod codec;
 
-/// Storage key for the single blob each lexical namespace holds. Versioned so a
-/// future encoding change can be detected rather than silently mis-parsed.
+/// Storage key for the model's single blob under [`Namespace::UserDict`].
+/// Versioned so a future encoding change can be detected rather than silently
+/// mis-parsed.
 const BLOB_KEY: &[u8] = b"v1";
 
 /// A word is storable only if it is non-empty and free of the codec's line/field
@@ -50,9 +52,10 @@ fn is_storable(word: &str) -> bool {
 /// * [`is_known`](Personalization::is_known) answers whether a word should be
 ///   treated as valid vocabulary (learned *or* whitelisted).
 ///
-/// The frequency map is persisted under [`Namespace::PersonalLm`] (personal
-/// unigram counts) and the whitelist under [`Namespace::UserDict`] (the user's
-/// explicit dictionary), through the injected [`SecureStore`].
+/// The whole model — frequency map and whitelist together — is persisted as a
+/// single atomic blob under [`Namespace::UserDict`] (the user's dictionary)
+/// through the injected [`SecureStore`], so a persist can never leave the two
+/// halves out of step with each other.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Personalization {
     /// Learned words and how often each has been observed. Counts are `>= 1`;
@@ -110,39 +113,37 @@ impl Personalization {
 
     /// Encrypt-and-store the whole model through the injected store.
     ///
-    /// The frequency dictionary is written under [`Namespace::PersonalLm`] and
-    /// the whitelist under [`Namespace::UserDict`]. This crate is the sole
-    /// writer of both (ADR-14).
+    /// The entire model — frequency dictionary *and* whitelist — is serialized
+    /// into one blob and written with a **single** [`put`](SecureStore::put)
+    /// under [`Namespace::UserDict`], the user's dictionary. Persisting as one
+    /// atomic write means a failure can never leave the store holding a new
+    /// dictionary beside a stale whitelist (or vice versa); either the whole new
+    /// model lands or none of it does. This crate is the sole writer of that
+    /// namespace (ADR-14).
     ///
     /// # Errors
     /// Propagates any [`StoreError`] from the underlying store; this crate adds
     /// no error of its own on the write path.
     pub fn persist(&self, store: &impl SecureStore) -> Result<(), StoreError> {
-        let dict = codec::encode_frequencies(&self.frequencies);
-        store.put(Namespace::PersonalLm, BLOB_KEY, &dict)?;
-        let whitelist = codec::encode_whitelist(&self.whitelist);
-        store.put(Namespace::UserDict, BLOB_KEY, &whitelist)?;
-        Ok(())
+        let blob = codec::encode_model(&self.frequencies, &self.whitelist);
+        store.put(Namespace::UserDict, BLOB_KEY, &blob)
     }
 
     /// Load a model previously written by [`persist`](Personalization::persist).
     ///
-    /// A namespace with no stored blob loads as empty (a first run), so this
-    /// never fails merely because the user has not typed yet.
+    /// Reads the single blob under [`Namespace::UserDict`]. A namespace with no
+    /// stored blob loads as an empty model (a first run), so this never fails
+    /// merely because the user has not typed yet.
     ///
     /// # Errors
     /// Returns the store's [`StoreError`] on a backend/crypto failure, or
-    /// [`StoreError::Backend`] if a stored blob is corrupt (not valid UTF-8 or
+    /// [`StoreError::Backend`] if the stored blob is corrupt (not valid UTF-8 or
     /// not in the expected encoding) — corruption is a backend fault, not a
     /// value the caller can act on.
     pub fn load(store: &impl SecureStore) -> Result<Self, StoreError> {
-        let frequencies = match store.get(Namespace::PersonalLm, BLOB_KEY)? {
-            Some(bytes) => codec::decode_frequencies(&bytes)?,
-            None => BTreeMap::new(),
-        };
-        let whitelist = match store.get(Namespace::UserDict, BLOB_KEY)? {
-            Some(bytes) => codec::decode_whitelist(&bytes)?,
-            None => BTreeSet::new(),
+        let (frequencies, whitelist) = match store.get(Namespace::UserDict, BLOB_KEY)? {
+            Some(bytes) => codec::decode_model(&bytes)?,
+            None => (BTreeMap::new(), BTreeSet::new()),
         };
         Ok(Self {
             frequencies,

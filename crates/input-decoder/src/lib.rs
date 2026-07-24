@@ -75,20 +75,50 @@ fn distance_sq(a: TouchPoint, b: TouchPoint) -> f32 {
     dx * dx + dy * dy
 }
 
-/// Convert per-key distances into a confidence for the best key via
-/// inverse-distance weighting. An exact hit (distance 0) yields confidence 1.0.
-fn confidence_for_best(best_dist: f32, all_dists: &[f32]) -> Confidence {
-    if best_dist == 0.0 {
-        return Confidence::new(1.0);
+/// Pre-computed denominator for inverse-distance confidence shares, built once
+/// per decode so each key's confidence is O(1) instead of re-scanning every
+/// distance per candidate (which made `decode` O(n²) on the keystroke hot path).
+///
+/// Inverse-distance weighting (`w(d) = 1/d`) is undefined at `d == 0`, so exact
+/// hits are handled explicitly: if any key sits on the touch, only the on-touch
+/// keys carry confidence and they split it evenly (a lone dead-centre hit ⇒ 1.0,
+/// two coincident keys ⇒ 0.5 each, every other key ⇒ 0.0). With no exact hit
+/// every weight is finite and positive, so `total_weight > 0`.
+#[derive(Debug, Clone, Copy)]
+struct ShareBasis {
+    /// How many keys sit exactly on the touch (`dist == 0`).
+    zeros: usize,
+    /// Sum of `1/d` over all keys — only meaningful when `zeros == 0`.
+    total_weight: f32,
+}
+
+impl ShareBasis {
+    fn new(all_dists: &[f32]) -> Self {
+        let zeros = all_dists.iter().filter(|d| **d == 0.0).count();
+        let total_weight = if zeros == 0 {
+            all_dists.iter().map(|&d| 1.0 / d).sum()
+        } else {
+            0.0
+        };
+        Self {
+            zeros,
+            total_weight,
+        }
     }
-    // `best_dist` is the smallest distance (callers pass sorted distances) and
-    // is > 0 here, so every weight is finite and positive and `total` is always
-    // > 0 — no divide-by-zero guard is reachable. If a *non-best* key coincides
-    // with the touch (distance 0 => infinite weight), `total` is infinite and
-    // the best key's share collapses toward 0, which is the correct outcome.
-    let weight = |d: f32| 1.0 / d;
-    let total: f32 = all_dists.iter().copied().map(weight).sum();
-    Confidence::new(weight(best_dist) / total)
+
+    /// One key's share of the weighting — its true proximity to the touch,
+    /// not a placeholder derived from the winner. O(1).
+    fn share(&self, dist: f32) -> Confidence {
+        if self.zeros > 0 {
+            let share = if dist == 0.0 {
+                1.0 / self.zeros as f32
+            } else {
+                0.0
+            };
+            return Confidence::new(share);
+        }
+        Confidence::new((1.0 / dist) / self.total_weight)
+    }
 }
 
 /// Shift a key's geometric centre by this user's learned offset for it. With an
@@ -126,22 +156,17 @@ impl InputDecoder for NearestKeyDecoder {
         scored.sort_by(|a, b| a.1.total_cmp(&b.1));
 
         let dists: Vec<f32> = scored.iter().map(|(_, d)| d.sqrt()).collect();
-        let best_conf = confidence_for_best(dists[0], &dists);
 
-        // Remaining candidates get a monotonically lower placeholder confidence
-        // derived from the best; exact per-candidate scoring arrives with the
-        // touch-model. Ordering is what the tracer bullet asserts.
+        // Every candidate gets its *own* inverse-distance share, so confidences
+        // reflect true proximity: a key twice as far carries half the weight,
+        // not a synthetic `best/(i+1)` placeholder. Ranking is unchanged (still
+        // ascending distance), so a smaller distance always yields the larger
+        // share and the order the tracer bullet asserts is preserved.
+        let basis = ShareBasis::new(&dists);
         let ranked = scored
             .iter()
-            .enumerate()
-            .map(|(i, (id, _))| {
-                let c = if i == 0 {
-                    best_conf.value()
-                } else {
-                    best_conf.value() / (i as f32 + 1.0)
-                };
-                (*id, Confidence::new(c))
-            })
+            .zip(dists.iter())
+            .map(|((id, _), &d)| (*id, basis.share(d)))
             .collect();
 
         Ok(KeyCandidates { ranked })
@@ -219,9 +244,42 @@ mod tests {
 
     #[test]
     fn confidence_collapses_to_zero_when_another_key_coincides_with_the_touch() {
-        // A non-best key at distance 0 gives infinite total weight, so the best
-        // key's share collapses to 0 — no panic, no divide-by-zero.
-        assert_eq!(confidence_for_best(5.0, &[0.0, 0.0]).value(), 0.0);
+        // A key at distance 5 while another key sits on the touch (distance 0):
+        // the on-touch key takes the confidence, so this one collapses to 0 —
+        // no panic, no divide-by-zero.
+        assert_eq!(ShareBasis::new(&[0.0, 0.0]).share(5.0).value(), 0.0);
+    }
+
+    /// The core of this change: a non-best candidate's confidence is its *real*
+    /// inverse-distance share, not the old `best/(i+1)` placeholder. A key four
+    /// times farther than the winner must carry ≈ one quarter of its confidence
+    /// (`share ∝ 1/dist`), which is materially below what the placeholder — half
+    /// the winner's, for the second candidate — would have produced.
+    #[test]
+    fn non_best_confidence_reflects_true_distance_not_a_placeholder() {
+        let decoder = NearestKeyDecoder::new();
+        let layout = Layout::qwerty_tracer_row();
+        // At x=230: 'e'(250) is 20px away, 'w'(150) is 80px away — 4x farther.
+        let out = decoder
+            .decode(
+                TouchPoint::new(230.0, 60.0),
+                &layout,
+                &TouchModel::unbiased(),
+            )
+            .unwrap();
+        let best = out.ranked()[0].1.value();
+        let second = out.ranked()[1].1.value();
+        // Real inverse-distance: 4x the distance ⇒ ~1/4 the confidence.
+        assert!(
+            (second - best / 4.0).abs() < 1e-4,
+            "expected ~best/4, got {second} (best {best})"
+        );
+        // The old placeholder would have made the second candidate best/2;
+        // prove we are materially below that synthetic value.
+        assert!(
+            best / 2.0 - second > 0.1,
+            "second {second} is not materially below the best/2 placeholder"
+        );
     }
 
     /// A tap that lands closer to a neighbour's centre than to the intended
