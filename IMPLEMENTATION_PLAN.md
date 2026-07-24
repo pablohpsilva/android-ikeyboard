@@ -176,8 +176,8 @@ Grounded in the dependency analysis. Every module's deps are built in an earlier
 ### Wave 0 — Done
 `kernel`, `layout-engine`, `input-decoder` (tracer). BR-5, BR-6 (thin slice). ✔
 
-### Wave 0.5 — Pre-flight (do first)
-Ratify **D-1…D-5**; land **E-1** (dependency-rule fitness) and **E-3** (`cargo-deny`/`cargo-audit`). No product BRs, but unblocks and guards everything after. Sandbox-verifiable: **Yes**.
+### Wave 0.5 — Pre-flight ✅ **Done**
+D-1…D-5 **ratified** (ADR-12–16, SEDD v0.7). Landed: the `contracts` port crate (D-1); **E-1** inward-dependency-rule fitness (proven to bite); **E-3** supply-chain gate (`deny.toml` + CI `cargo-deny`/`cargo-audit`, validated locally). SEDD/ARCH reconciled (E-4, §7 doc-fidelity). **E-2** (sensitive-context ordering property) is scheduled for Wave 4; its contract is written when `sensitive-context` lands in Wave 1. No product BRs. Sandbox-verifiable: **Yes**.
 
 ### Wave 1 — kernel-only leaves (fan out in parallel)
 Each depends only on `kernel` (+ `contracts` from D-1), so all can be built concurrently, one worktree each.
