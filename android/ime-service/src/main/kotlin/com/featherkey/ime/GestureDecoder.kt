@@ -26,11 +26,16 @@ object GestureDecoder {
     private const val SAMPLES = 24
     private const val SHAPE_WEIGHT = 0.3f
 
+    // How much a common word's score is discounted, so frequent words win over
+    // obscure ones of a similar shape (a coarse stand-in for word frequency).
+    private const val COMMON_BOOST = 0.72f
+
     /** Best-matching words for [path], most likely first (empty if not a gesture). */
     fun decode(
         path: List<PointF>,
         centers: Map<Char, PointF>,
         words: List<String>,
+        common: Set<String> = emptySet(),
         limit: Int = 4,
     ): List<String> {
         if (path.size < 3 || centers.isEmpty() || words.isEmpty()) return emptyList()
@@ -60,7 +65,9 @@ object GestureDecoder {
             }
             loc /= SAMPLES
             shape /= SAMPLES
-            scored.add(w to loc + SHAPE_WEIGHT * step * shape)
+            var score = loc + SHAPE_WEIGHT * step * shape
+            if (w in common) score *= COMMON_BOOST
+            scored.add(w to score)
         }
         scored.sortBy { it.second }
         val out = ArrayList<String>(limit)

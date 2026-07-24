@@ -64,8 +64,10 @@ class FeatherKeyImeService : InputMethodService() {
     private lateinit var langPrefs: LanguagePrefs
     /** The active languages currently loaded into the core (order = preference). */
     private var currentTags: List<String> = emptyList()
-    /** All active-language words, flattened — the swipe decoder's vocabulary. */
+    /** The swipe decoder's (large) vocabulary across active languages. */
     private var activeWords: List<String> = emptyList()
+    /** The curated common words, used to bias the swipe ranking toward them. */
+    private var commonWords: Set<String> = emptySet()
 
     override fun onCreate() {
         super.onCreate()
@@ -75,7 +77,8 @@ class FeatherKeyImeService : InputMethodService() {
         val dbPath = File(filesDir, "featherkey.redb").absolutePath
         val langs = Lexicons.load(this, currentTags)
         bridge = FeatherKeyBridge.open(dbPath, key, langs)
-        activeWords = langs.flatMap { it.words }
+        commonWords = langs.flatMapTo(HashSet()) { it.words }
+        activeWords = Lexicons.gestureVocab(this, currentTags)
         key.fill(0) // wipe the shell's copy; the native side holds it zeroizing
     }
 
@@ -109,7 +112,8 @@ class FeatherKeyImeService : InputMethodService() {
             val langs = Lexicons.load(this, tags)
             runCatching { bridge.setActiveLanguages(langs) }
             currentTags = tags
-            activeWords = langs.flatMap { it.words }
+            commonWords = langs.flatMapTo(HashSet()) { it.words }
+            activeWords = Lexicons.gestureVocab(this, tags)
         }
         keyboard?.spaceHint = spaceHint(tags)
     }
@@ -117,7 +121,7 @@ class FeatherKeyImeService : InputMethodService() {
     /** A swipe over the letters: decode to a word, commit it, offer alternatives. */
     private fun handleGesture(pathPts: List<PointF>, centers: Map<Char, PointF>) {
         val ic = currentInputConnection ?: return
-        val words = GestureDecoder.decode(pathPts, centers, activeWords, limit = 4)
+        val words = GestureDecoder.decode(pathPts, centers, activeWords, commonWords, limit = 4)
         val best = words.firstOrNull() ?: return
         if (pending.isNotEmpty()) { // finalise a half-typed word with a space
             runCatching { bridge.learnWord(pending.toString(), field) }
@@ -343,13 +347,24 @@ class FeatherKeyImeService : InputMethodService() {
  * predictions until a word list is added. Only `en.txt` ships today.
  */
 object Lexicons {
+    /** The curated per-language lexicon the core uses for taps/correction. */
     fun load(context: Context, tags: List<String>): List<Language> =
-        tags.map { tag ->
-            val words = runCatching {
-                context.assets.open("lexicons/$tag.txt").bufferedReader().useLines { lines ->
-                    lines.map { it.trim() }.filter { it.isNotEmpty() }.toList()
-                }
-            }.getOrDefault(emptyList())
-            Language(tag, words)
-        }
+        tags.map { tag -> Language(tag, readAsset(context, "lexicons/$tag.txt")) }
+
+    /**
+     * The larger vocabulary the swipe decoder searches: the big gesture list for
+     * a language when one ships (`gesture/<tag>.txt`), else its core lexicon.
+     * Only English ships a large gesture list today.
+     */
+    fun gestureVocab(context: Context, tags: List<String>): List<String> =
+        tags.flatMap { tag ->
+            readAsset(context, "gesture/$tag.txt").ifEmpty { readAsset(context, "lexicons/$tag.txt") }
+        }.distinct()
+
+    private fun readAsset(context: Context, path: String): List<String> =
+        runCatching {
+            context.assets.open(path).bufferedReader().useLines { lines ->
+                lines.map { it.trim() }.filter { it.isNotEmpty() }.toList()
+            }
+        }.getOrDefault(emptyList())
 }
