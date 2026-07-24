@@ -266,3 +266,37 @@ fn layout_keys_expose_the_active_page_and_pages_switch() {
     fk.use_alpha_layout();
     assert_eq!(fk.layout_keys().len(), 26);
 }
+
+#[test]
+fn alpha_page_follows_the_primary_language_script() {
+    // Default English core opens on the 26-letter QWERTY block.
+    let mut fk = core();
+    assert_eq!(fk.layout_keys().len(), 26);
+
+    // Switching the primary language to Russian swaps the alpha page to the
+    // 32-key Cyrillic block — with no page-switch call from the shell.
+    fk.set_active_languages(vec![("ru".to_owned(), vec!["да".to_owned()])])
+        .unwrap();
+    let cyrillic = fk.layout_keys();
+    assert_eq!(cyrillic.len(), 32);
+    assert!(cyrillic.iter().any(|k| k.label == "й"));
+
+    // Paging away and back keeps the Cyrillic script (use_alpha_layout is
+    // language-aware, not hard-coded to QWERTY).
+    fk.use_numeric_layout();
+    fk.use_alpha_layout();
+    assert_eq!(fk.layout_keys().len(), 32);
+
+    // French makes the primary → its AZERTY variant (still 26 Latin letters).
+    fk.set_active_languages(vec![("fr".to_owned(), Vec::new())])
+        .unwrap();
+    let azerty = fk.layout_keys();
+    assert_eq!(azerty.len(), 26);
+    // 'a' leads the top row in AZERTY (its logical origin), unlike QWERTY's 'q'.
+    let top_left = azerty
+        .iter()
+        .filter(|k| k.y == 0.0)
+        .min_by(|a, b| a.x.total_cmp(&b.x))
+        .expect("a top row");
+    assert_eq!(top_left.label, "a");
+}
