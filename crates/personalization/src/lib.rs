@@ -144,7 +144,10 @@ impl Personalization {
             Some(bytes) => codec::decode_whitelist(&bytes)?,
             None => BTreeSet::new(),
         };
-        Ok(Self { frequencies, whitelist })
+        Ok(Self {
+            frequencies,
+            whitelist,
+        })
     }
 }
 

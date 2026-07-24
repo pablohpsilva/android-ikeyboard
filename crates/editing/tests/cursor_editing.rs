@@ -7,9 +7,7 @@
 //! offset, get back the next offset (or the word range) to send through
 //! `InputConnection` (BR-49).
 
-use featherkey_editing::{
-    move_left, move_right, select_word, word_left, word_right, EditError,
-};
+use featherkey_editing::{move_left, move_right, select_word, word_left, word_right, EditError};
 
 #[test]
 fn arrow_keys_walk_a_line_grapheme_by_grapheme() {

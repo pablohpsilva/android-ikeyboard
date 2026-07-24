@@ -270,9 +270,15 @@ mod tests {
         let mut d = Diagnostics::new(2, FixedClock(0)).unwrap();
         d.record(DiagnosticCode::Startup);
         d.record(DiagnosticCode::LayoutSwitched);
-        assert_eq!(codes(&d), [DiagnosticCode::Startup, DiagnosticCode::LayoutSwitched]);
+        assert_eq!(
+            codes(&d),
+            [DiagnosticCode::Startup, DiagnosticCode::LayoutSwitched]
+        );
         d.record(DiagnosticCode::DecodeError);
-        assert_eq!(codes(&d), [DiagnosticCode::LayoutSwitched, DiagnosticCode::DecodeError]);
+        assert_eq!(
+            codes(&d),
+            [DiagnosticCode::LayoutSwitched, DiagnosticCode::DecodeError]
+        );
     }
 
     #[test]

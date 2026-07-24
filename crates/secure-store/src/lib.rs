@@ -59,7 +59,10 @@ impl RedbSecureStore {
     /// [`StoreError::Backend`] if the database cannot be opened or created.
     pub fn open(path: impl AsRef<Path>, key: [u8; 32]) -> Result<Self, StoreError> {
         let db = Database::create(path).map_err(|_| StoreError::Backend)?;
-        Ok(Self { db, key: Zeroizing::new(key) })
+        Ok(Self {
+            db,
+            key: Zeroizing::new(key),
+        })
     }
 
     /// Build the AES-256-GCM cipher from the stored key. Infallible: a 32-byte
@@ -92,8 +95,9 @@ impl RedbSecureStore {
     /// [`StoreError::Crypto`] if the blob is truncated, the key is wrong, or the
     /// ciphertext was tampered with (GCM tag mismatch).
     fn open_blob(&self, blob: &[u8]) -> Result<Vec<u8>, StoreError> {
-        let (nonce_bytes, ciphertext) =
-            blob.split_first_chunk::<NONCE_LEN>().ok_or(StoreError::Crypto)?;
+        let (nonce_bytes, ciphertext) = blob
+            .split_first_chunk::<NONCE_LEN>()
+            .ok_or(StoreError::Crypto)?;
         let nonce = Nonce::<Aes256Gcm>::from(*nonce_bytes);
         self.cipher()
             .decrypt(&nonce, ciphertext)
@@ -163,7 +167,10 @@ mod tests {
         let shown = format!("{store:?}");
         assert!(shown.contains("<redacted>"), "debug should redact: {shown}");
         // A non-redacted debug would print the key array as `[7, 7, 7, ...]`.
-        assert!(!shown.contains("7, 7"), "key bytes leaked into debug: {shown}");
+        assert!(
+            !shown.contains("7, 7"),
+            "key bytes leaked into debug: {shown}"
+        );
     }
 
     #[test]
@@ -183,7 +190,10 @@ mod tests {
     fn open_blob_rejects_a_blob_too_short_for_a_nonce() {
         let dir = TempDir::new().expect("tempdir");
         let store = store_in(&dir, KEY_A);
-        assert_eq!(store.open_blob(&[0u8; NONCE_LEN - 1]), Err(StoreError::Crypto));
+        assert_eq!(
+            store.open_blob(&[0u8; NONCE_LEN - 1]),
+            Err(StoreError::Crypto)
+        );
     }
 
     #[test]

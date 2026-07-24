@@ -85,7 +85,9 @@ impl TouchModel {
     /// unbiased nearest-key skeleton.
     #[must_use]
     pub fn unbiased() -> Self {
-        Self { means: HashMap::new() }
+        Self {
+            means: HashMap::new(),
+        }
     }
 
     /// `true` while no key has any learned bias yet (a fresh or reset model).

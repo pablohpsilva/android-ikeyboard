@@ -29,7 +29,13 @@ pub struct Key {
 impl Key {
     #[must_use]
     pub const fn new(id: KeyId, x: f32, y: f32, width: f32, height: f32) -> Self {
-        Self { id, x, y, width, height }
+        Self {
+            id,
+            x,
+            y,
+            width,
+            height,
+        }
     }
 
     /// The geometric center of the key, used by decoders as the key's
@@ -59,7 +65,11 @@ impl Layout {
     /// [`Layout::with_direction`] to tag it RTL.
     #[must_use]
     pub fn new(keys: Vec<Key>) -> Self {
-        Self { keys, kind: LayoutKind::Alpha, direction: Direction::Ltr }
+        Self {
+            keys,
+            kind: LayoutKind::Alpha,
+            direction: Direction::Ltr,
+        }
     }
 
     #[must_use]
@@ -163,6 +173,9 @@ mod tests {
         assert_eq!(rtl.direction(), Direction::Rtl);
         assert!(rtl.direction().is_rtl());
         let ids_after: Vec<char> = rtl.keys().iter().map(|k| k.id.ch()).collect();
-        assert_eq!(ids_before, ids_after, "with_direction must not reorder keys");
+        assert_eq!(
+            ids_before, ids_after,
+            "with_direction must not reorder keys"
+        );
     }
 }

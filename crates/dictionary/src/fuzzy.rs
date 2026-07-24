@@ -86,8 +86,7 @@ mod tests {
     #[test]
     fn deletes_removes_one_char_at_each_position() {
         let got: BTreeSet<String> = deletes(&chars("abc")).into_iter().collect();
-        let want: BTreeSet<String> =
-            ["bc", "ac", "ab"].iter().map(|s| s.to_string()).collect();
+        let want: BTreeSet<String> = ["bc", "ac", "ab"].iter().map(|s| s.to_string()).collect();
         assert_eq!(got, want);
     }
 
@@ -112,8 +111,9 @@ mod tests {
 
     #[test]
     fn substitutions_replace_with_other_alphabet_chars_only() {
-        let got: BTreeSet<String> =
-            substitutions(&chars("a"), &['a', 'b', 'c']).into_iter().collect();
+        let got: BTreeSet<String> = substitutions(&chars("a"), &['a', 'b', 'c'])
+            .into_iter()
+            .collect();
         // 'a'->'a' is skipped (not an edit); only 'b' and 'c' remain.
         let want: BTreeSet<String> = ["b", "c"].iter().map(|s| s.to_string()).collect();
         assert_eq!(got, want);

@@ -35,8 +35,12 @@ fn put_overwrites_the_previous_value() {
     let dir = TempDir::new().expect("tempdir");
     let store = open(&dir, KEY_A);
 
-    store.put(Namespace::UserDict, b"k", b"first").expect("put1");
-    store.put(Namespace::UserDict, b"k", b"second").expect("put2");
+    store
+        .put(Namespace::UserDict, b"k", b"first")
+        .expect("put1");
+    store
+        .put(Namespace::UserDict, b"k", b"second")
+        .expect("put2");
 
     assert_eq!(
         store.get(Namespace::UserDict, b"k").expect("get"),
@@ -55,7 +59,9 @@ fn get_of_absent_key_is_none() {
     assert_eq!(store.get(Namespace::Clipboard, b"nope").expect("get"), None);
 
     // Namespace exists (has another key) but this key is absent -> None.
-    store.put(Namespace::UserDict, b"present", b"v").expect("put");
+    store
+        .put(Namespace::UserDict, b"present", b"v")
+        .expect("put");
     assert_eq!(
         store.get(Namespace::UserDict, b"missing").expect("get"),
         None
@@ -102,7 +108,9 @@ fn namespaces_are_isolated() {
     let dir = TempDir::new().expect("tempdir");
     let store = open(&dir, KEY_A);
 
-    store.put(Namespace::UserDict, b"k", b"in-dict").expect("put1");
+    store
+        .put(Namespace::UserDict, b"k", b"in-dict")
+        .expect("put1");
     store
         .put(Namespace::Clipboard, b"k", b"in-clip")
         .expect("put2");

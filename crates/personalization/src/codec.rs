@@ -61,7 +61,12 @@ pub(crate) fn decode_frequencies(bytes: &[u8]) -> Result<BTreeMap<String, u32>, 
 /// Encode the whitelist as newline-joined words, in `BTreeSet` order.
 pub(crate) fn encode_whitelist(words: &BTreeSet<String>) -> Vec<u8> {
     // `join` over sorted set members is deterministic and allocation-simple.
-    words.iter().cloned().collect::<Vec<_>>().join("\n").into_bytes()
+    words
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n")
+        .into_bytes()
 }
 
 /// Decode a whitelist blob.
@@ -114,18 +119,27 @@ mod tests {
 
     #[test]
     fn decode_frequencies_rejects_a_line_without_separator() {
-        assert_eq!(decode_frequencies(b"noseparator").err(), Some(StoreError::Backend));
+        assert_eq!(
+            decode_frequencies(b"noseparator").err(),
+            Some(StoreError::Backend)
+        );
     }
 
     #[test]
     fn decode_frequencies_rejects_a_non_numeric_count() {
-        assert_eq!(decode_frequencies(b"NaN\tword").err(), Some(StoreError::Backend));
+        assert_eq!(
+            decode_frequencies(b"NaN\tword").err(),
+            Some(StoreError::Backend)
+        );
     }
 
     #[test]
     fn decode_frequencies_rejects_an_overflowing_count() {
         // 2^32 does not fit in u32.
-        assert_eq!(decode_frequencies(b"4294967296\tw").err(), Some(StoreError::Backend));
+        assert_eq!(
+            decode_frequencies(b"4294967296\tw").err(),
+            Some(StoreError::Backend)
+        );
     }
 
     #[test]

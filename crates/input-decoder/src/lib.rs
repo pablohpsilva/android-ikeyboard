@@ -135,7 +135,11 @@ impl InputDecoder for NearestKeyDecoder {
             .iter()
             .enumerate()
             .map(|(i, (id, _))| {
-                let c = if i == 0 { best_conf.value() } else { best_conf.value() / (i as f32 + 1.0) };
+                let c = if i == 0 {
+                    best_conf.value()
+                } else {
+                    best_conf.value() / (i as f32 + 1.0)
+                };
                 (*id, Confidence::new(c))
             })
             .collect();
@@ -167,7 +171,11 @@ mod tests {
         let layout = Layout::qwerty_tracer_row();
         // Center of 'e' (third key) is (250, 60).
         let out = decoder
-            .decode(TouchPoint::new(250.0, 60.0), &layout, &TouchModel::unbiased())
+            .decode(
+                TouchPoint::new(250.0, 60.0),
+                &layout,
+                &TouchModel::unbiased(),
+            )
             .unwrap();
         assert_eq!(out.best(), Some(KeyId('e')));
         assert_eq!(out.ranked()[0].1.value(), 1.0);
@@ -179,7 +187,11 @@ mod tests {
         let layout = Layout::qwerty_tracer_row();
         // Slightly right of 'e' center but still inside 'e'.
         let out = decoder
-            .decode(TouchPoint::new(270.0, 60.0), &layout, &TouchModel::unbiased())
+            .decode(
+                TouchPoint::new(270.0, 60.0),
+                &layout,
+                &TouchModel::unbiased(),
+            )
             .unwrap();
         assert_eq!(out.best(), Some(KeyId('e')));
         let conf = out.ranked()[0].1.value();
@@ -192,7 +204,11 @@ mod tests {
         let layout = Layout::qwerty_tracer_row();
         // Between 'w'(150) and 'e'(250) centers, nearer 'e'.
         let out = decoder
-            .decode(TouchPoint::new(230.0, 60.0), &layout, &TouchModel::unbiased())
+            .decode(
+                TouchPoint::new(230.0, 60.0),
+                &layout,
+                &TouchModel::unbiased(),
+            )
             .unwrap();
         let ids: Vec<char> = out.ranked().iter().map(|(k, _)| k.ch()).collect();
         assert_eq!(ids[0], 'e');
@@ -269,8 +285,12 @@ mod tests {
         let decoder = NearestKeyDecoder::new();
         let layout = Layout::qwerty_tracer_row();
         let touch = TouchPoint::new(230.0, 60.0);
-        let a = decoder.decode(touch, &layout, &TouchModel::unbiased()).unwrap();
-        let b = decoder.decode(touch, &layout, &TouchModel::default()).unwrap();
+        let a = decoder
+            .decode(touch, &layout, &TouchModel::unbiased())
+            .unwrap();
+        let b = decoder
+            .decode(touch, &layout, &TouchModel::default())
+            .unwrap();
         assert_eq!(a, b);
     }
 }

@@ -113,7 +113,10 @@ mod tests {
             Namespace::Clipboard,
         ];
         let keys: Vec<&str> = all.iter().map(|n| n.as_str()).collect();
-        assert_eq!(keys, ["touch_model", "user_dict", "personal_lm", "clipboard"]);
+        assert_eq!(
+            keys,
+            ["touch_model", "user_dict", "personal_lm", "clipboard"]
+        );
         // Distinct table names — no two namespaces collide in storage.
         for (i, a) in keys.iter().enumerate() {
             for b in &keys[i + 1..] {
@@ -125,8 +128,14 @@ mod tests {
     #[test]
     fn store_error_displays_human_messages() {
         extern crate alloc;
-        assert_eq!(alloc::format!("{}", StoreError::Backend), "secure store backend failure");
-        assert_eq!(alloc::format!("{}", StoreError::Crypto), "secure store crypto failure");
+        assert_eq!(
+            alloc::format!("{}", StoreError::Backend),
+            "secure store backend failure"
+        );
+        assert_eq!(
+            alloc::format!("{}", StoreError::Crypto),
+            "secure store crypto failure"
+        );
     }
 
     // Stub adapters prove the port shapes are implementable and exercise the

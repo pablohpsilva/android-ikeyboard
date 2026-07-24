@@ -79,9 +79,7 @@ pub enum LocaleError {
 impl fmt::Display for LocaleError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LocaleError::NoActiveLanguages => {
-                f.write_str("at least one language must be active")
-            }
+            LocaleError::NoActiveLanguages => f.write_str("at least one language must be active"),
             LocaleError::DuplicateLanguage => {
                 f.write_str("a language may appear in the active set at most once")
             }
@@ -234,11 +232,8 @@ mod tests {
 
     /// The standard concurrent pair: English then Portuguese, "hello" shared.
     fn en_then_pt() -> LocaleManager {
-        LocaleManager::new(vec![
-            en(&["hello", "world"]),
-            pt(&["hello", "mundo"]),
-        ])
-        .expect("valid active set")
+        LocaleManager::new(vec![en(&["hello", "world"]), pt(&["hello", "mundo"])])
+            .expect("valid active set")
     }
 
     // --- LangId ---------------------------------------------------------------
@@ -320,11 +315,8 @@ mod tests {
         // English merely *starts* words with "tes" (breadth), while Portuguese
         // contains "tes" exactly. Containment must win despite English being the
         // preferred (first) language — proving score, not order, decides here.
-        let mgr = LocaleManager::new(vec![
-            en(&["test", "tester", "testing"]),
-            pt(&["tes"]),
-        ])
-        .expect("valid active set");
+        let mgr = LocaleManager::new(vec![en(&["test", "tester", "testing"]), pt(&["tes"])])
+            .expect("valid active set");
         assert_eq!(mgr.detect("tes"), Some(LangId::new("pt")));
     }
 

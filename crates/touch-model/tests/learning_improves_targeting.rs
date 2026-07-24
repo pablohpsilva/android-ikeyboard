@@ -25,8 +25,14 @@ fn the_model_learns_a_consistent_tap_bias() {
     }
 
     let (dx, dy) = model.offset(key);
-    assert!((dx - 4.0).abs() < 1e-3, "learned dx {dx} should approach 4.0");
-    assert!((dy - 6.0).abs() < 1e-3, "learned dy {dy} should approach 6.0");
+    assert!(
+        (dx - 4.0).abs() < 1e-3,
+        "learned dx {dx} should approach 4.0"
+    );
+    assert!(
+        (dy - 6.0).abs() < 1e-3,
+        "learned dy {dy} should approach 6.0"
+    );
     assert_eq!(model.observations(key), 50);
 }
 

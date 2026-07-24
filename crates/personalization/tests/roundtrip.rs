@@ -30,14 +30,22 @@ impl FakeStore {
         Self::default()
     }
     fn failing_put() -> Self {
-        Self { fail_put: true, ..Self::default() }
+        Self {
+            fail_put: true,
+            ..Self::default()
+        }
     }
     fn failing_get() -> Self {
-        Self { fail_get: true, ..Self::default() }
+        Self {
+            fail_get: true,
+            ..Self::default()
+        }
     }
     /// Seed a raw value directly (bypasses `persist`) to drive decode paths.
     fn seed(&self, ns: Namespace, key: &[u8], val: &[u8]) {
-        self.map.borrow_mut().insert((ns, key.to_vec()), val.to_vec());
+        self.map
+            .borrow_mut()
+            .insert((ns, key.to_vec()), val.to_vec());
     }
 }
 
@@ -46,7 +54,9 @@ impl SecureStore for FakeStore {
         if self.fail_put {
             return Err(StoreError::Backend);
         }
-        self.map.borrow_mut().insert((ns, key.to_vec()), val.to_vec());
+        self.map
+            .borrow_mut()
+            .insert((ns, key.to_vec()), val.to_vec());
         Ok(())
     }
     fn get(&self, ns: Namespace, key: &[u8]) -> Result<Option<Vec<u8>>, StoreError> {
@@ -95,7 +105,10 @@ fn persist_propagates_a_store_backend_error() {
 #[test]
 fn load_propagates_a_store_crypto_error() {
     let store = FakeStore::failing_get();
-    assert_eq!(Personalization::load(&store).err(), Some(StoreError::Crypto));
+    assert_eq!(
+        Personalization::load(&store).err(),
+        Some(StoreError::Crypto)
+    );
 }
 
 #[test]
@@ -103,14 +116,20 @@ fn load_reports_corrupt_dictionary_bytes_as_backend_error() {
     let store = FakeStore::new();
     // Non-UTF-8 bytes under the dictionary namespace: corruption, not a value.
     store.seed(Namespace::PersonalLm, b"v1", &[0xff, 0xfe]);
-    assert_eq!(Personalization::load(&store).err(), Some(StoreError::Backend));
+    assert_eq!(
+        Personalization::load(&store).err(),
+        Some(StoreError::Backend)
+    );
 }
 
 #[test]
 fn load_reports_corrupt_whitelist_bytes_as_backend_error() {
     let store = FakeStore::new();
     store.seed(Namespace::UserDict, b"v1", &[0xff, 0xfe]);
-    assert_eq!(Personalization::load(&store).err(), Some(StoreError::Backend));
+    assert_eq!(
+        Personalization::load(&store).err(),
+        Some(StoreError::Backend)
+    );
 }
 
 #[test]

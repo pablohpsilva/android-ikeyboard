@@ -41,7 +41,11 @@ impl Layout {
             .enumerate()
             .map(|(i, &c)| Key::new(KeyId(c), i as f32 * 100.0, 0.0, 100.0, 120.0))
             .collect();
-        Self { keys, kind, direction: Direction::Ltr }
+        Self {
+            keys,
+            kind,
+            direction: Direction::Ltr,
+        }
     }
 }
 
@@ -57,7 +61,10 @@ mod tests {
         assert_eq!(l.direction(), Direction::Ltr);
         assert!(!l.is_empty());
         let digits: Vec<char> = l.keys().iter().map(|k| k.id.ch()).collect();
-        assert_eq!(digits, vec!['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']);
+        assert_eq!(
+            digits,
+            vec!['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']
+        );
     }
 
     #[test]
@@ -66,7 +73,10 @@ mod tests {
         assert_eq!(l.kind(), LayoutKind::Symbols);
         assert_eq!(l.direction(), Direction::Ltr);
         let syms: Vec<char> = l.keys().iter().map(|k| k.id.ch()).collect();
-        assert_eq!(syms, vec!['.', ',', '?', '!', '\'', '@', '#', '$', '&', '*']);
+        assert_eq!(
+            syms,
+            vec!['.', ',', '?', '!', '\'', '@', '#', '$', '&', '*']
+        );
     }
 
     #[test]

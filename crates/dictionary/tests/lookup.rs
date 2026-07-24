@@ -26,7 +26,9 @@ fn prefix_lookup_returns_completions_in_order() {
 // @BR-10 — completions are capped so the hot path stays bounded.
 #[test]
 fn completions_are_capped() {
-    let words: Vec<String> = (0..MAX_COMPLETIONS + 5).map(|i| format!("x{i:03}")).collect();
+    let words: Vec<String> = (0..MAX_COMPLETIONS + 5)
+        .map(|i| format!("x{i:03}"))
+        .collect();
     let d = Dictionary::from_sorted_words(words.iter()).expect("generated in order");
     assert_eq!(d.prefix("x").len(), MAX_COMPLETIONS);
 }
