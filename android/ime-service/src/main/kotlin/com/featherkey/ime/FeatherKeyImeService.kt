@@ -131,6 +131,10 @@ class FeatherKeyImeService : InputMethodService() {
             runCatching { bridge.setActiveLanguages(Lexicons.load(this, tags)) }
             currentTags = tags
             loadVocab(tags)
+            // The primary language may have changed the core's alpha script
+            // (e.g. Latin → Cyrillic), so re-pull the rendered keys; renderKeys()
+            // also refreshes keyCenters for the tap model via its `.also`.
+            keyboard?.keys = renderKeys()
         }
         keyboard?.spaceHint = spaceHint(tags)
     }
@@ -249,7 +253,7 @@ class FeatherKeyImeService : InputMethodService() {
                 sendDefaultEditorAction(true)
                 keyboard?.suggestions = emptyList()
             }
-            FunctionKey.GLOBE -> showLanguageDialog()
+            FunctionKey.GLOBE -> cycleLanguage()
             FunctionKey.MIC -> startVoiceInput()
         }
     }
@@ -343,7 +347,21 @@ class FeatherKeyImeService : InputMethodService() {
     }
 
     /**
-     * Globe: choose the active languages right from the keyboard. Several may be
+     * Globe: cycle the primary language among the active set by rotating the
+     * first tag to the end (which swaps the alpha script/layout and the space-bar
+     * hint in place). With fewer than two languages active there is nothing to
+     * cycle, so fall back to the picker so single-language users can add more.
+     */
+    private fun cycleLanguage() {
+        val active = langPrefs.activeTags()
+        if (active.size < 2) { showLanguageDialog(); return }
+        val rotated = active.drop(1) + active.first()
+        langPrefs.setActiveTags(rotated)
+        applyLanguages(rotated)
+    }
+
+    /**
+     * Globe long-form: choose the active languages right from the keyboard. Several may be
      * active at once (checked); the core keeps them all active and the space bar
      * shows the set. Rendered as a dialog attached to the input view's window
      * (the standard way an IME shows a dialog).

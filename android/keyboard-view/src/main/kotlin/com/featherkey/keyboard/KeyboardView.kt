@@ -176,7 +176,17 @@ class KeyboardView @JvmOverloads constructor(
     private fun buildCells(w: Int, h: Int): List<Cell> {
         val out = ArrayList<Cell>()
         val contentW = w - sideMargin * 2
-        val baseKeyW = (contentW - keyGap * 9) / 10f
+        // Letter-key width adapts to the widest alpha row so a 12-column Cyrillic
+        // block fits; number/symbol pages keep their fixed 10 columns. A bottom
+        // alpha row of `n` letters plus the two 1.5-width side keys spans `n + 3`
+        // columns, so the widest row (max 12) sets the count and everything else
+        // fits within it.
+        val cols = if (page == Page.ALPHA) {
+            maxOf(10, renderKeys.groupBy { it.y }.values.maxOfOrNull { it.size } ?: 10)
+        } else {
+            10
+        }
+        val baseKeyW = (contentW - keyGap * (cols - 1)) / cols
         val sideW = baseKeyW * 1.5f
 
         fun rowStart(n: Int) = sideMargin + (contentW - (n * baseKeyW + (n - 1) * keyGap)) / 2f
