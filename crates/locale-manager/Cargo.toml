@@ -1,0 +1,17 @@
+[package]
+name = "featherkey-locale-manager"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Active languages; concurrent multi-language; per-word language detection."
+
+[package.metadata.featherkey]
+layer = "domain"
+
+[dependencies]
+featherkey-dictionary = { path = "../dictionary" }
+
+[lints]
+workspace = true

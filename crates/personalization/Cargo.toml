@@ -1,0 +1,17 @@
+[package]
+name = "featherkey-personalization"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Learn user vocabulary/habits behind the SecureStore port; user dictionary, whitelist, import."
+
+[package.metadata.featherkey]
+layer = "domain"
+
+[dependencies]
+featherkey-contracts = { path = "../contracts" }
+
+[lints]
+workspace = true

@@ -23,6 +23,8 @@ members = [
     "crates/editing",
     "crates/diagnostics",
     "crates/crash-guard",
+    "crates/personalization",
+    "crates/locale-manager",
 ]
 
 [workspace.package]
