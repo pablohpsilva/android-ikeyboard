@@ -147,12 +147,12 @@ class KeyboardView @JvmOverloads constructor(
     private enum class Sp { SHIFT, BACKSPACE, ENTER, SPACE, GLOBE, MIC, TO_NUMBERS, TO_SYMBOLS, TO_ALPHA }
 
     private sealed class Cell(val rect: RectF) {
-        /** [lx],[ly] = key centre and [lw],[lh] = key size, all in logical space,
-         *  so a finger's pixel offset within [rect] can be mapped back to a
-         *  logical touch point for the core's adaptive tap model. */
+        /** [lx],[ly] = key centre and [lw] = key width, in the core's logical
+         *  space, so a finger's pixel offset within [rect] can be mapped back to
+         *  a logical touch point for the adaptive tap model (single-key fallback). */
         class Letter(
             rect: RectF, val label: String,
-            val lx: Float, val ly: Float, val lw: Float, val lh: Float,
+            val lx: Float, val ly: Float, val lw: Float,
         ) : Cell(rect)
         class Char(rect: RectF, val label: String) : Cell(rect)
         class Special(rect: RectF, val kind: Sp) : Cell(rect)
@@ -195,7 +195,7 @@ class KeyboardView @JvmOverloads constructor(
                 val r = RectF(x, kt, x + baseKeyW, kb)
                 out += if (decodeKeys != null) {
                     val k = decodeKeys[i]
-                    Cell.Letter(r, k.label, k.x + k.width / 2f, k.y + k.height / 2f, k.width, k.height)
+                    Cell.Letter(r, k.label, k.x + k.width / 2f, k.y + k.height / 2f, k.width)
                 } else Cell.Char(r, labels[i])
                 x += baseKeyW + keyGap
             }
@@ -224,7 +224,7 @@ class KeyboardView @JvmOverloads constructor(
                     val r = RectF(x, kt, x + baseKeyW, kb)
                     out += if (decodeKeys != null) {
                         val k = decodeKeys[i]
-                        Cell.Letter(r, k.label, k.x + k.width / 2f, k.y + k.height / 2f, k.width, k.height)
+                        Cell.Letter(r, k.label, k.x + k.width / 2f, k.y + k.height / 2f, k.width)
                     } else Cell.Char(r, middleLabels[i])
                     x += baseKeyW + keyGap
                 }

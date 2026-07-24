@@ -210,11 +210,14 @@ mod persistence_tests {
     use std::cell::RefCell;
     use std::collections::HashMap as Map;
 
+    /// `(namespace, key) -> value` backing map for the test store.
+    type StoreData = Map<(String, Vec<u8>), Vec<u8>>;
+
     /// A minimal in-memory `SecureStore` for exercising persist/load without the
     /// real encrypted redb adapter.
     #[derive(Default)]
     struct MemStore {
-        data: RefCell<Map<(String, Vec<u8>), Vec<u8>>>,
+        data: RefCell<StoreData>,
     }
     impl SecureStore for MemStore {
         fn put(&self, ns: Namespace, key: &[u8], val: &[u8]) -> Result<(), StoreError> {
