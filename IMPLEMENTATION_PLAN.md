@@ -179,8 +179,10 @@ Grounded in the dependency analysis. Every module's deps are built in an earlier
 ### Wave 0.5 — Pre-flight ✅ **Done**
 D-1…D-5 **ratified** (ADR-12–16, SEDD v0.7). Landed: the `contracts` port crate (D-1); **E-1** inward-dependency-rule fitness (proven to bite); **E-3** supply-chain gate (`deny.toml` + CI `cargo-deny`/`cargo-audit`, validated locally). SEDD/ARCH reconciled (E-4, §7 doc-fidelity). **E-2** (sensitive-context ordering property) is scheduled for Wave 4; its contract is written when `sensitive-context` lands in Wave 1. No product BRs. Sandbox-verifiable: **Yes**.
 
-### Wave 1 — kernel-only leaves (fan out in parallel)
-Each depends only on `kernel` (+ `contracts` from D-1), so all can be built concurrently, one worktree each.
+### Wave 1 — kernel-only leaves ✅ **Done**
+Each depends only on the foundation (`kernel` and/or `contracts`) plus its own external crates, so all were built concurrently (one agent per crate).
+
+> **Substrate vs. closure:** these crates deliver the MVP *core/substrate* for their listed BRs. Several BRs are multi-crate per SEDD §15 and are only *fully* closed downstream: BR-10 by `prediction`'s quality eval and BR-12 by `autocorrect`'s no-clobber property test (Wave 3), BR-48 user-toggles by `settings-ui` and BR-62 key provisioning by `platform-services` (Wave 5), and the BR-26 gate ordering at the composition root (Wave 4, E-2). Wave 1 provides the lexical/geometry/persistence/rule substrate those depend on.
 
 | Increment | Closes (MVP BRs only) | External crate | Notes (incl. deferred depth) |
 |---|---|---|---|

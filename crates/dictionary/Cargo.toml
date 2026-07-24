@@ -11,7 +11,7 @@ description = "Compact per-language lexicons; prefix/fuzzy lookup."
 layer = "domain"
 
 [dependencies]
-featherkey-kernel = { path = "../kernel" }
+fst = "0.4.7"
 
 
 [lints]

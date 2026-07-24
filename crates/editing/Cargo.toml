@@ -11,7 +11,7 @@ description = "Cursor movement and text-selection operations."
 layer = "domain"
 
 [dependencies]
-featherkey-kernel = { path = "../kernel" }
+unicode-segmentation = "1.13.3"
 
 
 [lints]

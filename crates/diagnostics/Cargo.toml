@@ -11,7 +11,6 @@ description = "Opt-in, content-free local diagnostics ring buffer."
 layer = "domain"
 
 [dependencies]
-featherkey-kernel = { path = "../kernel" }
 featherkey-contracts = { path = "../contracts" }
 
 [lints]

@@ -11,8 +11,13 @@ description = "Encrypted persistence of personal data; implements the SecureStor
 layer = "adapter"
 
 [dependencies]
-featherkey-kernel = { path = "../kernel" }
 featherkey-contracts = { path = "../contracts" }
+redb = "2.6.3"
+aes-gcm = "0.11.0"
+zeroize = "1.9.0"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile = "3.27.0"

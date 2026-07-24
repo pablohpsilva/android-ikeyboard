@@ -32,8 +32,16 @@ jobs:
       - name: Format check
         run: cargo fmt --all -- --check
 
-      - name: Clippy (warnings are errors)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Clippy — library code (strict, no-panic invariant)
+        # Library/bin code must be panic-averse: unwrap/expect/panic are denied
+        # here (SEDD §5.5 r3). Runs on lib+bin targets only.
+        run: cargo clippy --workspace --lib --bins -- -D warnings
+
+      - name: Clippy — test code (real lints, but unwrap/expect allowed)
+        # Tests legitimately unwrap/expect; still catch every other clippy lint.
+        run: |
+          cargo clippy --workspace --tests -- -D warnings \
+            -A clippy::unwrap_used -A clippy::expect_used -A clippy::panic
 
       - name: Tests
         run: cargo test --workspace --all-targets

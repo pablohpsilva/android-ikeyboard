@@ -4,6 +4,13 @@
 //! This crate is pure data + geometry: no touch decoding (that is
 //! `input-decoder`'s job), no I/O, no Android types (SEDD §5.2, §5.5 rule 2).
 
+mod direction;
+mod kind;
+mod standard;
+
+pub use direction::Direction;
+pub use kind::LayoutKind;
+
 use featherkey_kernel::{KeyId, TouchPoint};
 
 /// A single key: its identity and its rectangle on the surface.
@@ -33,21 +40,53 @@ impl Key {
     }
 }
 
-/// A positioned set of keys.
+/// A positioned set of keys, tagged with the character family it presents
+/// ([`LayoutKind`]) and the reading direction of its script ([`Direction`]).
+///
+/// The direction is a marker only: it makes the port RTL-ready (RTL locales can
+/// be tagged) without implementing bidirectional reordering, which is deferred
+/// until the launch language set is fixed (ADR-16, BR-53*).
 #[derive(Debug, Clone, Default)]
 pub struct Layout {
     keys: Vec<Key>,
+    kind: LayoutKind,
+    direction: Direction,
 }
 
 impl Layout {
+    /// A left-to-right alphabetic layout from `keys`. Kind defaults to
+    /// [`LayoutKind::Alpha`] and direction to [`Direction::Ltr`]; use
+    /// [`Layout::with_direction`] to tag it RTL.
     #[must_use]
     pub fn new(keys: Vec<Key>) -> Self {
-        Self { keys }
+        Self { keys, kind: LayoutKind::Alpha, direction: Direction::Ltr }
     }
 
     #[must_use]
     pub fn keys(&self) -> &[Key] {
         &self.keys
+    }
+
+    /// Which character family this layout presents.
+    #[must_use]
+    pub const fn kind(&self) -> LayoutKind {
+        self.kind
+    }
+
+    /// The reading direction of this layout's script. Marker only — no bidi
+    /// reordering is performed (ADR-16, BR-53*).
+    #[must_use]
+    pub const fn direction(&self) -> Direction {
+        self.direction
+    }
+
+    /// Return this layout tagged with `direction`. This records the reading
+    /// direction (making RTL locales expressible) but performs **no** glyph
+    /// reordering; bidi rendering is deferred (ADR-16, BR-53*).
+    #[must_use]
+    pub fn with_direction(mut self, direction: Direction) -> Self {
+        self.direction = direction;
+        self
     }
 
     #[must_use]
@@ -102,5 +141,28 @@ mod tests {
         let e = l.keys()[2];
         assert_eq!(e.x, 200.0);
         assert_eq!(e.center(), TouchPoint::new(250.0, 60.0));
+    }
+
+    #[test]
+    fn a_plain_layout_is_alpha_and_left_to_right_by_default() {
+        // The additive kind/direction markers must not disturb existing callers:
+        // `new` and `default` stay Alpha/Ltr so the tracer bullet is unaffected.
+        assert_eq!(Layout::default().kind(), LayoutKind::Alpha);
+        assert_eq!(Layout::default().direction(), Direction::Ltr);
+        assert_eq!(Layout::qwerty_tracer_row().kind(), LayoutKind::Alpha);
+        assert_eq!(Layout::qwerty_tracer_row().direction(), Direction::Ltr);
+    }
+
+    #[test]
+    fn with_direction_tags_rtl_without_touching_the_keys() {
+        // RTL-readiness (BR-53*): a layout can be *marked* RTL. The marker is the
+        // only change — no keys are reordered (bidi deferred, ADR-16).
+        let ltr = Layout::qwerty_tracer_row();
+        let ids_before: Vec<char> = ltr.keys().iter().map(|k| k.id.ch()).collect();
+        let rtl = ltr.with_direction(Direction::Rtl);
+        assert_eq!(rtl.direction(), Direction::Rtl);
+        assert!(rtl.direction().is_rtl());
+        let ids_after: Vec<char> = rtl.keys().iter().map(|k| k.id.ch()).collect();
+        assert_eq!(ids_before, ids_after, "with_direction must not reorder keys");
     }
 }

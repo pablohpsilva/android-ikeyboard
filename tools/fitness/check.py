@@ -66,17 +66,33 @@ def check_file_sizes(v: Violations) -> None:
                   f"{n} lines > {MAX_FILE_LINES}")
 
 
-def check_function_lengths(v: Violations) -> None:
-    """Count lines from a `fn` signature's opening brace to its matching close.
+_CHAR_LIT = re.compile(r"'(\\.|[^'\\])'")
+_STR_LIT = re.compile(r'"(\\.|[^"\\])*"')
+_BLOCK_COMMENT = re.compile(r"/\*.*?\*/")
 
-    A brace-depth scan — good enough for idiomatic Rust and free of external
-    parsers. It ignores braces inside strings/comments only loosely, which is
-    acceptable for a length heuristic (it can only over-count, never hide a
-    genuinely oversized function).
+
+def _strip_noncode(line: str) -> str:
+    """Blank out char/string literals and comments so `{`/`}` inside them are not
+    counted as code braces. Without this, a line like `matches!(c, '{' | '}')`
+    would corrupt a brace-depth scan (a real false-positive this guards against).
+    Single-line only; multi-line strings/block comments are rare in this code and
+    not relied upon.
+    """
+    line = _CHAR_LIT.sub("_", line)
+    line = _STR_LIT.sub("_", line)
+    line = _BLOCK_COMMENT.sub("", line)
+    idx = line.find("//")
+    return line[:idx] if idx != -1 else line
+
+
+def check_function_lengths(v: Violations) -> None:
+    """Count lines from a `fn` signature's opening brace to its matching close,
+    counting only braces that are actual code (not inside literals/comments).
     """
     fn_sig = re.compile(r"\bfn\s+\w+")
     for f in rust_files():
-        lines = f.read_text(encoding="utf-8").splitlines()
+        raw = f.read_text(encoding="utf-8").splitlines()
+        lines = [_strip_noncode(ln) for ln in raw]
         i = 0
         while i < len(lines):
             if fn_sig.search(lines[i]):
