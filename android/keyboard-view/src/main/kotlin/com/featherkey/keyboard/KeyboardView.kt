@@ -16,6 +16,7 @@ import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PointF
@@ -25,6 +26,7 @@ import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.View
+import androidx.core.graphics.PathParser
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 
@@ -380,7 +382,7 @@ class KeyboardView @JvmOverloads constructor(
             Sp.GLOBE -> drawGlobe(canvas, r, c)
             Sp.MIC -> drawMic(canvas, r, c)
             Sp.SHIFT -> { keyBg(canvas, r, c, p); drawShift(canvas, r, c) }
-            Sp.BACKSPACE -> { keyBg(canvas, r, c, p); drawBackspace(canvas, r, c, p) }
+            Sp.BACKSPACE -> { keyBg(canvas, r, c, p); drawBackspace(canvas, r, c) }
             Sp.ENTER -> { keyBg(canvas, r, c, p); drawReturn(canvas, r, c) }
             Sp.SPACE -> {
                 keyBg(canvas, r, c, p)
@@ -395,96 +397,49 @@ class KeyboardView @JvmOverloads constructor(
 
     // ---- Vector icons -------------------------------------------------------
 
-    /** Shift: an upward arrow — hollow, filled with the accent when active. */
+    // Icons are the Lucide set (ISC-licensed), authored on a 24×24 grid as
+    // stroked outlines, parsed once and scaled small into each key.
+    private val matrix = Matrix()
+    private val scaledIcon = Path()
+
+    /** Stroke [icon] (a 24×24 path) into [r], centred, at [frac] of the key size. */
+    private fun drawIcon(canvas: Canvas, icon: Path, r: RectF, frac: Float, paint: Paint) {
+        val size = minOf(r.width(), r.height()) * frac
+        val scale = size / 24f
+        matrix.setScale(scale, scale)
+        matrix.postTranslate(r.centerX() - size / 2f, r.centerY() - size / 2f)
+        icon.transform(matrix, scaledIcon)
+        canvas.drawPath(scaledIcon, paint)
+    }
+
     private fun drawShift(canvas: Canvas, r: RectF, c: Palette) {
-        val cx = r.centerX(); val cy = r.centerY(); val s = minOf(r.width(), r.height()) * 0.33f
-        val head = s * 0.95f  // arrowhead half-width
-        val stem = s * 0.40f  // stem half-width
-        val top = cy - s      // apex
-        val mid = cy - s * 0.04f
-        val bot = cy + s
-        path.reset()
-        path.moveTo(cx, top)
-        path.lineTo(cx - head, mid)
-        path.lineTo(cx - stem, mid)
-        path.lineTo(cx - stem, bot)
-        path.lineTo(cx + stem, bot)
-        path.lineTo(cx + stem, mid)
-        path.lineTo(cx + head, mid)
-        path.close()
         if (shifted) {
             iconFill.color = c.accent
-            canvas.drawPath(path, iconFill)
+            drawIcon(canvas, ICON_SHIFT, r, ICON_FRAC, iconFill)
         } else {
-            iconPaint.color = c.icon; iconPaint.strokeWidth = dp(2.1f)
-            canvas.drawPath(path, iconPaint) // round joins soften the corners
+            iconPaint.color = c.icon; iconPaint.strokeWidth = dp(1.7f)
+            drawIcon(canvas, ICON_SHIFT, r, ICON_FRAC, iconPaint)
         }
     }
 
-    /** Backspace: a solid left-pointing tag with a knocked-out ✕. */
-    private fun drawBackspace(canvas: Canvas, r: RectF, c: Palette, pressed: Boolean) {
-        val cx = r.centerX(); val cy = r.centerY(); val s = minOf(r.width(), r.height()) * 0.40f
-        path.reset()
-        path.moveTo(cx - s * 1.02f, cy)              // left tip
-        path.lineTo(cx - s * 0.40f, cy - s * 0.64f)  // top-left
-        path.lineTo(cx + s * 0.95f, cy - s * 0.64f)  // top-right
-        path.lineTo(cx + s * 0.95f, cy + s * 0.64f)  // bottom-right
-        path.lineTo(cx - s * 0.40f, cy + s * 0.64f)  // bottom-left
-        path.close()
-        iconFill.color = c.icon
-        canvas.drawPath(path, iconFill)
-        // Knock the ✕ out in the key's own fill colour.
-        iconPaint.color = if (pressed) c.pressed else c.key
-        iconPaint.strokeWidth = dp(2.1f)
-        val bx = cx + s * 0.34f; val d = s * 0.24f
-        canvas.drawLine(bx - d, cy - d, bx + d, cy + d, iconPaint)
-        canvas.drawLine(bx - d, cy + d, bx + d, cy - d, iconPaint)
+    private fun drawBackspace(canvas: Canvas, r: RectF, c: Palette) {
+        iconPaint.color = c.icon; iconPaint.strokeWidth = dp(1.7f)
+        drawIcon(canvas, ICON_BACKSPACE, r, ICON_FRAC, iconPaint)
     }
 
-    /** Return: a hooked arrow pointing down-then-left. */
     private fun drawReturn(canvas: Canvas, r: RectF, c: Palette) {
-        val cx = r.centerX(); val cy = r.centerY(); val s = minOf(r.width(), r.height()) * 0.4f
-        iconPaint.color = c.iconMuted; iconPaint.strokeWidth = dp(2.0f)
-        path.reset()
-        path.moveTo(cx + s * 0.8f, cy - s * 0.62f)
-        path.lineTo(cx + s * 0.8f, cy + s * 0.12f)
-        path.lineTo(cx - s * 0.55f, cy + s * 0.12f)
-        canvas.drawPath(path, iconPaint)
-        path.reset()
-        path.moveTo(cx - s * 0.12f, cy - s * 0.3f)
-        path.lineTo(cx - s * 0.68f, cy + s * 0.12f)
-        path.lineTo(cx - s * 0.12f, cy + s * 0.54f)
-        canvas.drawPath(path, iconPaint)
+        iconPaint.color = c.iconMuted; iconPaint.strokeWidth = dp(1.7f)
+        drawIcon(canvas, ICON_RETURN, r, ICON_FRAC, iconPaint)
     }
 
-    /** Globe: a sphere with a meridian ellipse, equator, and curved latitudes. */
     private fun drawGlobe(canvas: Canvas, r: RectF, c: Palette) {
-        val cx = r.centerX(); val cy = r.centerY(); val rad = minOf(r.width(), r.height()) * 0.3f
-        iconPaint.color = c.icon; iconPaint.strokeWidth = dp(1.8f)
-        canvas.drawCircle(cx, cy, rad, iconPaint)
-        canvas.drawOval(RectF(cx - rad * 0.52f, cy - rad, cx + rad * 0.52f, cy + rad), iconPaint)
-        canvas.drawLine(cx - rad, cy, cx + rad, cy, iconPaint)
-        // Latitudes bow toward the equator, so the sphere reads as round.
-        val lx = rad * 0.82f; val ly = rad * 0.52f
-        path.reset()
-        path.moveTo(cx - lx, cy - ly); path.quadTo(cx, cy - ly * 0.35f, cx + lx, cy - ly)
-        canvas.drawPath(path, iconPaint)
-        path.reset()
-        path.moveTo(cx - lx, cy + ly); path.quadTo(cx, cy + ly * 0.35f, cx + lx, cy + ly)
-        canvas.drawPath(path, iconPaint)
+        iconPaint.color = c.icon; iconPaint.strokeWidth = dp(1.6f)
+        drawIcon(canvas, ICON_GLOBE, r, ICON_FRAC, iconPaint)
     }
 
-    /** Microphone: a rounded capsule in a cradle arc on a small stand. */
     private fun drawMic(canvas: Canvas, r: RectF, c: Palette) {
-        val cx = r.centerX(); val cy = r.centerY(); val s = minOf(r.width(), r.height()) * 0.3f
-        iconPaint.color = c.icon; iconPaint.strokeWidth = dp(1.9f); iconFill.color = c.icon
-        canvas.drawRoundRect(
-            RectF(cx - s * 0.46f, cy - s * 1.18f, cx + s * 0.46f, cy + s * 0.18f),
-            s * 0.46f, s * 0.46f, iconFill,
-        )
-        canvas.drawArc(RectF(cx - s * 0.8f, cy - s * 0.52f, cx + s * 0.8f, cy + s * 0.56f), 22f, 136f, false, iconPaint)
-        canvas.drawLine(cx, cy + s * 0.56f, cx, cy + s * 1.08f, iconPaint)
-        canvas.drawLine(cx - s * 0.44f, cy + s * 1.08f, cx + s * 0.44f, cy + s * 1.08f, iconPaint)
+        iconPaint.color = c.icon; iconPaint.strokeWidth = dp(1.6f)
+        drawIcon(canvas, ICON_MIC, r, ICON_FRAC, iconPaint)
     }
 
     // ---- Touch --------------------------------------------------------------
@@ -610,6 +565,28 @@ class KeyboardView @JvmOverloads constructor(
         val SYMBOLS_R1 = listOf("[", "]", "{", "}", "#", "%", "^", "*", "+", "=")
         val SYMBOLS_R2 = listOf("_", "\\", "|", "~", "<", ">", "€", "£", "¥", "•")
         val PUNCT_R3 = listOf(".", ",", "?", "!", "'")
+
+        // Special-key glyphs from the Lucide icon set (ISC-licensed), each on a
+        // 24×24 grid; multi-part icons use absolute coordinates so the subpaths
+        // concatenate safely. Rendered at half a key so they stay light and small.
+        const val ICON_FRAC = 0.5f
+        val ICON_SHIFT: Path = PathParser.createPathFromPathData(
+            "M9 19a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-6a1 1 0 0 1 1-1h3.293a.707.707 0 0 0 " +
+                ".5-1.207l-7.086-7.086a1 1 0 0 0-1.414 0l-7.086 7.086a.707.707 0 0 0 .5 1.207H8a1 1 0 0 1 1 1z",
+        )
+        val ICON_BACKSPACE: Path = PathParser.createPathFromPathData(
+            "M10 5a2 2 0 0 0-1.344.519l-6.328 5.74a1 1 0 0 0 0 1.481l6.328 5.741A2 2 0 0 0 " +
+                "10 19h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2z M12 9L18 15 M18 9L12 15",
+        )
+        val ICON_RETURN: Path =
+            PathParser.createPathFromPathData("M20 4v7a4 4 0 0 1-4 4H4 M9 10L4 15L9 20")
+        val ICON_GLOBE: Path = PathParser.createPathFromPathData(
+            "M2 12A10 10 0 1 1 22 12A10 10 0 1 1 2 12Z " +
+                "M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20 M2 12h20",
+        )
+        val ICON_MIC: Path = PathParser.createPathFromPathData(
+            "M9 5A3 3 0 0 1 15 5V12A3 3 0 0 1 9 12Z M19 10v2a7 7 0 0 1-14 0v-2 M12 19v3",
+        )
 
         /** Built-in QWERTY in the core's 1000×360 logical space, for decode fallback. */
         val FALLBACK_QWERTY: List<RenderKey> = buildList {
