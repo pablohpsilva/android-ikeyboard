@@ -198,7 +198,7 @@ Each depends only on the foundation (`kernel` and/or `contracts`) plus its own e
 
 Sandbox-verifiable: **Yes** (network permitting — R-5).
 
-### Wave 2 — one hop from Wave 1
+### Wave 2 — one hop from Wave 1 ✅ **Done**
 | Increment | Closes (MVP BRs only) | Depends on / deferred depth |
 |---|---|---|
 | `personalization` | BR-7 (vocab), BR-13 | `secure-store` (port). **Deferred depth (v1.x):** view/reset UI (BR-9), edit dictionary (BR-14), foreign-dict import (BR-57). |
