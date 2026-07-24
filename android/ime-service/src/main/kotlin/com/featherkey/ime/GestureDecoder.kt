@@ -26,16 +26,19 @@ object GestureDecoder {
     private const val SAMPLES = 24
     private const val SHAPE_WEIGHT = 0.3f
 
-    // How much a common word's score is discounted, so frequent words win over
-    // obscure ones of a similar shape (a coarse stand-in for word frequency).
-    private const val COMMON_BOOST = 0.72f
+    // Frequency/learning discounts applied to the shape score, so a common or
+    // user-used word wins over an obscure one of a similar shape.
+    private const val LEARNED_BOOST = 0.55f   // words the user has typed/swiped
+    private const val FREQ_MIN = 0.70f        // most-common dictionary words
+    private const val FREQ_SPAN = 8000f       // rank where the frequency boost fades out
 
     /** Best-matching words for [path], most likely first (empty if not a gesture). */
     fun decode(
         path: List<PointF>,
         centers: Map<Char, PointF>,
         words: List<String>,
-        common: Set<String> = emptySet(),
+        rankOf: (String) -> Int,
+        learned: Map<String, Int>,
         limit: Int = 4,
     ): List<String> {
         if (path.size < 3 || centers.isEmpty() || words.isEmpty()) return emptyList()
@@ -66,7 +69,14 @@ object GestureDecoder {
             loc /= SAMPLES
             shape /= SAMPLES
             var score = loc + SHAPE_WEIGHT * step * shape
-            if (w in common) score *= COMMON_BOOST
+            score *= when {
+                learned.containsKey(w) -> LEARNED_BOOST
+                else -> {
+                    val r = rankOf(w)
+                    if (r >= Int.MAX_VALUE) 1f
+                    else FREQ_MIN + (1f - FREQ_MIN) * minOf(1f, r / FREQ_SPAN)
+                }
+            }
             scored.add(w to score)
         }
         scored.sortBy { it.second }

@@ -19,6 +19,7 @@ dependencies {
     implementation(project(":platform-services"))
     implementation(project(":keyboard-view"))
     implementation(project(":accessibility-adapter"))
+    implementation(project(":onboarding"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.service)
     implementation(libs.kotlinx.coroutines.android)

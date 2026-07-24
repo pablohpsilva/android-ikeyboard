@@ -36,6 +36,7 @@ import com.featherkey.ffi.Language
 import com.featherkey.keyboard.FunctionKey
 import com.featherkey.keyboard.KeyboardView
 import com.featherkey.keyboard.RenderKey
+import com.featherkey.onboarding.ConsentStore
 import com.featherkey.platform.EditorInfoSensitivity
 import com.featherkey.platform.KeystoreKeyProvider
 import com.featherkey.platform.LanguageCatalog
@@ -47,6 +48,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 
 class FeatherKeyImeService : InputMethodService() {
@@ -64,21 +67,25 @@ class FeatherKeyImeService : InputMethodService() {
     private lateinit var langPrefs: LanguagePrefs
     /** The active languages currently loaded into the core (order = preference). */
     private var currentTags: List<String> = emptyList()
-    /** The swipe decoder's (large) vocabulary across active languages. */
-    private var activeWords: List<String> = emptyList()
-    /** The curated common words, used to bias the swipe ranking toward them. */
-    private var commonWords: Set<String> = emptySet()
+    /** Frequency-ranked vocabulary for suggestions + swipe (loaded off the input path). */
+    @Volatile private var vocab: Vocabulary = Vocabulary.empty()
+    /** On-device usage learning that biases ranking toward the user's own words. */
+    private lateinit var usage: UsageModel
+    /** The learning-consent toggle (BR-22); learning is off until opted in. */
+    @Volatile private var learningEnabled = false
 
     override fun onCreate() {
         super.onCreate()
         langPrefs = LanguagePrefs(this)
         currentTags = langPrefs.activeTags()
+        usage = UsageModel(this).also { it.load() }
+        loadVocab(currentTags)
+        ConsentStore(applicationContext).learningEnabled
+            .onEach { learningEnabled = it }
+            .launchIn(ioScope)
         val key = KeystoreKeyProvider(this).provisionDataKey()
         val dbPath = File(filesDir, "featherkey.redb").absolutePath
-        val langs = Lexicons.load(this, currentTags)
-        bridge = FeatherKeyBridge.open(dbPath, key, langs)
-        commonWords = langs.flatMapTo(HashSet()) { it.words }
-        activeWords = Lexicons.gestureVocab(this, currentTags)
+        bridge = FeatherKeyBridge.open(dbPath, key, Lexicons.load(this, currentTags))
         key.fill(0) // wipe the shell's copy; the native side holds it zeroizing
     }
 
@@ -109,22 +116,25 @@ class FeatherKeyImeService : InputMethodService() {
     /** Push [tags] to the core (if changed) and reflect them on the space bar. */
     private fun applyLanguages(tags: List<String>) {
         if (tags != currentTags) {
-            val langs = Lexicons.load(this, tags)
-            runCatching { bridge.setActiveLanguages(langs) }
+            runCatching { bridge.setActiveLanguages(Lexicons.load(this, tags)) }
             currentTags = tags
-            commonWords = langs.flatMapTo(HashSet()) { it.words }
-            activeWords = Lexicons.gestureVocab(this, tags)
+            loadVocab(tags)
         }
         keyboard?.spaceHint = spaceHint(tags)
+    }
+
+    /** Build the frequency vocabulary off the input thread; swap it in when ready. */
+    private fun loadVocab(tags: List<String>) {
+        ioScope.launch { vocab = Vocabulary.load(applicationContext, tags) }
     }
 
     /** A swipe over the letters: decode to a word, commit it, offer alternatives. */
     private fun handleGesture(pathPts: List<PointF>, centers: Map<Char, PointF>) {
         val ic = currentInputConnection ?: return
-        val words = GestureDecoder.decode(pathPts, centers, activeWords, commonWords, limit = 4)
+        val words = GestureDecoder.decode(pathPts, centers, vocab.words, vocab::rankOf, usage.map, limit = 4)
         val best = words.firstOrNull() ?: return
         if (pending.isNotEmpty()) { // finalise a half-typed word with a space
-            runCatching { bridge.learnWord(pending.toString(), field) }
+            learnWord(pending.toString())
             ic.commitText(" ", 1)
             pending.clear()
         }
@@ -132,6 +142,17 @@ class FeatherKeyImeService : InputMethodService() {
         pending.clear(); pending.append(best) // treat as the current word: alts replace it
         keyboard?.suggestions = words.take(3)
         schedulePersist()
+    }
+
+    /**
+     * Learn a committed word into both the core (autocorrect protection) and the
+     * shell usage model (ranking) — gated by consent (BR-22) and field
+     * sensitivity (E-2/BR-26), so password/secure fields are never learned.
+     */
+    private fun learnWord(word: String) {
+        if (word.isEmpty() || field.isSensitive() || !learningEnabled) return
+        runCatching { bridge.learnWord(word, field) }
+        usage.record(word)
     }
 
     /** The space-bar language hint, e.g. "EN" or "EN PT" (primary first). */
@@ -185,16 +206,11 @@ class FeatherKeyImeService : InputMethodService() {
         keyboard?.suggestions = emptyList()
     }
 
-    /** Live predictions for the current pending word (lexicon is lower-case). */
+    /** Live predictions: user-learned words first, then frequency across languages. */
     private fun updateSuggestions() {
-        val prefix = pending.toString()
-        keyboard?.suggestions = if (prefix.isEmpty()) {
-            emptyList()
-        } else {
-            runCatching { bridge.suggest("", prefix.lowercase()).map { it.word } }
-                .getOrDefault(emptyList())
-                .take(3)
-        }
+        val prefix = pending.toString().lowercase()
+        keyboard?.suggestions =
+            if (prefix.isEmpty()) emptyList() else vocab.suggestions(prefix, usage.map, 3)
     }
 
     /** Commit a tapped suggestion, replacing the pending word. */
@@ -204,7 +220,7 @@ class FeatherKeyImeService : InputMethodService() {
         val cur = pending.toString()
         if (cur.isNotEmpty()) ic.deleteSurroundingText(cur.length, 0)
         ic.commitText("$word ", 1)
-        runCatching { bridge.learnWord(word, field) } // gated (BR-26)
+        learnWord(word)
         pending.clear()
         keyboard?.suggestions = emptyList()
         schedulePersist()
@@ -219,7 +235,7 @@ class FeatherKeyImeService : InputMethodService() {
                 ic.deleteSurroundingText(word.length, 0)
                 ic.commitText(correction.primary, 1)
             }
-            runCatching { bridge.learnWord(correction?.primary ?: word, field) } // gated (BR-26)
+            learnWord(correction?.primary ?: word)
         }
         ic.commitText(" ", 1)
         pending.clear()
@@ -233,8 +249,7 @@ class FeatherKeyImeService : InputMethodService() {
     }
 
     private fun flushWord(ic: InputConnection) {
-        val word = pending.toString()
-        if (word.isNotEmpty()) runCatching { bridge.learnWord(word, field) }
+        learnWord(pending.toString())
         pending.clear()
     }
 
@@ -323,11 +338,13 @@ class FeatherKeyImeService : InputMethodService() {
         persistJob = ioScope.launch {
             if (!immediate) delay(PERSIST_DEBOUNCE_MS)
             runCatching { bridge.persist() }
+            usage.persist()
         }
     }
 
     override fun onDestroy() {
         recognizer?.destroy()
+        usage.persist()
         ioScope.cancel()
         runCatching { bridge.persist() }
         runCatching { bridge.close() }
@@ -341,30 +358,18 @@ class FeatherKeyImeService : InputMethodService() {
 
 /**
  * Loads the active languages' lexicons from `assets/lexicons/<tag>.txt` (one word
- * per line, pre-sorted by byte order — the core rejects an unsorted list). A tag
- * with no bundled file loads as an empty lexicon: the language is still active
- * (it appears in the space bar and can win language-ID), it just contributes no
- * predictions until a word list is added. Only `en.txt` ships today.
+ * per line, pre-sorted by byte order — the core rejects an unsorted list) for the
+ * core's correction/autocorrect. Suggestion and swipe ranking use the
+ * frequency-ordered lists via [Vocabulary].
  */
 object Lexicons {
-    /** The curated per-language lexicon the core uses for taps/correction. */
     fun load(context: Context, tags: List<String>): List<Language> =
-        tags.map { tag -> Language(tag, readAsset(context, "lexicons/$tag.txt")) }
-
-    /**
-     * The larger vocabulary the swipe decoder searches: the big gesture list for
-     * a language when one ships (`gesture/<tag>.txt`), else its core lexicon.
-     * Only English ships a large gesture list today.
-     */
-    fun gestureVocab(context: Context, tags: List<String>): List<String> =
-        tags.flatMap { tag ->
-            readAsset(context, "gesture/$tag.txt").ifEmpty { readAsset(context, "lexicons/$tag.txt") }
-        }.distinct()
-
-    private fun readAsset(context: Context, path: String): List<String> =
-        runCatching {
-            context.assets.open(path).bufferedReader().useLines { lines ->
-                lines.map { it.trim() }.filter { it.isNotEmpty() }.toList()
-            }
-        }.getOrDefault(emptyList())
+        tags.map { tag ->
+            val words = runCatching {
+                context.assets.open("lexicons/$tag.txt").bufferedReader().useLines { lines ->
+                    lines.map { it.trim() }.filter { it.isNotEmpty() }.toList()
+                }
+            }.getOrDefault(emptyList())
+            Language(tag, words)
+        }
 }
