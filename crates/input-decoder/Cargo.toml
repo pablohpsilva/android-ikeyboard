@@ -13,6 +13,7 @@ layer = "domain"
 [dependencies]
 featherkey-kernel = { path = "../kernel" }
 featherkey-layout-engine = { path = "../layout-engine" }
+featherkey-touch-model = { path = "../touch-model" }
 
 [lints]
 workspace = true
