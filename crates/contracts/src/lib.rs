@@ -5,12 +5,12 @@
 //! (ARCH §3.2 Dependency Rule / DIP). This crate has no logic and depends only
 //! on `kernel`.
 //!
-//! Only the ports expressible with today's types are defined. Ports whose
-//! signatures need domain types that don't exist yet — `Predictor`
-//! (`TypingContext`/`Suggestions`), `AutoCorrect` (`Token`/`Correction`),
-//! `Personalization` (`TypingEvent`) — are added alongside the crates that
-//! introduce those types (Waves 2–3), keeping this crate honest rather than
-//! full of placeholder types.
+//! Every port whose signature is expressible today is defined here — the driven
+//! `SecureStore`, `SensitiveContextSource`, and `Clock`, and the driving
+//! `Predictor` (`TypingContext`/`Suggestions`) and `AutoCorrect`
+//! (`Token`/`Correction`). A `Personalization` port (over a `TypingEvent`) is
+//! deliberately still deferred: it is added alongside the crate that introduces
+//! its types rather than seeded here as a placeholder.
 
 #![no_std]
 

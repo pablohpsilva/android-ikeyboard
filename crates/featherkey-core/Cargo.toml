@@ -1,0 +1,32 @@
+[package]
+name = "featherkey-core"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Composition façade: wires the core crates behind the contracts ports and presents the (UniFFI-ready) use-case API to the shell."
+
+[package.metadata.featherkey]
+layer = "composition"
+
+[dependencies]
+featherkey-kernel = { path = "../kernel" }
+featherkey-contracts = { path = "../contracts" }
+featherkey-layout-engine = { path = "../layout-engine" }
+featherkey-input-decoder = { path = "../input-decoder" }
+featherkey-touch-model = { path = "../touch-model" }
+featherkey-dictionary = { path = "../dictionary" }
+featherkey-locale-manager = { path = "../locale-manager" }
+featherkey-prediction = { path = "../prediction" }
+featherkey-autocorrect = { path = "../autocorrect" }
+featherkey-personalization = { path = "../personalization" }
+featherkey-sensitive-context = { path = "../sensitive-context" }
+featherkey-secure-store = { path = "../secure-store" }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+proptest = "1.11.0"
+tempfile = "3.27.0"

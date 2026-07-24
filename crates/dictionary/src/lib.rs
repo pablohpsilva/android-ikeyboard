@@ -54,6 +54,12 @@ impl fmt::Display for DictionaryError {
 }
 
 /// A compact, read-only lexicon for a single language.
+///
+/// `Clone` is a cheap byte-buffer copy of the backing FST; it does not make the
+/// lexicon mutable (there are still no `&mut self` methods) — it lets the
+/// composition root hand owned copies to the engines that consume a lexicon by
+/// value (`prediction`, `autocorrect`, `locale-manager`).
+#[derive(Clone)]
 pub struct Dictionary {
     set: Set<Vec<u8>>,
     /// The distinct characters occurring in the lexicon, sorted. Used as the

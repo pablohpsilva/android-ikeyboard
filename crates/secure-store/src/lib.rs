@@ -15,7 +15,8 @@
 //!
 //! Every blob is additionally *bound to its `(namespace, key)` location*
 //! (BR-62 positional integrity): the AES-GCM associated data is
-//! `namespace-name || record-key`. Because that binding is authenticated but
+//! `len(namespace-name) || namespace-name || record-key`. Because that binding
+//! is authenticated but
 //! not stored, an attacker with disk access who relocates a valid blob to a
 //! different namespace or key cannot decrypt it — the GCM tag check fails and
 //! surfaces as [`StoreError::Crypto`].

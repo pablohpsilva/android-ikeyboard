@@ -7,7 +7,7 @@
 **Status:** Draft — for engineering review
 **Document chain:**
 - [`BUSINESS_REQUIREMENTS.md`](./BUSINESS_REQUIREMENTS.md) (BRD v0.7) — *what & why* (**source of truth**)
-- [`SOFTWARE_ENGINEERING.md`](./SOFTWARE_ENGINEERING.md) (SEDD v0.7) — *the tech idea & decisions*
+- [`SOFTWARE_ENGINEERING.md`](./SOFTWARE_ENGINEERING.md) (SEDD v0.8) — *the tech idea & decisions*
 - **This document (ARCH)** — *the how-to: architecture, rules, conventions* (**normative**)
 
 > **How to read this document.** It is **normative**: rules use **MUST / SHOULD / MUST NOT** (RFC-2119 sense). Where this document conflicts with the BRD, the **BRD wins**; where it refines the SEDD, it must stay consistent with the SEDD's ratified decisions (ADR-1/2/3). This document exists to make the BRD's modularity and maintainability requirements (**BR-38, BR-39, BR-40**) *enforceable* — not aspirational. Rules here are backed by CI "fitness functions" wherever possible (§13).
@@ -19,6 +19,7 @@
 | 0.1 | 2026-07-24 | Initial architecture: Hexagonal/Clean style, SOLID rules, module registry, anti-god-file caps, mandatory TDD/BDD workflow, ports & adapters catalog, repo layout, add-a-module recipe, fitness functions, traceability |
 | 0.2 | 2026-07-24 | Set minimum test coverage to **98%** line+branch (§7.3); added this revision history for consistency with the BRD/SEDD; synced document-chain references to BRD v0.7 / SEDD v0.6 (after the BR-17 resolution) |
 | 0.3 | 2026-07-24 | Synced SEDD chain reference to v0.7 (adds ADR-12–16, the `contracts`/`featherkey-core` registry entries, and the two-domain writer split). No architectural change in this document. |
+| 0.4 | 2026-07-24 | Reconciled the document with the as-built repo (per SEDD ADR-17): added `contracts` to the module registry (§5.4); updated the module anatomy (§5.2) and repository layout (§11) to the actual `crates/` workspace + centralized repo-root `features/` + flat single-concept `src/`; made per-crate `README.md` a stated requirement (now satisfied). No change to any architectural mandate (AM-1..AM-7) or fitness function. |
 
 ---
 
@@ -155,19 +156,19 @@ A **module** is a bounded unit that does **one well-specified job** (AM-6). In R
 
 ```
 <module>/
-  README.md            # the module's ONE job, its ports, its invariants
+  README.md            # the module's ONE job, its ports, its invariants (required)
+  Cargo.toml           # declares [package.metadata.featherkey] layer (fitness E-1)
   src/
-    lib.rs             # façade: re-exports the public API ONLY (thin)
-    domain/            # pure entities, value objects, domain services (no I/O)
-    application/       # use cases orchestrating the domain (optional per module)
-    ports/             # trait definitions this module owns
-    <feature>.rs       # small, single-concept files
-  tests/               # integration + contract tests (public API only)
-  features/            # BDD .feature files for this module's behavior
+    lib.rs             # public API + logic for small crates; a thin façade once a crate grows
+    <feature>.rs       # small, single-concept files (split out as the crate grows)
+  tests/               # integration + property tests (public API only), when the crate has them
 ```
 
-- `lib.rs` is a **façade only** — it MUST NOT contain logic (prevents a god-file entry point).
-- Internal files are **private by default**; only the façade decides the public API (ISP at module scale).
+- Every crate has a **`README.md`** stating its one job, ports, and invariants (§5.1).
+- Ports are **not** re-declared per module: all port traits live in the shared **`contracts`** crate (ADR-12), so a domain crate implements/consumes a trait it imports rather than owning a `ports/` directory.
+- **BDD `.feature` files are centralized** in the repo-root **`features/`** directory (one `<module>.feature` per crate), not nested per module — this keeps the BR↔scenario traceability check (§8.3) over a single tree.
+- For a **small crate**, `src/lib.rs` may hold the crate's logic directly (one concept, within the §6 size caps); the `domain/`/`application/`/`ports/` subfolders are an option a crate adopts **only when it grows** past a single concept, not a mandatory scaffold. The size/complexity caps (§6.1), not the folder count, are what prevent god-files.
+- Internal files are **private by default**; only the crate's public API is exported (ISP at module scale).
 
 ### 5.3 Inter-module rules (MUST)
 
@@ -186,6 +187,7 @@ Authoritative list; each row is one job (consistent with SEDD §5). Any new modu
 | Module | Its ONE job |
 |---|---|
 | `kernel` | Define shared value objects and error types crossing module boundaries (no logic, no deps). |
+| `contracts` | Define the port traits (driven & driving) domain crates depend on instead of adapters (no logic, deps on `kernel` only; ADR-12). |
 | `input-decoder` | Turn a touch + layout + touch-model into ranked intended keys. |
 | `touch-model` | Maintain the per-user adaptive tap-distribution model. |
 | `layout-engine` | Provide keyboard layout geometry (alpha/number/symbol/RTL/ergonomic). |
@@ -417,30 +419,31 @@ A **monorepo**: a Cargo workspace (Rust core) plus a Gradle multi-module build (
 ```
 featherkey/
   ARCHITECTURE.md  BUSINESS_REQUIREMENTS.md  SOFTWARE_ENGINEERING.md
+  IMPLEMENTATION_PLAN.md
   Cargo.toml                      # Rust workspace: lists all core crates
-  core/
+  crates/                         # the Rust core (one crate per module)
     kernel/                       # shared value objects + errors (no deps)
+    contracts/                    # port traits, deps on kernel only (ADR-12)
     input-decoder/  touch-model/  layout-engine/  locale-manager/
     dictionary/  prediction/  autocorrect/  personalization/
-    gesture/  smart-typing/  editing/  clipboard-core/
-    sensitive-context/  diagnostics/
-    neural-runtime/   # feature-gated (v1.x)
-    dictation/        # feature-gated (v2+)
+    smart-typing/  editing/  sensitive-context/  diagnostics/
     secure-store/                 # adapter: persistence/crypto
     crash-guard/                  # adapter: fault isolation
-    featherkey-core/              # composition façade + UniFFI API
-      src/  tests/  features/     # (each crate follows §5.2 anatomy)
-  android/                        # Gradle multi-module
+    featherkey-core/              # composition: façade + UniFFI-ready surface (Wave 4; ADR-18)
+    # planned, not yet built: gesture, clipboard-core, neural-runtime (v1.x), dictation (v2+)
+    <crate>/README.md  <crate>/src/  <crate>/tests/   # (each follows §5.2 anatomy)
+  features/                       # ALL BDD .feature files, one <module>.feature per crate
+  android/                        # Gradle multi-module (scaffold; built in Wave 5)
     app/                          # composition root (Kotlin) + manifest
     ime-service/  keyboard-view/  settings-ui/  onboarding/
     accessibility-adapter/  platform-services/  ffi-bridge/
-  build-logic/                    # shared Gradle convention plugins
-  fuzz/                           # cargo-fuzz targets
-  tools/ci/                       # fitness-function scripts (§13)
+  tools/                          # fitness/ (§13), bdd_check.py (§8.3), ci-local.sh
+  # planned: build-logic/ (Gradle convention plugins), fuzz/ (cargo-fuzz targets)
 ```
 
-- Each `core/*` crate and each `android/*` module follows the **same anatomy** (§5.2).
-- `Cargo.toml` workspace + Gradle settings make the module list explicit and the DAG enforceable.
+- Crates live under **`crates/`** (a single Cargo workspace), **not** a `core/` subfolder; BDD features are **centralized** under the repo-root **`features/`** directory rather than nested per crate (§5.2).
+- Each `crates/*` crate follows the **same anatomy** (§5.2) and carries its own `README.md`; the DAG and layer rules are enforced by `tools/fitness` (§13).
+- Crates are added to the workspace **as they are implemented** (TDD-first), so the workspace member list is the source of truth for what exists today; the §5.4 registry is the full target map, including modules not yet built.
 
 ---
 
@@ -527,4 +530,4 @@ How this document's rules satisfy the BRD's architecture-relevant requirements a
 
 ---
 
-*End of Architecture Document (Draft v0.3). Document chain: BUSINESS_REQUIREMENTS.md (BRD v0.7, source of truth) → SOFTWARE_ENGINEERING.md (SEDD v0.7) → this.*
+*End of Architecture Document (Draft v0.3). Document chain: BUSINESS_REQUIREMENTS.md (BRD v0.7, source of truth) → SOFTWARE_ENGINEERING.md (SEDD v0.8) → this.*

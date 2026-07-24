@@ -1,12 +1,15 @@
 # FeatherKey — Rust core workspace.
 #
-# The full module map lives in SOFTWARE_ENGINEERING.md §5.2. Crates are added to
-# this workspace as they are implemented (TDD-first). The initial walking
-# skeleton contains only the crates exercised by the keystroke tracer bullet:
-#   kernel         — shared value objects + error types (no logic, no deps)
-#   layout-engine  — key layouts & geometry
-#   input-decoder  — touch coordinates -> intended key + candidates (accuracy engine)
+# The full module map lives in SOFTWARE_ENGINEERING.md §5.2; the target registry
+# is ARCHITECTURE.md §5.4. Crates are added to this workspace as they are
+# implemented (TDD-first), so the `members` list below is the source of truth for
+# what exists today. Waves 0–4 (MVP Rust core) are complete: the 17 crates below,
+# including the `featherkey-core` composition façade (Wave 4; UniFFI surface
+# authored FFI-ready, export scaffolding + bindgen deferred to Wave 5 per ADR-18).
+# Not yet built (see the registry): gesture, clipboard-core (v1.x new modules),
+# neural-runtime (v1.x), dictation (v2+), and the Android/Kotlin shell (Wave 5).
 #
+# Repository layout and per-crate anatomy: ARCHITECTURE.md §11 / §5.2 (ADR-17).
 # Architecture rules (ARCHITECTURE.md §5, §6) are enforced by tools/fitness and CI.
 [workspace]
 resolver = "2"
@@ -27,6 +30,7 @@ members = [
     "crates/locale-manager",
     "crates/prediction",
     "crates/autocorrect",
+    "crates/featherkey-core",
 ]
 
 [workspace.package]
