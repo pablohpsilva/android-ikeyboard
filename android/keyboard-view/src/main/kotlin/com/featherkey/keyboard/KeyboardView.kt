@@ -18,6 +18,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.PointF
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.util.AttributeSet
@@ -49,6 +50,9 @@ class KeyboardView @JvmOverloads constructor(
 
     /** A suggestion in the strip was tapped (index into [suggestions]). */
     var onSuggestion: ((Int) -> Unit)? = null
+
+    /** A swipe gesture over the letters: the screen-space path and key centres. */
+    var onGesture: ((path: List<PointF>, centers: Map<Char, PointF>) -> Unit)? = null
 
     /** The active alpha layout's keys (from the core). */
     var keys: List<RenderKey> = emptyList()
@@ -129,7 +133,16 @@ class KeyboardView @JvmOverloads constructor(
         style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
     }
     private val iconFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val trailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
+    }
     private val path = Path()
+
+    // --- Swipe/glide typing state ---
+    private val trail = ArrayList<PointF>()
+    private var gestureCell: Cell.Letter? = null
+    private var gesturing = false
+    private var trailLen = 0f
 
     private enum class Sp { SHIFT, BACKSPACE, ENTER, SPACE, GLOBE, MIC, TO_NUMBERS, TO_SYMBOLS, TO_ALPHA }
 
@@ -296,6 +309,24 @@ class KeyboardView @JvmOverloads constructor(
             is Cell.Special -> drawSpecial(canvas, cell, c)
             is Cell.Suggest -> Unit
         }
+
+        if (gesturing && trail.size > 1) {
+            trailPaint.color = c.accent
+            trailPaint.alpha = 150
+            trailPaint.strokeWidth = dp(5f)
+            path.reset()
+            path.moveTo(trail[0].x, trail[0].y)
+            for (i in 1 until trail.size) path.lineTo(trail[i].x, trail[i].y)
+            canvas.drawPath(path, trailPaint)
+        }
+    }
+
+    private fun letterCenters(): Map<Char, PointF> {
+        val m = HashMap<Char, PointF>()
+        for (cell in cells) if (cell is Cell.Letter && cell.label.length == 1) {
+            m[cell.label.first().lowercaseChar()] = PointF(cell.rect.centerX(), cell.rect.centerY())
+        }
+        return m
     }
 
     private fun keyBg(canvas: Canvas, r: RectF, c: Palette, isPressed: Boolean) {
@@ -390,14 +421,58 @@ class KeyboardView @JvmOverloads constructor(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                val hit = cells.firstOrNull { it.rect.contains(event.x, event.y) } ?: return true
-                pressed = hit; invalidate(); fire(hit); return true
+                val hit = cells.firstOrNull { it.rect.contains(event.x, event.y) }
+                // A letter press may become a swipe: defer its commit to UP and
+                // start tracking a path. Everything else fires immediately.
+                if (page == Page.ALPHA && hit is Cell.Letter) {
+                    gestureCell = hit
+                    gesturing = false
+                    trailLen = 0f
+                    trail.clear(); trail.add(PointF(event.x, event.y))
+                    pressed = hit; invalidate()
+                } else {
+                    gestureCell = null
+                    pressed = hit; invalidate()
+                    if (hit != null) fire(hit)
+                }
+                return true
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (pressed != null) { pressed = null; invalidate() }; return true
+            MotionEvent.ACTION_MOVE -> {
+                val g = gestureCell ?: return true
+                val last = trail.lastOrNull()
+                val p = PointF(event.x, event.y)
+                if (last != null) trailLen += kotlin.math.hypot(p.x - last.x, p.y - last.y)
+                trail.add(p)
+                if (!gesturing && trailLen > gestureStartThreshold()) {
+                    gesturing = true; pressed = null
+                }
+                if (gesturing) invalidate()
+                return true
             }
+            MotionEvent.ACTION_UP -> {
+                val g = gestureCell
+                if (g != null) {
+                    if (gesturing && trail.size >= 3) {
+                        onGesture?.invoke(ArrayList(trail), letterCenters())
+                    } else {
+                        fire(g) // it was a tap after all
+                    }
+                }
+                resetGesture()
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> { resetGesture(); return true }
         }
         return super.onTouchEvent(event)
+    }
+
+    private fun gestureStartThreshold() = dp(26f)
+
+    private fun resetGesture() {
+        gestureCell = null; gesturing = false; trailLen = 0f
+        trail.clear()
+        if (pressed != null) pressed = null
+        invalidate()
     }
 
     private fun fire(cell: Cell) {

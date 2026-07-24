@@ -17,6 +17,7 @@ import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.PointF
 import android.inputmethodservice.InputMethodService
 import android.net.Uri
 import android.os.Bundle
@@ -63,6 +64,8 @@ class FeatherKeyImeService : InputMethodService() {
     private lateinit var langPrefs: LanguagePrefs
     /** The active languages currently loaded into the core (order = preference). */
     private var currentTags: List<String> = emptyList()
+    /** All active-language words, flattened — the swipe decoder's vocabulary. */
+    private var activeWords: List<String> = emptyList()
 
     override fun onCreate() {
         super.onCreate()
@@ -70,7 +73,9 @@ class FeatherKeyImeService : InputMethodService() {
         currentTags = langPrefs.activeTags()
         val key = KeystoreKeyProvider(this).provisionDataKey()
         val dbPath = File(filesDir, "featherkey.redb").absolutePath
-        bridge = FeatherKeyBridge.open(dbPath, key, Lexicons.load(this, currentTags))
+        val langs = Lexicons.load(this, currentTags)
+        bridge = FeatherKeyBridge.open(dbPath, key, langs)
+        activeWords = langs.flatMap { it.words }
         key.fill(0) // wipe the shell's copy; the native side holds it zeroizing
     }
 
@@ -82,6 +87,7 @@ class FeatherKeyImeService : InputMethodService() {
         view.onCharKey = { ch -> handleChar(ch) }
         view.onFunctionKey = { fk -> handleFunction(fk) }
         view.onSuggestion = { i -> commitSuggestion(i) }
+        view.onGesture = { pathPts, centers -> handleGesture(pathPts, centers) }
         keyboard = view
         return view
     }
@@ -100,10 +106,28 @@ class FeatherKeyImeService : InputMethodService() {
     /** Push [tags] to the core (if changed) and reflect them on the space bar. */
     private fun applyLanguages(tags: List<String>) {
         if (tags != currentTags) {
-            runCatching { bridge.setActiveLanguages(Lexicons.load(this, tags)) }
+            val langs = Lexicons.load(this, tags)
+            runCatching { bridge.setActiveLanguages(langs) }
             currentTags = tags
+            activeWords = langs.flatMap { it.words }
         }
         keyboard?.spaceHint = spaceHint(tags)
+    }
+
+    /** A swipe over the letters: decode to a word, commit it, offer alternatives. */
+    private fun handleGesture(pathPts: List<PointF>, centers: Map<Char, PointF>) {
+        val ic = currentInputConnection ?: return
+        val words = GestureDecoder.decode(pathPts, centers, activeWords, limit = 4)
+        val best = words.firstOrNull() ?: return
+        if (pending.isNotEmpty()) { // finalise a half-typed word with a space
+            runCatching { bridge.learnWord(pending.toString(), field) }
+            ic.commitText(" ", 1)
+            pending.clear()
+        }
+        ic.commitText(best, 1)
+        pending.clear(); pending.append(best) // treat as the current word: alts replace it
+        keyboard?.suggestions = words.take(3)
+        schedulePersist()
     }
 
     /** The space-bar language hint, e.g. "EN" or "EN PT" (primary first). */
