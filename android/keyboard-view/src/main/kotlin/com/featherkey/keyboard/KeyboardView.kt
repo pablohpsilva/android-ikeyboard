@@ -56,6 +56,9 @@ class KeyboardView @JvmOverloads constructor(
     /** A swipe gesture over the letters: the screen-space path and key centres. */
     var onGesture: ((path: List<PointF>, centers: Map<Char, PointF>) -> Unit)? = null
 
+    /** An emoji was tapped on the emoji page: commit this exact string verbatim. */
+    var onEmoji: ((String) -> Unit)? = null
+
     /** The active alpha layout's keys (from the core). */
     var keys: List<RenderKey> = emptyList()
         set(value) { field = value; requestLayout(); invalidate() }
@@ -77,8 +80,23 @@ class KeyboardView @JvmOverloads constructor(
     var spaceHint: String = "EN"
         set(value) { field = value; invalidate() }
 
-    private enum class Page { ALPHA, NUMBERS, SYMBOLS }
+    /** Recently-used emoji (most-recent-first); shown on the emoji page's recents tab. */
+    var recents: List<String> = emptyList()
+        set(value) { field = value; if (page == Page.EMOJI) invalidate() }
+
+    private enum class Page { ALPHA, NUMBERS, SYMBOLS, EMOJI }
     private var page = Page.ALPHA
+
+    // --- Emoji-page state (own draw + scroll path, independent of the cell grid). ---
+    /** Active emoji tab: 0 = recents, 1..N = [EmojiData.categories] in order. */
+    private var emojiTab = 0
+    /** Vertical scroll of the active tab's grid, in px; clamped to its content. */
+    private var emojiScrollY = 0f
+    private var emojiDownX = 0f
+    private var emojiDownY = 0f
+    private var emojiStartScroll = 0f
+    private var emojiDragging = false
+    private var emojiDownInGrid = false
 
     /**
      * Height of the system navigation bar under us. The globe/mic bar is lifted
@@ -146,7 +164,7 @@ class KeyboardView @JvmOverloads constructor(
     private var gesturing = false
     private var trailLen = 0f
 
-    private enum class Sp { SHIFT, BACKSPACE, ENTER, SPACE, GLOBE, MIC, TO_NUMBERS, TO_SYMBOLS, TO_ALPHA }
+    private enum class Sp { SHIFT, BACKSPACE, ENTER, SPACE, GLOBE, MIC, TO_NUMBERS, TO_SYMBOLS, TO_ALPHA, TO_EMOJI }
 
     private sealed class Cell(val rect: RectF) {
         /** [lx],[ly] = key centre and [lw] = key width, in the core's logical
@@ -166,7 +184,9 @@ class KeyboardView @JvmOverloads constructor(
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = MeasureSpec.getSize(widthMeasureSpec)
-        val strip = if (suggestions.isEmpty()) 0f else stripHeight
+        // The emoji page owns its full height (no prediction strip), so it fits in
+        // the same envelope as the normal pages regardless of any pending strip.
+        val strip = if (page == Page.EMOJI || suggestions.isEmpty()) 0f else stripHeight
         val h = strip + rowHeight * 3 + funcRowHeight + bottomBarHeight + bottomInset
         setMeasuredDimension(w, h.toInt())
     }
@@ -174,6 +194,9 @@ class KeyboardView @JvmOverloads constructor(
     // ---- Layout -------------------------------------------------------------
 
     private fun buildCells(w: Int, h: Int): List<Cell> {
+        // The emoji page draws and hit-tests itself (its grid is far too many keys
+        // to model as [Cell]s), so it contributes no cells to the standard grid.
+        if (page == Page.EMOJI) return emptyList()
         val out = ArrayList<Cell>()
         val contentW = w - sideMargin * 2
         // Letter-key width adapts to the widest alpha row so a 12-column Cyrillic
@@ -264,9 +287,12 @@ class KeyboardView @JvmOverloads constructor(
                 charRow(SYMBOLS_R2, null)
                 lastRow(Sp.TO_NUMBERS, PUNCT_R3, null, fill = true)
             }
+            Page.EMOJI -> Unit // handled by the early return above; builds no cells
         }
 
-        // Function row: [123|ABC] [ space ] [ return ].
+        // Function row: [123|ABC] [emoji] [ space ] [ return ]. The emoji key sits
+        // between the page-switch key and the space bar (iOS-style), so the emoji
+        // page is reachable from every standard page; the space bar takes the rest.
         run {
             val kt = top + rowGap / 2f; val kb = top + funcRowHeight - rowGap / 2f
             val fSideW = baseKeyW * 2f
@@ -274,7 +300,10 @@ class KeyboardView @JvmOverloads constructor(
             out += Cell.Special(RectF(sideMargin, kt, sideMargin + fSideW, kb), leftKind)
             val retLeft = w - sideMargin - fSideW
             out += Cell.Special(RectF(retLeft, kt, w - sideMargin, kb), Sp.ENTER)
-            out += Cell.Special(RectF(sideMargin + fSideW + keyGap, kt, retLeft - keyGap, kb), Sp.SPACE)
+            val emojiLeft = sideMargin + fSideW + keyGap
+            val emojiW = baseKeyW * 1.2f
+            out += Cell.Special(RectF(emojiLeft, kt, emojiLeft + emojiW, kb), Sp.TO_EMOJI)
+            out += Cell.Special(RectF(emojiLeft + emojiW + keyGap, kt, retLeft - keyGap, kb), Sp.SPACE)
             top += funcRowHeight
         }
 
@@ -302,6 +331,10 @@ class KeyboardView @JvmOverloads constructor(
         labelPaint.color = c.label
         dividerPaint.color = c.divider
         hintPaint.color = c.hint
+
+        // The emoji page renders itself (tabs + scrollable grid + control bar) and
+        // takes no part in the cell grid or the prediction strip below.
+        if (page == Page.EMOJI) { cells = emptyList(); drawEmojiPage(canvas, c); return }
 
         cells = buildCells(width, height)
 
@@ -402,6 +435,11 @@ class KeyboardView @JvmOverloads constructor(
             Sp.TO_NUMBERS -> drawTextKey(canvas, r, c, p, "123", r.height() * 0.34f)
             Sp.TO_SYMBOLS -> drawTextKey(canvas, r, c, p, "#+=", r.height() * 0.34f)
             Sp.TO_ALPHA -> drawTextKey(canvas, r, c, p, "ABC", r.height() * 0.34f)
+            Sp.TO_EMOJI -> {
+                keyBg(canvas, r, c, p)
+                iconPaint.color = c.icon; iconPaint.strokeWidth = dp(1.6f)
+                drawIcon(canvas, ICON_SMILE, r, ICON_FRAC, iconPaint)
+            }
         }
     }
 
@@ -456,6 +494,9 @@ class KeyboardView @JvmOverloads constructor(
     // ---- Touch --------------------------------------------------------------
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        // The emoji page has its own tap-vs-drag scroll model; keep it off the
+        // letter/gesture path entirely.
+        if (page == Page.EMOJI) return onEmojiTouch(event)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 val hit = cells.firstOrNull { it.rect.contains(event.x, event.y) }
@@ -539,7 +580,162 @@ class KeyboardView @JvmOverloads constructor(
                 Sp.TO_NUMBERS -> { page = Page.NUMBERS; requestLayout(); invalidate() }
                 Sp.TO_SYMBOLS -> { page = Page.SYMBOLS; requestLayout(); invalidate() }
                 Sp.TO_ALPHA -> { page = Page.ALPHA; requestLayout(); invalidate() }
+                Sp.TO_EMOJI -> { page = Page.EMOJI; emojiScrollY = 0f; requestLayout(); invalidate() }
             }
+        }
+    }
+
+    // ---- Emoji page ---------------------------------------------------------
+
+    /**
+     * The emoji page's geometry, computed once and shared by its draw and touch
+     * paths so both agree on where the tabs, grid cells and control bar sit.
+     */
+    private class EmojiLayout(
+        val tabCount: Int, val tabBottom: Float,
+        val gridTop: Float, val gridBottom: Float,
+        val cols: Int, val cellW: Float, val cellH: Float, val contentH: Float,
+        val abc: RectF, val recents: RectF, val backspace: RectF,
+    )
+
+    private val emojiTabHeight get() = dp(44f)
+    private val emojiDragThreshold get() = dp(8f)
+
+    /** The active tab's emoji: recents for tab 0, else the category's list. */
+    private fun emojiList(): List<String> =
+        if (emojiTab == 0) recents else EmojiData.categories[emojiTab - 1].emojis
+
+    /** The glyph for tab [i] — a clock for recents (0), else the category's tab glyph. */
+    private fun emojiTabGlyph(i: Int): String =
+        if (i == 0) RECENTS_GLYPH else EmojiData.categories[i - 1].tabGlyph
+
+    private fun emojiLayout(): EmojiLayout {
+        val w = width.toFloat(); val h = height.toFloat()
+        val tabCount = 1 + EmojiData.categories.size
+        val tabBottom = emojiTabHeight
+        // A single control bar sits at the bottom (over the nav inset); the grid
+        // fills everything between it and the tab band.
+        val barTop = h - bottomInset - funcRowHeight
+        val gridW = w - sideMargin * 2
+        val cols = maxOf(1, (gridW / dp(46f)).toInt())
+        val cellW = gridW / cols
+        val cellH = cellW
+        val rows = (emojiList().size + cols - 1) / cols
+        val contentH = rows * cellH
+        // Control bar: [ABC] [recents] … [backspace], keys sized like a func row.
+        val baseKeyW = (gridW - keyGap * 9) / 10f
+        val fSideW = baseKeyW * 2f
+        val barKt = barTop + rowGap / 2f
+        val barKb = h - bottomInset - rowGap / 2f
+        val abc = RectF(sideMargin, barKt, sideMargin + fSideW, barKb)
+        val recLeft = sideMargin + fSideW + keyGap
+        val recents = RectF(recLeft, barKt, recLeft + fSideW, barKb)
+        val backspace = RectF(w - sideMargin - fSideW, barKt, w - sideMargin, barKb)
+        return EmojiLayout(tabCount, tabBottom, tabBottom, barTop, cols, cellW, cellH, contentH, abc, recents, backspace)
+    }
+
+    private fun drawEmojiPage(canvas: Canvas, c: Palette) {
+        val L = emojiLayout()
+        val maxScroll = maxOf(0f, L.contentH - (L.gridBottom - L.gridTop))
+        emojiScrollY = emojiScrollY.coerceIn(0f, maxScroll)
+
+        // Category tab band + its baseline divider, active tab underlined in accent.
+        canvas.drawLine(0f, L.tabBottom, width.toFloat(), L.tabBottom, dividerPaint)
+        labelPaint.color = c.label
+        labelPaint.textSize = emojiTabHeight * 0.5f
+        val tabW = width / L.tabCount.toFloat()
+        val tabCy = L.tabBottom / 2f - (labelPaint.ascent() + labelPaint.descent()) / 2f
+        for (i in 0 until L.tabCount) {
+            canvas.drawText(emojiTabGlyph(i), tabW * (i + 0.5f), tabCy, labelPaint)
+        }
+        iconFill.color = c.accent
+        canvas.drawRect(tabW * emojiTab + tabW * 0.3f, L.tabBottom - dp(3f),
+            tabW * emojiTab + tabW * 0.7f, L.tabBottom - dp(1f), iconFill)
+
+        // The scrollable grid, clipped to its band; skip rows scrolled out of view.
+        val emojis = emojiList()
+        canvas.save()
+        canvas.clipRect(0f, L.gridTop, width.toFloat(), L.gridBottom)
+        if (emojis.isEmpty()) {
+            labelPaint.color = c.hint
+            labelPaint.textSize = dp(15f)
+            val my = (L.gridTop + L.gridBottom) / 2f - (labelPaint.ascent() + labelPaint.descent()) / 2f
+            canvas.drawText("No recent emoji yet", width / 2f, my, labelPaint)
+        } else {
+            labelPaint.color = c.label
+            labelPaint.textSize = minOf(L.cellW, L.cellH) * 0.62f
+            for (i in emojis.indices) {
+                val cx = sideMargin + (i % L.cols) * L.cellW + L.cellW / 2f
+                val cy = L.gridTop - emojiScrollY + (i / L.cols) * L.cellH + L.cellH / 2f
+                if (cy + L.cellH / 2f < L.gridTop || cy - L.cellH / 2f > L.gridBottom) continue
+                val by = cy - (labelPaint.ascent() + labelPaint.descent()) / 2f
+                canvas.drawText(emojis[i], cx, by, labelPaint)
+            }
+        }
+        canvas.restore()
+
+        // Control bar: return-to-letters, jump-to-recents, backspace.
+        labelPaint.color = c.label
+        drawTextKey(canvas, L.abc, c, false, "ABC", L.abc.height() * 0.34f)
+        keyBg(canvas, L.recents, c, emojiTab == 0)
+        iconPaint.color = c.icon; iconPaint.strokeWidth = dp(1.6f)
+        drawIcon(canvas, ICON_CLOCK, L.recents, ICON_FRAC, iconPaint)
+        keyBg(canvas, L.backspace, c, false)
+        drawBackspace(canvas, L.backspace, c)
+    }
+
+    /**
+     * The emoji page's touch model: a press that moves past [emojiDragThreshold]
+     * inside the grid scrolls it; anything else is a tap, dispatched on UP to a
+     * tab, an emoji cell, or a control-bar key.
+     */
+    private fun onEmojiTouch(event: MotionEvent): Boolean {
+        val L = emojiLayout()
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                emojiDownX = event.x; emojiDownY = event.y
+                emojiStartScroll = emojiScrollY
+                emojiDragging = false
+                emojiDownInGrid = event.y >= L.gridTop && event.y < L.gridBottom
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!emojiDownInGrid) return true
+                val dy = event.y - emojiDownY
+                if (!emojiDragging &&
+                    kotlin.math.hypot(event.x - emojiDownX, dy) > emojiDragThreshold) {
+                    emojiDragging = true
+                }
+                if (emojiDragging) {
+                    val maxScroll = maxOf(0f, L.contentH - (L.gridBottom - L.gridTop))
+                    emojiScrollY = (emojiStartScroll - dy).coerceIn(0f, maxScroll)
+                    invalidate()
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                if (!emojiDragging) onEmojiTap(L, event.x, event.y)
+                emojiDragging = false
+            }
+            MotionEvent.ACTION_CANCEL -> emojiDragging = false
+        }
+        return true
+    }
+
+    private fun onEmojiTap(L: EmojiLayout, x: Float, y: Float) {
+        when {
+            y < L.tabBottom -> {
+                val idx = ((x / width.toFloat()) * L.tabCount).toInt().coerceIn(0, L.tabCount - 1)
+                if (idx != emojiTab) { emojiTab = idx; emojiScrollY = 0f; invalidate() }
+            }
+            y < L.gridBottom -> {
+                val col = ((x - sideMargin) / L.cellW).toInt()
+                if (col in 0 until L.cols) {
+                    val row = ((y - L.gridTop + emojiScrollY) / L.cellH).toInt()
+                    emojiList().getOrNull(row * L.cols + col)?.let { onEmoji?.invoke(it) }
+                }
+            }
+            L.abc.contains(x, y) -> { page = Page.ALPHA; requestLayout(); invalidate() }
+            L.recents.contains(x, y) -> if (emojiTab != 0) { emojiTab = 0; emojiScrollY = 0f; invalidate() }
+            L.backspace.contains(x, y) -> onFunctionKey?.invoke(FunctionKey.BACKSPACE)
         }
     }
 
@@ -598,6 +794,18 @@ class KeyboardView @JvmOverloads constructor(
         val ICON_MIC: Path = PathParser.createPathFromPathData(
             "M9 5A3 3 0 0 1 15 5V12A3 3 0 0 1 9 12Z M19 10v2a7 7 0 0 1-14 0v-2 M12 19v3",
         )
+        // Emoji-entry (a smile) and the recents (clock) key on the emoji control
+        // bar. The eyes are round-capped zero-length strokes, so they draw as dots.
+        val ICON_SMILE: Path = PathParser.createPathFromPathData(
+            "M2 12A10 10 0 1 1 22 12A10 10 0 1 1 2 12Z " +
+                "M8 14c1.333 1.333 6.667 1.333 8 0 M9 9L9.01 9 M15 9L15.01 9",
+        )
+        val ICON_CLOCK: Path = PathParser.createPathFromPathData(
+            "M2 12A10 10 0 1 1 22 12A10 10 0 1 1 2 12Z M12 6v6l4 2",
+        )
+
+        /** Tab glyph for the emoji page's recents tab (system emoji font). */
+        const val RECENTS_GLYPH = "🕙" // 🕙
 
         /** Built-in QWERTY in the core's 1000×360 logical space, for decode fallback. */
         val FALLBACK_QWERTY: List<RenderKey> = buildList {

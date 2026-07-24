@@ -39,6 +39,7 @@ import com.featherkey.keyboard.KeyboardView
 import com.featherkey.keyboard.RenderKey
 import com.featherkey.onboarding.ConsentStore
 import com.featherkey.platform.EditorInfoSensitivity
+import com.featherkey.platform.EmojiRecents
 import com.featherkey.platform.KeystoreKeyProvider
 import com.featherkey.platform.LanguageCatalog
 import com.featherkey.platform.LanguagePrefs
@@ -69,6 +70,8 @@ class FeatherKeyImeService : InputMethodService() {
     private var recognizer: SpeechRecognizer? = null
 
     private lateinit var langPrefs: LanguagePrefs
+    /** Persisted most-recently-used emoji for the emoji page's recents tab. */
+    private lateinit var emojiRecents: EmojiRecents
     /** The active languages currently loaded into the core (order = preference). */
     private var currentTags: List<String> = emptyList()
     /** Frequency-ranked vocabulary for suggestions + swipe (loaded off the input path). */
@@ -87,6 +90,7 @@ class FeatherKeyImeService : InputMethodService() {
     override fun onCreate() {
         super.onCreate()
         langPrefs = LanguagePrefs(this)
+        emojiRecents = EmojiRecents(this)
         currentTags = langPrefs.activeTags()
         usage = UsageModel(this).also { it.load() }
         bigrams = ContextModel(this).also { it.load() }
@@ -109,6 +113,8 @@ class FeatherKeyImeService : InputMethodService() {
         view.onFunctionKey = { fk -> handleFunction(fk) }
         view.onSuggestion = { i -> commitSuggestion(i) }
         view.onGesture = { pathPts, centers -> handleGesture(pathPts, centers) }
+        view.onEmoji = { emoji -> handleEmoji(emoji) }
+        view.recents = emojiRecents.list()
         keyboard = view
         return view
     }
@@ -264,6 +270,22 @@ class FeatherKeyImeService : InputMethodService() {
         ic.commitText(ch, 1)
         pending.clear(); tapDists.clear()
         keyboard?.suggestions = emptyList()
+    }
+
+    /**
+     * An emoji tapped on the emoji page: commit it verbatim and record it as
+     * recent. Emoji never go through the decoder or the tap-learning path — they
+     * are picked, not typed — so this just ends the current word's tracking like
+     * any non-letter and drops the preceding-word context. Committing text is
+     * always allowed; only *learning* is gated, and we learn nothing here.
+     */
+    private fun handleEmoji(emoji: String) {
+        val ic = currentInputConnection ?: return
+        ic.commitText(emoji, 1)
+        pending.clear(); tapDists.clear()
+        lastWord = null
+        keyboard?.suggestions = emptyList()
+        keyboard?.recents = emojiRecents.record(emoji)
     }
 
     /**
