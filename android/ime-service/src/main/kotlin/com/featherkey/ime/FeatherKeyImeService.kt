@@ -137,7 +137,12 @@ class FeatherKeyImeService : InputMethodService() {
 
     /** Build the frequency vocabulary off the input thread; swap it in when ready. */
     private fun loadVocab(tags: List<String>) {
-        ioScope.launch { vocab = Vocabulary.load(applicationContext, tags) }
+        ioScope.launch {
+            vocab = Vocabulary.load(applicationContext, tags)
+            // On a cold start the strip may be empty for the word already being
+            // typed (the load is async); refresh it now that the data is ready.
+            keyboard?.post { updateSuggestions() }
+        }
     }
 
     /** A swipe over the letters: decode to a word, commit it, offer alternatives. */
