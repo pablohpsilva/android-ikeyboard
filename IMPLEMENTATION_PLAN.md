@@ -207,10 +207,10 @@ Sandbox-verifiable: **Yes** (network permitting — R-5).
 
 Sandbox-verifiable: **Yes**.
 
-### Wave 3 — the predictive layer
+### Wave 3 — the predictive layer ✅ **Done**
 | Increment | Closes (MVP BRs only) | Depends on / deferred depth |
 |---|---|---|
-| `prediction` | BR-10 (competitive) | `dictionary`, `locale-manager` (statistical n-gram; neural behind the `Predictor` port, v1.x). **Deferred depth:** inline-prediction polish (BR-42, v1.x), neural quality (BR-11, v1.x). |
+| `prediction` | BR-10 (competitive) | `dictionary` only — prefix completions over the active lexicons behind the `Predictor` port. *(Design note: `locale-manager` exposes no lexicon accessor, so the composition root selects active languages via `locale-manager` and passes their `Dictionary` set into the predictor; the crate needs no direct `locale-manager` dep.)* **Deferred depth:** frequency/n-gram ranking (needs frequency data), inline polish (BR-42), neural quality (BR-11) — all v1.x. |
 | `autocorrect` | BR-12, BR-18 | `dictionary`, `personalization` (whitelist), `locale-manager`. Must follow personalization so the no-clobber property test passes. **Deferred depth:** alternative-word UI (BR-45, v1.x). |
 
 Sandbox-verifiable: **Yes**.

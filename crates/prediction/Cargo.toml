@@ -5,7 +5,7 @@ publish = false
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Autocomplete and next-word prediction; implements the Predictor port (statistical n-gram at MVP)."
+description = "Autocomplete via prefix completion over the active lexicons (Predictor port). Frequency/n-gram ranking is v1.x, once frequency data is available."
 
 [package.metadata.featherkey]
 layer = "domain"
@@ -13,7 +13,6 @@ layer = "domain"
 [dependencies]
 featherkey-contracts = { path = "../contracts" }
 featherkey-dictionary = { path = "../dictionary" }
-featherkey-locale-manager = { path = "../locale-manager" }
 
 [lints]
 workspace = true
