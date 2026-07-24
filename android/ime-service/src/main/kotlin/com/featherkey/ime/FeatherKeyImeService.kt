@@ -33,6 +33,7 @@ import android.widget.Toast
 import com.featherkey.ffi.FeatherKeyBridge
 import com.featherkey.ffi.FieldSensitivity
 import com.featherkey.ffi.Language
+import com.featherkey.ffi.generated.FfiDecode
 import com.featherkey.keyboard.FunctionKey
 import com.featherkey.keyboard.KeyboardView
 import com.featherkey.keyboard.RenderKey
@@ -59,6 +60,9 @@ class FeatherKeyImeService : InputMethodService() {
 
     private var field: FieldSensitivity = FieldSensitivity { false }
     private val pending = StringBuilder()
+    /** Per-tap key-probability distributions for the word in [pending], kept in
+     *  lockstep with it, so the word can be re-read probabilistically (BR-10). */
+    private val tapDists = ArrayList<Map<Char, Float>>()
     private var persistJob: Job? = null
 
     private var keyboard: KeyboardView? = null
@@ -113,7 +117,7 @@ class FeatherKeyImeService : InputMethodService() {
         super.onStartInput(info, restarting)
         val sensitive = EditorInfoSensitivity.isSensitive(info)
         field = FieldSensitivity { sensitive } // captured once per field (E-2)
-        pending.clear()
+        pending.clear(); tapDists.clear()
         lastWord = null // a new field starts with no preceding-word context
         keyboard?.suggestions = emptyList()
         keyboard?.resetPage()
@@ -147,6 +151,8 @@ class FeatherKeyImeService : InputMethodService() {
             pending.clear()
         }
         ic.commitText(best, 1)
+        // Swipe result has no per-tap data; drop any so suggestions use prefixes.
+        tapDists.clear()
         pending.clear(); pending.append(best) // treat as the current word: alts replace it
         keyboard?.suggestions = words.take(3)
         schedulePersist()
@@ -190,14 +196,27 @@ class FeatherKeyImeService : InputMethodService() {
     /** A letter touch, already mapped to the Rust layout's logical space. */
     private fun handleTouch(x: Float, y: Float) {
         val ic = currentInputConnection ?: return
-        val decoded = runCatching { bridge.decode(x, y).best }.getOrNull() ?: return
+        val result = runCatching { bridge.decode(x, y) }.getOrNull() ?: return
+        val decoded = result.best ?: return
         observeTap(decoded, x, y)
+        tapDists.add(distributionOf(result)) // remember the tap as a distribution
         val kb = keyboard
         val ch = if (kb?.shifted == true) decoded.uppercase() else decoded
         pending.append(ch)
         ic.commitText(ch, 1)
         if (kb?.shifted == true) kb.shifted = false
         updateSuggestions()
+    }
+
+    /** A tap's key -> probability map (lowercased), from the decoder's candidates. */
+    private fun distributionOf(result: FfiDecode): Map<Char, Float> {
+        val m = HashMap<Char, Float>(result.candidates.size)
+        for (c in result.candidates) {
+            val ch = c.key.firstOrNull()?.lowercaseChar() ?: continue
+            val cur = m[ch]
+            if (cur == null || c.confidence > cur) m[ch] = c.confidence
+        }
+        return m
     }
 
     /**
@@ -234,7 +253,7 @@ class FeatherKeyImeService : InputMethodService() {
     private fun handleChar(ch: String) {
         val ic = currentInputConnection ?: return
         ic.commitText(ch, 1)
-        pending.clear()
+        pending.clear(); tapDists.clear()
         keyboard?.suggestions = emptyList()
     }
 
@@ -247,8 +266,14 @@ class FeatherKeyImeService : InputMethodService() {
     private fun updateSuggestions() {
         val prefix = pending.toString().lowercase()
         keyboard?.suggestions = when {
-            prefix.isNotEmpty() -> vocab.suggestions(prefix, usage.map, 3, bigrams.nextCounts(lastWord))
-            else -> lastWord?.let { bigrams.nextWords(it, 3) } ?: emptyList()
+            prefix.isEmpty() -> lastWord?.let { bigrams.nextWords(it, 3) } ?: emptyList()
+            // Taps in lockstep with the word: read them probabilistically against
+            // the language model (fat-finger tolerant) instead of as hard keys.
+            tapDists.size == prefix.length ->
+                vocab.probableWords(tapDists, usage.map, bigrams.nextCounts(lastWord), 3)
+            // Word came from a path without per-tap data (swipe, suggestion): fall
+            // back to exact-prefix completion.
+            else -> vocab.suggestions(prefix, usage.map, 3, bigrams.nextCounts(lastWord))
         }
     }
 
@@ -260,7 +285,7 @@ class FeatherKeyImeService : InputMethodService() {
         if (cur.isNotEmpty()) ic.deleteSurroundingText(cur.length, 0)
         ic.commitText("$word ", 1)
         learnWord(word)
-        pending.clear()
+        pending.clear(); tapDists.clear()
         updateSuggestions() // now show next-word predictions for this word
         schedulePersist()
     }
@@ -269,27 +294,46 @@ class FeatherKeyImeService : InputMethodService() {
     private fun boundary(ic: InputConnection) {
         val word = pending.toString()
         if (word.isNotEmpty()) {
-            val correction = runCatching { bridge.correct(word, "", word) }.getOrNull()
-            if (correction != null && correction.applied) {
+            val corrected = correctedWord(word)
+            if (corrected != null && corrected != word) {
                 ic.deleteSurroundingText(word.length, 0)
-                ic.commitText(correction.primary, 1)
+                ic.commitText(corrected, 1)
             }
-            learnWord(correction?.primary ?: word)
+            learnWord(corrected ?: word)
         }
         ic.commitText(" ", 1)
-        pending.clear()
+        pending.clear(); tapDists.clear()
         updateSuggestions() // next-word predictions for the word just committed
         schedulePersist()
     }
 
+    /**
+     * The word to commit at a boundary, or `null` to keep what was typed. Uses
+     * the core autocorrect first; if that declines and the typed string is not
+     * itself a known word, it trusts the noisy-channel reading of the taps — so a
+     * fat-fingered "rhe" commits as "the" — but never second-guesses a real word
+     * or a mixed-case token.
+     */
+    private fun correctedWord(word: String): String? {
+        val core = runCatching { bridge.correct(word, "", word) }.getOrNull()
+        if (core != null && core.applied) return core.primary
+        if (word != word.lowercase()) return null // don't mangle Caps/ALLCAPS
+        if (vocab.rankOf(word) != Int.MAX_VALUE) return null // already a real word
+        if (tapDists.size != word.length) return null // no per-tap data to trust
+        return vocab.probableWords(tapDists, usage.map, bigrams.nextCounts(lastWord), 1)
+            .firstOrNull()
+            ?.takeIf { it != word }
+    }
+
     private fun backspace(ic: InputConnection) {
         if (pending.isNotEmpty()) pending.deleteCharAt(pending.length - 1)
+        if (tapDists.isNotEmpty()) tapDists.removeAt(tapDists.size - 1)
         ic.deleteSurroundingText(1, 0)
     }
 
     private fun flushWord(ic: InputConnection) {
         learnWord(pending.toString())
-        pending.clear()
+        pending.clear(); tapDists.clear()
         lastWord = null // Enter ends the line: start the next with no context
     }
 
