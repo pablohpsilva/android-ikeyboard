@@ -1,0 +1,19 @@
+[package]
+name = "featherkey-contracts"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Port traits (driven & driving) that domain crates depend on instead of adapters. No logic, no dependencies beyond kernel. See ADR-12."
+
+# contracts is a port-layer crate: it may depend only on the foundation (kernel).
+# The layered-dependency fitness rule (tools/fitness/check.py) enforces this.
+[package.metadata.featherkey]
+layer = "port"
+
+[dependencies]
+featherkey-kernel = { path = "../kernel" }
+
+[lints]
+workspace = true

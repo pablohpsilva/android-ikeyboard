@@ -39,7 +39,8 @@ jobs:
         run: cargo test --workspace --all-targets
 
       - name: Architectural fitness functions
-        # No-god-files, core purity, acyclic DAG (ARCH §6, SEDD §5.5).
+        # No-god-files, core purity, acyclic DAG, inward dependency rule
+        # (ARCH §6/§3.2, SEDD §5.5, ADR-12).
         run: python3 tools/fitness/check.py
 
       - name: Install cargo-llvm-cov
@@ -66,6 +67,27 @@ jobs:
         # branches are expected at 100%.
         continue-on-error: true
         run: cargo +nightly llvm-cov --workspace --branch --summary-only
+
+  supply-chain:
+    name: Supply-chain hygiene (cargo-deny + audit, BR-65)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-deny + cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny,cargo-audit
+      - name: cargo-deny (advisories, bans, licenses, sources)
+        # Config in deny.toml. Enforces permissive-only licenses, crates.io-only
+        # sources, no yanked/advisory crates, no wildcard versions.
+        run: cargo deny check
+      - name: cargo-audit (RustSec advisory DB)
+        # Needs a lockfile; the workspace gitignores Cargo.lock (libraries), so
+        # generate one for the audit.
+        run: |
+          cargo generate-lockfile
+          cargo audit
 
   android-shell:
     name: Android shell — assemble & unit test

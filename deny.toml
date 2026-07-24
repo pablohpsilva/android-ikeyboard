@@ -1,0 +1,44 @@
+# cargo-deny configuration — supply-chain hygiene gate (SEDD §13.5, BR-65).
+# Run locally with `cargo deny check`; enforced in CI (.github/workflows/ci.yml).
+# The privacy/security posture (EP-1, EP-8) makes dependency provenance and
+# license compatibility a hard requirement, not a nicety.
+
+[advisories]
+version = 2
+# Fail on any crate with a known RustSec advisory or that has been yanked.
+yanked = "deny"
+ignore = []
+
+[bans]
+# A second copy of a crate is a footprint + audit-surface smell (EP-2); warn so
+# it is visible in review without blocking on unavoidable transitive dupes.
+multiple-versions = "warn"
+# Wildcard version requirements are unreproducible — forbid them (BR-24)...
+wildcards = "deny"
+# ...but intra-workspace `path` deps are legitimately version-less; allow those.
+allow-wildcard-paths = true
+
+[licenses]
+version = 2
+# Permissive-only: the project ships Apache-2.0 OR MIT and targets F-Droid
+# (BR-67), so copyleft/unknown licenses must not enter the graph.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Unlicense",
+    "CC0-1.0",
+]
+confidence-threshold = 0.9
+
+[sources]
+# Only crates.io — no unknown registries or ad-hoc git sources (supply-chain).
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

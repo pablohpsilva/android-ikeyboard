@@ -1,13 +1,17 @@
 [package]
 name = "featherkey-kernel"
 version = "0.0.0"
+publish = false
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 description = "Shared value objects and error types that cross module boundaries. No logic, no dependencies."
 
 # kernel is the root of the dependency DAG (SEDD §5.5 rule 4). It MUST have zero
-# dependencies — tools/fitness/check_acyclic.py enforces this.
+# dependencies — tools/fitness/check.py enforces this.
+[package.metadata.featherkey]
+layer = "foundation"
+
 [dependencies]
 
 [lints]

@@ -12,6 +12,7 @@
 resolver = "2"
 members = [
     "crates/kernel",
+    "crates/contracts",
     "crates/layout-engine",
     "crates/input-decoder",
 ]

@@ -34,6 +34,14 @@ KERNEL_CRATE = "featherkey-kernel"
 # Android-agnostic (SEDD §5.5 rule 2) so it stays host-testable and portable.
 FORBIDDEN_IN_CORE = ("android.", "jni::", "extern crate jni", "ndk_")
 
+# The inward Dependency Rule (ARCH §3.2, ADR-12): dependencies point inward, so a
+# crate may depend only on crates in the same or an inner layer. Ranks increase
+# outward; the forbidden edge is any dependency on a HIGHER-ranked (more concrete)
+# layer — e.g. a domain crate depending on an adapter. Each crate declares its
+# layer in Cargo.toml under [package.metadata.featherkey].
+LAYER_RANK = {"foundation": 0, "port": 1, "domain": 2, "adapter": 3, "composition": 4}
+DEFAULT_LAYER = "domain"  # undeclared crates are treated as domain
+
 
 class Violations:
     def __init__(self) -> None:
@@ -140,17 +148,48 @@ def check_dependency_dag(v: Violations) -> None:
             visit(n, [n])
 
 
+def crate_layer(manifest: dict) -> str:
+    meta = manifest.get("package", {}).get("metadata", {}).get("featherkey", {})
+    return meta.get("layer", DEFAULT_LAYER)
+
+
+def check_layered_dependencies(v: Violations) -> None:
+    """Enforce the inward Dependency Rule via each crate's declared layer.
+
+    A crate of rank R may depend only on crates of rank <= R. The load-bearing
+    case this catches: a `domain` crate (rank 2) depending on an `adapter`
+    (rank 3) — the exact erosion the acyclic-only check could not see.
+    """
+    manifests = crate_manifests()
+    known = set(manifests)
+    layer = {name: crate_layer(m) for name, m in manifests.items()}
+
+    for name, manifest in manifests.items():
+        self_layer = layer[name]
+        self_rank = LAYER_RANK.get(self_layer)
+        if self_rank is None:
+            v.add("layer", name, f"unknown layer '{self_layer}'")
+            continue
+        for dep in local_deps(manifest, known):
+            dep_rank = LAYER_RANK.get(layer.get(dep, DEFAULT_LAYER), LAYER_RANK[DEFAULT_LAYER])
+            if dep_rank > self_rank:
+                v.add("dependency-rule", name,
+                      f"{self_layer} crate depends on {layer.get(dep)} crate "
+                      f"'{dep}' — dependencies must point inward (ARCH §3.2)")
+
+
 def main() -> int:
     v = Violations()
     check_file_sizes(v)
     check_function_lengths(v)
     check_no_android_in_core(v)
     check_dependency_dag(v)
+    check_layered_dependencies(v)
 
     if v.ok():
         print("fitness: all architectural rules pass "
               f"(<= {MAX_FILE_LINES} lines/file, <= {MAX_FN_LINES} lines/fn, "
-              "core purity, acyclic DAG)")
+              "core purity, acyclic DAG, inward dependency rule)")
         return 0
 
     print(f"fitness: {len(v.items)} violation(s):", file=sys.stderr)

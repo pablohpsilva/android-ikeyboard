@@ -17,7 +17,7 @@
 | 0.4 | 2026-07-24 | Coherence-review fixes: reconciled the MVP accuracy bar (keystroke accuracy = MVP/beat-iOS; prediction quality = competitive at MVP, beat-iOS in v1.x) in ADR-3 + BR-10 traceability; tightened the `no_std` claim; added a note on cohesive module grouping vs strict BR-38 |
 | 0.5 | 2026-07-24 | Added the `kernel` crate (shared value objects + error types) to §5.2, for consistency with the Architecture Document (ARCH v0.1) |
 | 0.6 | 2026-07-24 | Set minimum coverage to **98%** (§12.5); moved BR-17 to **MVP** in the §15 traceability (consistent with BRD v0.7); synced BRD reference to v0.7 |
-| 0.7 | 2026-07-24 | Added ADR-12–16 (proposed: `contracts` port crate; `locale-manager`→`dictionary` edge; two-domain writer split; `input-decoder` signature break; RTL deferral); added `contracts` + `featherkey-core` to §5.2; two-domain writer split rewrite (§5.5 r1, §5.4); doc-fidelity fixes — BR-37 into `accessibility-adapter` §5.1, BR-38 marked structural, BR-62 secure-store/platform-services split (§5.1/§5.2/§15). Supports IMPLEMENTATION_PLAN.md Wave 0.5. |
+| 0.7 | 2026-07-24 | Added ADR-12–16 (**sponsor-ratified**: `contracts` port crate; `locale-manager`→`dictionary` edge; two-domain writer split; `input-decoder` signature break; RTL deferral); added `contracts` + `featherkey-core` to §5.2; two-domain writer split rewrite (§5.5 r1, §5.4); doc-fidelity fixes — BR-37 into `accessibility-adapter` §5.1, BR-38 marked structural, BR-62 secure-store/platform-services split (§5.1/§5.2/§15). Supports IMPLEMENTATION_PLAN.md Wave 0.5. |
 
 > **Purpose & relationship to the BRD.** The BRD defines *what* and *why* (business requirements BR-1…BR-67, objectives OBJ-1…9, problems P-1…10). **This document defines *how*** — the concrete technologies, architecture, module decomposition, and engineering practices we will use to satisfy those requirements. The BRD is the **source of truth**: where this document and the BRD conflict, the BRD wins and this document must be corrected (or the BRD explicitly revised). Every significant choice here traces back to one or more BR IDs.
 >
@@ -846,7 +846,7 @@ The technical backbone of the "verifiable privacy" promise:
 **Alternatives:** Ship full bidi unconditionally at MVP (spends the hardest i18n budget on a maybe-language; violates principle precedence §1.1); drop RTL from the port (forces a breaking change if an RTL language is later added).
 **Consequences:** Scopes Wave-1 `layout-engine` finalize to LTR + number/symbol/punctuation (BR-47); complex-script depth (BR-54) stays v2+. Trigger: resolution of §16 Q2 / BRD §18.
 
-> **ADR status:** ADR-1/2/3 are **ratified** (sponsor-approved). ADR-4–11 and **ADR-12–16** are **proposed** — recorded here with rationale for engineering review, pending sponsor ratification; each can be revisited with data before implementation locks it in.
+> **ADR status:** ADR-1/2/3 and **ADR-12–16** are **ratified** (sponsor-approved). ADR-4–11 are **proposed defaults** — recorded here with rationale for engineering review; each can be revisited with data before implementation locks it in.
 
 ---
 
