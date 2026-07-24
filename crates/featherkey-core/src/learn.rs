@@ -15,6 +15,7 @@
 use featherkey_contracts::{SecureStore, SensitiveContextSource};
 use featherkey_kernel::KeyId;
 use featherkey_personalization::Personalization;
+use featherkey_touch_model::TouchModel;
 
 use crate::error::FeatherKeyError;
 use crate::FeatherKeyCore;
@@ -69,23 +70,27 @@ impl FeatherKeyCore {
         self.personalization.frequency(word)
     }
 
-    /// Encrypt and persist the learned vocabulary through the `SecureStore` port
-    /// (the `secure-store` adapter at the composition root).
+    /// Encrypt and persist all learned state — the vocabulary *and* the per-user
+    /// tap-geometry model — through the `SecureStore` port (the `secure-store`
+    /// adapter at the composition root), so both survive across sessions.
     ///
     /// # Errors
     /// [`FeatherKeyError::Store`] if the backend or crypto layer fails.
     pub fn persist(&self, store: &impl SecureStore) -> Result<(), FeatherKeyError> {
         self.personalization.persist(store)?;
+        self.touch_model.persist(store)?;
         Ok(())
     }
 
-    /// Reload the learned vocabulary from the `SecureStore`, replacing the
-    /// in-memory model. An absent blob restores an empty model (first run).
+    /// Reload all learned state — vocabulary and tap model — from the
+    /// `SecureStore`, replacing the in-memory models. An absent blob restores an
+    /// empty/unbiased model (first run).
     ///
     /// # Errors
     /// [`FeatherKeyError::Store`] if the backend or crypto layer fails.
     pub fn restore(&mut self, store: &impl SecureStore) -> Result<(), FeatherKeyError> {
         self.personalization = Personalization::load(store)?;
+        self.touch_model = TouchModel::load(store)?;
         Ok(())
     }
 }

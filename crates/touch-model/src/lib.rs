@@ -4,9 +4,17 @@
 //! This crate owns **one** thing: the incremental learning of where a given
 //! user actually taps relative to each key's centre. `input-decoder` reads an
 //! immutable snapshot of this model to bias its geometry (ADR-15); it never
-//! mutates it. Nothing here performs I/O, crypto, or persistence — that is
-//! `secure-store`'s job (SEDD §5.4). The model is a pure, deterministic
-//! function of the sequence of observations fed to it.
+//! mutates it. The model is a pure, deterministic function of the sequence of
+//! observations fed to it.
+//!
+//! Like `personalization`, it owns the byte **codec** for its own learned
+//! state and persists it as one atomic blob under [`Namespace::TouchModel`]
+//! (the sole writer of that namespace, ADR-14) through the injected
+//! [`SecureStore`] port — the actual encryption and I/O live in `secure-store`
+//! (SEDD §5.4, ADR-12 Dependency Rule). It depends on the *trait*, never the
+//! adapter, so the composition root injects the concrete store. Persisting the
+//! tap model is what lets a user's learned targeting survive across sessions
+//! rather than resetting each time the IME process is recreated.
 //!
 //! The learning rule is an **incremental running mean** of the per-key touch
 //! offset `(dx, dy)`. A fresh model is *unbiased*: every key's offset is
@@ -18,7 +26,14 @@
 
 use std::collections::HashMap;
 
+use featherkey_contracts::{Namespace, SecureStore, StoreError};
 use featherkey_kernel::KeyId;
+
+mod codec;
+
+/// Storage key for the model's single blob under [`Namespace::TouchModel`].
+/// Versioned so a future encoding change is detected rather than mis-parsed.
+const BLOB_KEY: &[u8] = b"v1";
 
 /// Why an observation was rejected. Errors are values, never panics on the hot
 /// path (SEDD §5.5 rule 3): a bad sample is dropped and reported, it never
@@ -50,7 +65,7 @@ impl std::error::Error for TouchModelError {}
 /// Kept private: callers observe and read through [`TouchModel`], never a bare
 /// per-key accumulator. `count` is `u64` and saturates, so even an unbounded
 /// stream of taps can never overflow or panic (BR-46).
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 struct Mean {
     dx: f32,
     dy: f32,
@@ -156,6 +171,90 @@ impl TouchModel {
     #[must_use]
     pub fn observations(&self, key: KeyId) -> u64 {
         self.means.get(&key).map_or(0, |m| m.count)
+    }
+
+    /// Encrypt-and-store the whole model — every key's learned mean offset and
+    /// its observation count — as one atomic blob under [`Namespace::TouchModel`]
+    /// through the injected store. A single [`put`](SecureStore::put) means a
+    /// failure can never leave a partially-written model. This crate is the sole
+    /// writer of that namespace (ADR-14).
+    ///
+    /// # Errors
+    /// Propagates any [`StoreError`] from the underlying store.
+    pub fn persist(&self, store: &impl SecureStore) -> Result<(), StoreError> {
+        let blob = codec::encode(&self.means);
+        store.put(Namespace::TouchModel, BLOB_KEY, &blob)
+    }
+
+    /// Load a model previously written by [`persist`](TouchModel::persist).
+    /// A namespace with no stored blob loads as an unbiased model (first run),
+    /// so this never fails merely because the user has not typed yet.
+    ///
+    /// # Errors
+    /// The store's [`StoreError`] on a backend/crypto failure, or
+    /// [`StoreError::Backend`] if the stored blob is corrupt (not valid UTF-8 or
+    /// not in the expected encoding).
+    pub fn load(store: &impl SecureStore) -> Result<Self, StoreError> {
+        let means = match store.get(Namespace::TouchModel, BLOB_KEY)? {
+            Some(bytes) => codec::decode(&bytes)?,
+            None => HashMap::new(),
+        };
+        Ok(Self { means })
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod persistence_tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::collections::HashMap as Map;
+
+    /// A minimal in-memory `SecureStore` for exercising persist/load without the
+    /// real encrypted redb adapter.
+    #[derive(Default)]
+    struct MemStore {
+        data: RefCell<Map<(String, Vec<u8>), Vec<u8>>>,
+    }
+    impl SecureStore for MemStore {
+        fn put(&self, ns: Namespace, key: &[u8], val: &[u8]) -> Result<(), StoreError> {
+            self.data
+                .borrow_mut()
+                .insert((ns.as_str().to_owned(), key.to_vec()), val.to_vec());
+            Ok(())
+        }
+        fn get(&self, ns: Namespace, key: &[u8]) -> Result<Option<Vec<u8>>, StoreError> {
+            Ok(self
+                .data
+                .borrow()
+                .get(&(ns.as_str().to_owned(), key.to_vec()))
+                .cloned())
+        }
+    }
+
+    #[test]
+    fn learned_offsets_survive_persist_then_load() {
+        let store = MemStore::default();
+        let mut m = TouchModel::unbiased();
+        for _ in 0..10 {
+            m.observe(KeyId('t'), 3.0, -1.0).unwrap();
+        }
+        m.observe(KeyId('y'), -2.0, 0.5).unwrap();
+        m.persist(&store).unwrap();
+
+        // A fresh model that reloads reproduces the learned bias exactly.
+        let loaded = TouchModel::load(&store).unwrap();
+        assert_eq!(loaded.offset(KeyId('t')), m.offset(KeyId('t')));
+        assert_eq!(loaded.observations(KeyId('t')), 10);
+        assert_eq!(loaded.offset(KeyId('y')), (-2.0, 0.5));
+        assert_eq!(loaded.observations(KeyId('y')), 1);
+    }
+
+    #[test]
+    fn an_absent_blob_loads_an_unbiased_model() {
+        let store = MemStore::default();
+        let loaded = TouchModel::load(&store).unwrap();
+        assert!(loaded.is_unbiased());
     }
 }
 
