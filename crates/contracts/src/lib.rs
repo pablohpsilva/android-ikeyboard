@@ -16,6 +16,7 @@
 
 extern crate alloc;
 
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
@@ -102,6 +103,65 @@ pub trait Clock {
     fn now_millis(&self) -> u64;
 }
 
+/// The textual context around the token the user is typing: the text already
+/// committed before it (for next-word/n-gram scoring and capitalization) and the
+/// in-progress `prefix` being completed. Language handling is internal to the
+/// implementation, so this port stays language-agnostic.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TypingContext {
+    /// Committed text immediately before the current token.
+    pub preceding: String,
+    /// The in-progress token being typed (may be empty at a word boundary).
+    pub prefix: String,
+}
+
+/// One ranked suggestion: a candidate word and an opaque score (higher is
+/// better; the scale is the producer's private business).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Suggestion {
+    pub word: String,
+    pub score: u32,
+}
+
+/// Ranked suggestions, best first.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Suggestions {
+    pub items: Vec<Suggestion>,
+}
+
+/// Driving port: completions / next-word predictions for the current context
+/// (SEDD §5.4). Statistical at MVP, neural behind the *same* trait in v1.x, so
+/// callers never change when the engine is swapped (ADR-3).
+pub trait Predictor {
+    fn suggest(&self, ctx: &TypingContext) -> Suggestions;
+}
+
+/// A single typed token considered for correction.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Token {
+    pub text: String,
+}
+
+/// The outcome of an autocorrect decision. `applied` is `false` when the token
+/// was left unchanged — an exact/whitelisted word is never clobbered (BR-12).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Correction {
+    /// The word to commit (equal to the input when `applied` is false).
+    pub primary: String,
+    /// Other plausible words the user may pick instead.
+    pub alternatives: Vec<String>,
+    /// Whether the primary differs from the typed token.
+    pub applied: bool,
+}
+
+/// Driving port: decide whether/how to correct a token (SEDD §5.4). It MUST
+/// never replace a word the user clearly intended — an exact dictionary match or
+/// a whitelisted word is returned unchanged with `applied == false` (BR-12, the
+/// no-clobber rule, verified by a property test in the `autocorrect` crate).
+pub trait AutoCorrect {
+    fn correct(&self, token: &Token, ctx: &TypingContext) -> Correction;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,5 +233,113 @@ mod tests {
         assert_eq!(store.get(Namespace::UserDict, b"k"), Ok(None));
         assert!(!NotSensitive.is_sensitive());
         assert_eq!(FixedClock(42).now_millis(), 42);
+    }
+
+    // Stub prediction/autocorrect adapters prove the Wave-3 port shapes are
+    // implementable and their value types compose.
+    struct EchoPredictor;
+    impl Predictor for EchoPredictor {
+        fn suggest(&self, ctx: &TypingContext) -> Suggestions {
+            Suggestions {
+                items: alloc::vec![Suggestion {
+                    word: ctx.prefix.clone(),
+                    score: 1
+                }],
+            }
+        }
+    }
+
+    struct NoClobber;
+    impl AutoCorrect for NoClobber {
+        fn correct(&self, token: &Token, _ctx: &TypingContext) -> Correction {
+            Correction {
+                primary: token.text.clone(),
+                alternatives: Vec::new(),
+                applied: false,
+            }
+        }
+    }
+
+    #[test]
+    fn prediction_and_autocorrect_ports_compose() {
+        let ctx = TypingContext {
+            preceding: String::new(),
+            prefix: alloc::string::String::from("he"),
+        };
+        let s = EchoPredictor.suggest(&ctx);
+        assert_eq!(s.items.len(), 1);
+        assert_eq!(s.items[0].word, "he");
+        assert_eq!(s.items[0].score, 1);
+
+        let token = Token {
+            text: alloc::string::String::from("cat"),
+        };
+        let c = NoClobber.correct(&token, &ctx);
+        assert_eq!(c.primary, "cat");
+        assert!(!c.applied);
+        assert!(c.alternatives.is_empty());
+        // Default TypingContext / Suggestions are usable.
+        assert_eq!(TypingContext::default().prefix, "");
+        assert!(Suggestions::default().items.is_empty());
+    }
+
+    #[test]
+    fn wave3_value_types_derive_expected_behaviour() {
+        // Exercise Clone + PartialEq (== and !=) + Debug on every Wave-3 value
+        // type so the derived surface consumers rely on is actually covered.
+        let ctx = TypingContext {
+            preceding: String::from("a"),
+            prefix: String::from("b"),
+        };
+        assert_eq!(ctx, ctx.clone());
+        assert_ne!(ctx, TypingContext::default());
+
+        let sug = Suggestion {
+            word: String::from("hi"),
+            score: 3,
+        };
+        assert_eq!(sug, sug.clone());
+        assert_ne!(
+            sug,
+            Suggestion {
+                word: String::from("hi"),
+                score: 4
+            }
+        );
+
+        let sugs = Suggestions {
+            items: alloc::vec![sug.clone()],
+        };
+        assert_eq!(sugs, sugs.clone());
+        assert_ne!(sugs, Suggestions::default());
+
+        let tok = Token {
+            text: String::from("x"),
+        };
+        assert_eq!(tok, tok.clone());
+        assert_ne!(
+            tok,
+            Token {
+                text: String::from("y")
+            }
+        );
+
+        let cor = Correction {
+            primary: String::from("x"),
+            alternatives: alloc::vec![String::from("y")],
+            applied: true,
+        };
+        assert_eq!(cor, cor.clone());
+        assert_ne!(
+            cor,
+            Correction {
+                primary: String::from("x"),
+                alternatives: Vec::new(),
+                applied: true
+            }
+        );
+
+        // Debug is usable on every type (non-empty, no panic).
+        assert!(!alloc::format!("{ctx:?}{sug:?}{sugs:?}{tok:?}{cor:?}").is_empty());
     }
 }
