@@ -147,7 +147,13 @@ class KeyboardView @JvmOverloads constructor(
     private enum class Sp { SHIFT, BACKSPACE, ENTER, SPACE, GLOBE, MIC, TO_NUMBERS, TO_SYMBOLS, TO_ALPHA }
 
     private sealed class Cell(val rect: RectF) {
-        class Letter(rect: RectF, val label: String, val lx: Float, val ly: Float) : Cell(rect)
+        /** [lx],[ly] = key centre and [lw],[lh] = key size, all in logical space,
+         *  so a finger's pixel offset within [rect] can be mapped back to a
+         *  logical touch point for the core's adaptive tap model. */
+        class Letter(
+            rect: RectF, val label: String,
+            val lx: Float, val ly: Float, val lw: Float, val lh: Float,
+        ) : Cell(rect)
         class Char(rect: RectF, val label: String) : Cell(rect)
         class Special(rect: RectF, val kind: Sp) : Cell(rect)
         class Suggest(rect: RectF, val index: Int) : Cell(rect)
@@ -189,7 +195,7 @@ class KeyboardView @JvmOverloads constructor(
                 val r = RectF(x, kt, x + baseKeyW, kb)
                 out += if (decodeKeys != null) {
                     val k = decodeKeys[i]
-                    Cell.Letter(r, k.label, k.x + k.width / 2f, k.y + k.height / 2f)
+                    Cell.Letter(r, k.label, k.x + k.width / 2f, k.y + k.height / 2f, k.width, k.height)
                 } else Cell.Char(r, labels[i])
                 x += baseKeyW + keyGap
             }
@@ -217,7 +223,8 @@ class KeyboardView @JvmOverloads constructor(
                 for (i in 0 until n) {
                     val r = RectF(x, kt, x + baseKeyW, kb)
                     out += if (decodeKeys != null) {
-                        val k = decodeKeys[i]; Cell.Letter(r, k.label, k.x + k.width / 2f, k.y + k.height / 2f)
+                        val k = decodeKeys[i]
+                        Cell.Letter(r, k.label, k.x + k.width / 2f, k.y + k.height / 2f, k.width, k.height)
                     } else Cell.Char(r, middleLabels[i])
                     x += baseKeyW + keyGap
                 }
@@ -319,6 +326,32 @@ class KeyboardView @JvmOverloads constructor(
             for (i in 1 until trail.size) path.lineTo(trail[i].x, trail[i].y)
             canvas.drawPath(path, trailPaint)
         }
+    }
+
+    /**
+     * The finger's pixel x, mapped to a logical-space point by piecewise-linear
+     * interpolation across [cell]'s letter row (through each key's logical
+     * centre), extrapolating past the end keys. This keeps the map continuous
+     * across key boundaries — a touch between two keys resolves to a logical
+     * point between their centres — so the core's adaptive tap model can decide
+     * the winner. The logical y is the row's, since taps rarely cross rows.
+     */
+    private fun logicalTouch(cell: Cell.Letter, tx: Float): PointF {
+        val row = cells.asSequence()
+            .filterIsInstance<Cell.Letter>()
+            .filter { kotlin.math.abs(it.rect.top - cell.rect.top) < 1f }
+            .sortedBy { it.rect.centerX() }
+            .toList()
+        if (row.size < 2) {
+            val sx = if (cell.rect.width() > 0f) cell.lw / cell.rect.width() else 1f
+            return PointF(cell.lx + (tx - cell.rect.centerX()) * sx, cell.ly)
+        }
+        var i = 0
+        while (i < row.size - 2 && tx >= row[i + 1].rect.centerX()) i++
+        val lo = row[i]; val hi = row[i + 1]
+        val cxLo = lo.rect.centerX(); val cxHi = hi.rect.centerX()
+        val t = if (cxHi != cxLo) (tx - cxLo) / (cxHi - cxLo) else 0f
+        return PointF(lo.lx + t * (hi.lx - lo.lx), cell.ly)
     }
 
     private fun letterCenters(): Map<Char, PointF> {
@@ -433,7 +466,7 @@ class KeyboardView @JvmOverloads constructor(
                 } else {
                     gestureCell = null
                     pressed = hit; invalidate()
-                    if (hit != null) fire(hit)
+                    if (hit != null) fire(hit, event.x, event.y)
                 }
                 return true
             }
@@ -455,7 +488,10 @@ class KeyboardView @JvmOverloads constructor(
                     if (gesturing && trail.size >= 3) {
                         onGesture?.invoke(ArrayList(trail), letterCenters())
                     } else {
-                        fire(g) // it was a tap after all
+                        // A tap after all: report the finger-down point so the
+                        // core can learn this user's offset for the key.
+                        val down = trail.firstOrNull()
+                        fire(g, down?.x ?: g.rect.centerX(), down?.y ?: g.rect.centerY())
                     }
                 }
                 resetGesture()
@@ -475,9 +511,18 @@ class KeyboardView @JvmOverloads constructor(
         invalidate()
     }
 
-    private fun fire(cell: Cell) {
+    private fun fire(cell: Cell, tx: Float, ty: Float) {
         when (cell) {
-            is Cell.Letter -> onKeyTouch?.invoke(cell.lx, cell.ly)
+            is Cell.Letter -> {
+                // Map the finger to a *continuous* point in the core's logical
+                // space so decode — not this pixel hit-test — picks the key. A
+                // finger between two keys lands between their logical centres, so
+                // the per-user tap model can pull a borderline touch to the key
+                // the user meant. (A within-key mapping would snap to this key and
+                // make the model inert.)
+                val p = logicalTouch(cell, tx)
+                onKeyTouch?.invoke(p.x, p.y)
+            }
             is Cell.Char -> onCharKey?.invoke(cell.label)
             is Cell.Suggest -> onSuggestion?.invoke(cell.index)
             is Cell.Special -> when (cell.kind) {

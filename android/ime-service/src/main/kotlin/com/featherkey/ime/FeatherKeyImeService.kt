@@ -71,6 +71,8 @@ class FeatherKeyImeService : InputMethodService() {
     @Volatile private var vocab: Vocabulary = Vocabulary.empty()
     /** On-device usage learning that biases ranking toward the user's own words. */
     private lateinit var usage: UsageModel
+    /** Logical-space centre of each letter key, for computing tap offsets to learn. */
+    @Volatile private var keyCenters: Map<Char, PointF> = emptyMap()
     /** The learning-consent toggle (BR-22); learning is off until opted in. */
     @Volatile private var learningEnabled = false
 
@@ -170,17 +172,37 @@ class FeatherKeyImeService : InputMethodService() {
         runCatching {
             bridge.layoutKeys().map { RenderKey(it.label, it.x, it.y, it.width, it.height) }
         }.getOrDefault(emptyList())
+            .also { keys ->
+                keyCenters = keys.filter { it.label.length == 1 }
+                    .associate { it.label.first().lowercaseChar() to PointF(it.x + it.width / 2f, it.y + it.height / 2f) }
+            }
 
     /** A letter touch, already mapped to the Rust layout's logical space. */
     private fun handleTouch(x: Float, y: Float) {
         val ic = currentInputConnection ?: return
         val decoded = runCatching { bridge.decode(x, y).best }.getOrNull() ?: return
+        observeTap(decoded, x, y)
         val kb = keyboard
         val ch = if (kb?.shifted == true) decoded.uppercase() else decoded
         pending.append(ch)
         ic.commitText(ch, 1)
         if (kb?.shifted == true) kb.shifted = false
         updateSuggestions()
+    }
+
+    /**
+     * Teach the core's adaptive tap model where this user actually landed
+     * relative to the key the decoder chose: the running-mean offset lets future
+     * decodes correct for a systematic finger bias (BR-7). Same gates as
+     * [learnWord] — consent (BR-22) and field sensitivity (E-2/BR-26) — so
+     * password/secure fields never feed the model. The core update is O(1) and
+     * allocation-free (BR-46), so it is safe on the input path.
+     */
+    private fun observeTap(decoded: String, x: Float, y: Float) {
+        if (field.isSensitive() || !learningEnabled) return
+        val ch = decoded.firstOrNull()?.lowercaseChar() ?: return
+        val center = keyCenters[ch] ?: return
+        runCatching { bridge.observeTap(ch.toString(), x - center.x, y - center.y, field) }
     }
 
     private fun handleFunction(fk: FunctionKey) {
