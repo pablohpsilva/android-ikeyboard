@@ -1,0 +1,5 @@
+# UniFFI binding configuration (Wave 5 overlay). Authored, not verified.
+[bindings.kotlin]
+package_name = "com.featherkey.ffi.generated"
+# Keep generated types out of the hand-written bridge package so the wrapper in
+# ffi-bridge/src/main/kotlin/com/featherkey/ffi can re-export a curated surface.

@@ -1,14 +1,10 @@
-// UniFFI interface for the Kotlin <-> Rust seam (SEDD §5.1 ffi-bridge, ADR-2).
+// SUPERSEDED (Wave 5, ADR-18).
 //
-// This UDL is the single, narrow contract the shell may call. It mirrors the
-// Rust `InputDecoder` trait (crates/input-decoder) but flattened to FFI-safe
-// value types. The Rust FFI facade that implements it (a thin `featherkey-ffi`
-// crate wrapping the core) is added when the Android build is wired up.
-
-namespace featherkey {
-  // Decode a touch at surface coordinates against the active layout,
-  // returning the character the editor should commit, or null if the touch
-  // resolved to no key. Pure and read-only: no learning, no persistence,
-  // no crypto on this path (SEDD §5.4 boundary invariants).
-  string? decode_touch(f32 x, f32 y);
-};
+// The Wave-0 tracer used a single UDL function `decode_touch`. The full core
+// surface is now exported with **proc-macro UniFFI** directly on
+// `featherkey-core` (see android/ffi-bridge/rust-overlay/ffi.rs and APPLY.md),
+// not via a UDL. There is no `.udl` to compile: `uniffi::setup_scaffolding!()`
+// plus `#[derive(uniffi::Object/Record/Error)]` generate the bindings.
+//
+// This file is retained only as a historical marker; it is not referenced by
+// any build script. Delete it once the proc-macro export is merged and building.

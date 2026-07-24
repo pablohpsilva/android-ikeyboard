@@ -6,6 +6,7 @@
 
 mod direction;
 mod kind;
+mod qwerty;
 mod standard;
 
 pub use direction::Direction;

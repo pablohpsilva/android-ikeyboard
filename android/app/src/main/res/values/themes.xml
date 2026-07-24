@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose supplies its own Material3 theming; this app theme only needs a
+         sane window baseline. -->
+    <style name="Theme.FeatherKey" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

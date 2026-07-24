@@ -241,3 +241,28 @@ fn tap_observation_rejects_non_finite_offsets() {
         Err(FeatherKeyError::TouchModel)
     );
 }
+
+// ---- Layout geometry for rendering ---------------------------------------
+
+#[test]
+fn layout_keys_expose_the_active_page_and_pages_switch() {
+    let mut fk = core();
+    // Default alpha page is the full 26-letter QWERTY block.
+    let alpha = fk.layout_keys();
+    assert_eq!(alpha.len(), 26);
+    let q = alpha.iter().find(|k| k.label == "q").expect("q present");
+    assert_eq!(q.x, 0.0);
+    assert_eq!(q.width, 100.0);
+    assert!(alpha.iter().any(|k| k.label == "m"));
+
+    fk.use_numeric_layout();
+    let num = fk.layout_keys();
+    assert_eq!(num.len(), 10);
+    assert!(num.iter().any(|k| k.label == "1"));
+
+    fk.use_symbols_layout();
+    assert!(fk.layout_keys().iter().any(|k| k.label == "."));
+
+    fk.use_alpha_layout();
+    assert_eq!(fk.layout_keys().len(), 26);
+}

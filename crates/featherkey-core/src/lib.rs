@@ -30,6 +30,12 @@ mod correct;
 mod error;
 mod learn;
 
+#[cfg(feature = "uniffi")]
+mod ffi;
+
+#[cfg(feature = "uniffi")]
+uniffi::setup_scaffolding!();
+
 pub use crate::error::FeatherKeyError;
 
 // Re-exported so the shell depends only on this façade, never on the internal
@@ -71,6 +77,19 @@ pub struct DecodeResult {
     pub candidates: Vec<KeyCandidate>,
 }
 
+/// One key of the active layout, in the layout's logical coordinate space — the
+/// shell renders each `label` at `(x, y, width, height)` and reports touches back
+/// in the same space, so what is drawn is exactly what the core decodes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayoutKey {
+    /// The character the key commits (e.g. `"q"`, `"1"`, `"."`).
+    pub label: String,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
 /// The composed core handle. Owns the single source of truth for learned and
 /// language state; the derived read engines (predictor, corrector, locale
 /// manager) are rebuilt on demand from it so there is no cache to fall stale.
@@ -87,8 +106,9 @@ pub struct FeatherKeyCore {
 
 impl FeatherKeyCore {
     /// Assemble a core over one or more active languages, each a `(tag, words)`
-    /// pair whose `words` are a non-decreasing sorted set. The alpha tracer
-    /// layout is active by default; switch pages with [`Self::set_layout`].
+    /// pair whose `words` are a non-decreasing sorted set. The full QWERTY alpha
+    /// page is active by default; switch pages with [`Self::use_numeric_layout`]
+    /// / [`Self::use_symbols_layout`] / [`Self::use_alpha_layout`].
     ///
     /// # Errors
     /// - [`FeatherKeyError::NoLanguages`] if `languages` is empty.
@@ -97,7 +117,7 @@ impl FeatherKeyCore {
     pub fn new(languages: Vec<(String, Vec<String>)>) -> Result<Self, FeatherKeyError> {
         let packs = build_packs(languages)?;
         Ok(Self {
-            layout: Layout::qwerty_tracer_row(),
+            layout: Layout::qwerty(),
             decoder: NearestKeyDecoder::new(),
             touch_model: TouchModel::default(),
             personalization: Personalization::new(),
@@ -133,6 +153,39 @@ impl FeatherKeyCore {
     /// custom [`Layout`]). The composition root owns which page is live.
     pub fn set_layout(&mut self, layout: Layout) {
         self.layout = layout;
+    }
+
+    /// Switch to the QWERTY letter page (the default).
+    pub fn use_alpha_layout(&mut self) {
+        self.layout = Layout::qwerty();
+    }
+
+    /// Switch to the numeric page.
+    pub fn use_numeric_layout(&mut self) {
+        self.layout = Layout::numeric();
+    }
+
+    /// Switch to the symbols page.
+    pub fn use_symbols_layout(&mut self) {
+        self.layout = Layout::symbols();
+    }
+
+    /// The keys of the active layout, in the layout's logical coordinate space,
+    /// for the shell to render (ARCH §9.1). What the shell draws from this is
+    /// exactly what [`Self::decode`] resolves against.
+    #[must_use]
+    pub fn layout_keys(&self) -> Vec<LayoutKey> {
+        self.layout
+            .keys()
+            .iter()
+            .map(|k| LayoutKey {
+                label: k.id.ch().to_string(),
+                x: k.x,
+                y: k.y,
+                width: k.width,
+                height: k.height,
+            })
+            .collect()
     }
 
     /// Decode a touch at surface-local pixel `(x, y)` into ranked candidates

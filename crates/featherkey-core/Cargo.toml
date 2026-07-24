@@ -10,7 +10,20 @@ description = "Composition façade: wires the core crates behind the contracts p
 [package.metadata.featherkey]
 layer = "composition"
 
+[lib]
+crate-type = ["lib", "cdylib"]
+
+[features]
+uniffi = ["dep:uniffi", "dep:thiserror"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+required-features = ["uniffi"]
+
 [dependencies]
+uniffi = { version = "0.28", features = ["cli"], optional = true }
+thiserror = { version = "2", optional = true }
 featherkey-kernel = { path = "../kernel" }
 featherkey-contracts = { path = "../contracts" }
 featherkey-layout-engine = { path = "../layout-engine" }
@@ -24,8 +37,14 @@ featherkey-personalization = { path = "../personalization" }
 featherkey-sensitive-context = { path = "../sensitive-context" }
 featherkey-secure-store = { path = "../secure-store" }
 
-[lints]
-workspace = true
+[lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
 
 [dev-dependencies]
 proptest = "1.11.0"

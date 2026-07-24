@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FeatherKey</string>
+    <string name="settings_title">FeatherKey settings</string>
+    <string name="subtype_en">English</string>
+    <string name="consent_title">Your typing stays on this device</string>
+    <string name="consent_body">FeatherKey learns your words on-device to improve suggestions. Nothing you type is ever sent off your phone. Password and secure fields are never learned. You can review or clear what it has learned any time.</string>
+    <string name="consent_enable_learning">Let FeatherKey learn from my typing</string>
+    <string name="consent_continue">Continue</string>
+    <string name="settings_learning">On-device learning</string>
+    <string name="settings_clear">Clear learned data</string>
+</resources>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Input-method metadata. `supportsSwitchingToNextInputMethod` lets the user hop
+  keyboards from the space bar; the subtype declares the (single, MVP) locale.
+  Real builds enumerate a subtype per active language.
+-->
+<input-method xmlns:android="http://schemas.android.com/apk/res/android"
+    android:settingsActivity="com.featherkey.settings.SettingsActivity"
+    android:supportsSwitchingToNextInputMethod="true">
+    <subtype
+        android:name="@string/subtype_en"
+        android:imeSubtypeLocale="en_US"
+        android:imeSubtypeMode="keyboard" />
+</input-method>
