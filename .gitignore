@@ -1,0 +1,20 @@
+# Rust
+/target
+**/*.rs.bk
+# Workspace of libraries; an app crate that needs a pinned lock re-adds it.
+Cargo.lock
+
+# Android / Gradle
+android/.gradle/
+android/build/
+android/**/build/
+android/local.properties
+*.iml
+.idea/
+
+# Python fitness tooling
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store

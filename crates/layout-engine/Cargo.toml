@@ -1,0 +1,13 @@
+[package]
+name = "featherkey-layout-engine"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Key layouts and geometry: rectangles, centers, hit regions. Data, no I/O."
+
+[dependencies]
+featherkey-kernel = { path = "../kernel" }
+
+[lints]
+workspace = true

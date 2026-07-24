@@ -1,0 +1,34 @@
+# FeatherKey — Rust core workspace.
+#
+# The full module map lives in SOFTWARE_ENGINEERING.md §5.2. Crates are added to
+# this workspace as they are implemented (TDD-first). The initial walking
+# skeleton contains only the crates exercised by the keystroke tracer bullet:
+#   kernel         — shared value objects + error types (no logic, no deps)
+#   layout-engine  — key layouts & geometry
+#   input-decoder  — touch coordinates -> intended key + candidates (accuracy engine)
+#
+# Architecture rules (ARCHITECTURE.md §5, §6) are enforced by tools/fitness and CI.
+[workspace]
+resolver = "2"
+members = [
+    "crates/kernel",
+    "crates/layout-engine",
+    "crates/input-decoder",
+]
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0 OR MIT"
+rust-version = "1.85"
+
+# Deny-by-default lints for every crate in the workspace. The core is panic-averse
+# (SEDD §5.5 rule 3: "errors are values, not panics"); unwrap/expect in library code
+# is a lint, not a convention.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
