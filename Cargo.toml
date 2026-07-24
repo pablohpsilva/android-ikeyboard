@@ -25,6 +25,8 @@ members = [
     "crates/crash-guard",
     "crates/personalization",
     "crates/locale-manager",
+    "crates/prediction",
+    "crates/autocorrect",
 ]
 
 [workspace.package]

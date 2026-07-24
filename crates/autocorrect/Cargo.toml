@@ -1,0 +1,20 @@
+[package]
+name = "featherkey-autocorrect"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Correction candidates with a no-clobber policy; implements the AutoCorrect port."
+
+[package.metadata.featherkey]
+layer = "domain"
+
+[dependencies]
+featherkey-contracts = { path = "../contracts" }
+featherkey-dictionary = { path = "../dictionary" }
+featherkey-personalization = { path = "../personalization" }
+featherkey-locale-manager = { path = "../locale-manager" }
+
+[lints]
+workspace = true

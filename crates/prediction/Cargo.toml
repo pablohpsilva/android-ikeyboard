@@ -1,0 +1,19 @@
+[package]
+name = "featherkey-prediction"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Autocomplete and next-word prediction; implements the Predictor port (statistical n-gram at MVP)."
+
+[package.metadata.featherkey]
+layer = "domain"
+
+[dependencies]
+featherkey-contracts = { path = "../contracts" }
+featherkey-dictionary = { path = "../dictionary" }
+featherkey-locale-manager = { path = "../locale-manager" }
+
+[lints]
+workspace = true
