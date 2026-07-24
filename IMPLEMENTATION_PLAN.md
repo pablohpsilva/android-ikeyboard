@@ -182,34 +182,34 @@ Ratify **D-1…D-5**; land **E-1** (dependency-rule fitness) and **E-3** (`cargo
 ### Wave 1 — kernel-only leaves (fan out in parallel)
 Each depends only on `kernel` (+ `contracts` from D-1), so all can be built concurrently, one worktree each.
 
-| Increment | Closes / advances | External crate | Notes |
+| Increment | Closes (MVP BRs only) | External crate | Notes (incl. deferred depth) |
 |---|---|---|---|
-| `layout-engine` **finalize** | BR-47 (**Must**), BR-51, BR-54, BR-53 (per D-5) | — | Wave 0 shipped only the tracer row. This closes real layouts: alpha + number/symbol/punctuation (BR-47), ergonomic/one-handed/split variants (BR-51), and complex-script readiness (BR-54). Depends only on `kernel`. |
+| `layout-engine` **finalize** | BR-47 (**Must**), BR-53 (**Must\***, per D-5) | — | Wave 0 shipped only the tracer row. Closes the MVP layouts: alpha + number/symbol/punctuation (BR-47) and RTL/bidi (BR-53, conditional per D-5). **Deferred depth:** ergonomic/one-handed/split (BR-51, v1.x), complex-script readiness (BR-54, v2+). Depends only on `kernel`. |
 | `dictionary` | BR-10, BR-12 | `fst` | Prefix/fuzzy lookup. Every predictive module reads it → must precede Wave 3. |
-| `secure-store` | BR-8, BR-23, BR-62(at-rest) | `redb`, `aes-gcm`, `hkdf`, `zeroize` | Implements the `SecureStore` port. Precedes personalization/clipboard. |
-| `touch-model` | BR-7(geometry), BR-46 | — | Tap-distribution model (per D-3). Feeds input-decoder finalize. |
+| `secure-store` | BR-8, BR-23, BR-62 (at-rest) | `redb`, `aes-gcm`, `hkdf`, `zeroize` | Implements the `SecureStore` port. Precedes personalization/clipboard. |
+| `touch-model` | BR-7 (geometry), BR-46 | — | Tap-distribution model (per D-3). Feeds input-decoder finalize. |
 | `sensitive-context` | BR-26 | — | The learn/predict gate. Writes the E-2 ordering contract. |
 | `smart-typing` | BR-48 | — | Auto-cap, smart punctuation. Independent. |
 | `editing` | BR-49 | `unicode-segmentation` | Cursor/selection ops. Independent. |
-| `diagnostics` | BR-60, BR-61 | — | Opt-in content-free ring buffer. Independent. |
-| `crash-guard` | BR-29/30/31 (core half) | — | Safe-mode/error-conversion host-testable now; FFI-seam/watchdog validated in Wave 5. |
+| `diagnostics` | BR-60 | — | Opt-in content-free ring buffer. **Deferred depth:** user-exportable history (BR-61, v1.x). Independent. |
+| `crash-guard` | BR-29, BR-30, BR-31 (core half) | — | Safe-mode/error-conversion host-testable now; FFI-seam/watchdog validated in Wave 5. |
 
 Sandbox-verifiable: **Yes** (network permitting — R-5).
 
 ### Wave 2 — one hop from Wave 1
-| Increment | Closes / advances | Depends on |
+| Increment | Closes (MVP BRs only) | Depends on / deferred depth |
 |---|---|---|
-| `personalization` | BR-7(vocab), BR-9, BR-13, BR-14, BR-57 | `secure-store` (port) |
-| `locale-manager` | BR-16, BR-17, BR-18, BR-19, BR-19a, BR-19b | `dictionary` (per D-2) |
+| `personalization` | BR-7 (vocab), BR-13 | `secure-store` (port). **Deferred depth (v1.x):** view/reset UI (BR-9), edit dictionary (BR-14), foreign-dict import (BR-57). |
+| `locale-manager` | BR-16, BR-17, BR-18, BR-19b | `dictionary` (per D-2). **Deferred depth:** language breadth (BR-19a v1.x, BR-19 v2+). |
 | `input-decoder` **finalize** | BR-6, BR-46 (+ BR-7 targeting) | `touch-model` — **scheduled break D-4** |
 
 Sandbox-verifiable: **Yes**.
 
 ### Wave 3 — the predictive layer
-| Increment | Closes / advances | Depends on |
+| Increment | Closes (MVP BRs only) | Depends on / deferred depth |
 |---|---|---|
-| `prediction` | BR-10 (competitive), BR-42 | `dictionary`, `locale-manager` (statistical n-gram; neural behind the `Predictor` port, v1.x) |
-| `autocorrect` | BR-12, BR-45, BR-18 | `dictionary`, `personalization` (whitelist), `locale-manager`. Must follow personalization so the no-clobber property test passes. |
+| `prediction` | BR-10 (competitive) | `dictionary`, `locale-manager` (statistical n-gram; neural behind the `Predictor` port, v1.x). **Deferred depth:** inline-prediction polish (BR-42, v1.x), neural quality (BR-11, v1.x). |
+| `autocorrect` | BR-12, BR-18 | `dictionary`, `personalization` (whitelist), `locale-manager`. Must follow personalization so the no-clobber property test passes. **Deferred depth:** alternative-word UI (BR-45, v1.x). |
 
 Sandbox-verifiable: **Yes**.
 
@@ -218,11 +218,13 @@ Sandbox-verifiable: **Yes**.
 
 ### Wave 5 — Android shell integration (NOT sandbox-buildable)
 Needs JDK/Gradle/Android SDK/NDK. Order within the wave: `ffi-bridge` → `ime-service`, `keyboard-view`, `platform-services` → `onboarding`, `settings-ui`, `accessibility-adapter`.
-Closes BR-1, BR-2, BR-29, BR-30, BR-31 (end-to-end), BR-32, BR-33, BR-34, BR-35, BR-36, BR-37, BR-44 (emoji, Could), BR-52 (haptics/sound), BR-55, BR-58, BR-62 (keys)/BR-63. **BR-22** (Must — plain-language consent visibility + withdrawal) is closed here by `settings-ui` + `onboarding`. Validated only once the `android-shell` CI job is live (§8).
+Closes (MVP BRs only): BR-1, BR-2, BR-29, BR-30, BR-31 (end-to-end), BR-32, BR-33, BR-34, BR-35, BR-55, BR-58, BR-62 (keys)/BR-63, and **BR-22** (Must — plain-language consent visibility + withdrawal, via `settings-ui` + `onboarding`). **Deferred depth on these shell modules:** theme customization (BR-36, v1.x), key-preview/long-press polish (BR-37, v1.x), emoji entry (BR-44, v2+), haptic/sound feedback (BR-52, v1.x), switch-access (BR-56, v1.x). Validated only once the `android-shell` CI job is live (§8).
 
-### Deferred (post-MVP — keep OUT of the MVP waves)
-- **v1.x:** `gesture` (BR-41), `clipboard-core` (BR-50), `neural-runtime` (BR-11), plus v1.x behaviors on MVP modules (personalization BR-9/14/57 depth; autocorrect BR-15; prediction BR-11/42; accessibility BR-56).
-- **v2+:** `dictation` (BR-43).
+### Deferred (post-MVP — keep OUT of the MVP waves; every BR here is v1.x/v2+ per SEDD §15)
+- **v1.x — new modules:** `gesture` (BR-41), `clipboard-core` (BR-50), `neural-runtime` (BR-11).
+- **v1.x — depth on MVP-built modules:** layout-engine ergonomic modes (BR-51); personalization BR-9/BR-14/BR-57; autocorrect alternatives (BR-15, BR-45); prediction inline polish (BR-42); diagnostics exportable history (BR-61); locale-manager BR-19a; shell BR-36/BR-37/BR-52/BR-56.
+- **v1.x — process/CI (owned in §7, scheduled v1.x):** reproducible build (BR-24), security review (BR-28), modularity-evolution (BR-39), disclosure policy (BR-64), supply-chain (BR-65), device-matrix perf (BR-3). *Note: E-3 lands `cargo-deny`/`audit` early as a cheap guardrail, but BR-65's formal completion is v1.x.*
+- **v2+:** `dictation` (BR-43); emoji (BR-44); complex-script depth (BR-54); language breadth (BR-19).
 
 ---
 
