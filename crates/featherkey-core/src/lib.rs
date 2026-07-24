@@ -106,9 +106,11 @@ pub struct FeatherKeyCore {
 
 impl FeatherKeyCore {
     /// Assemble a core over one or more active languages, each a `(tag, words)`
-    /// pair whose `words` are a non-decreasing sorted set. The full QWERTY alpha
-    /// page is active by default; switch pages with [`Self::use_numeric_layout`]
-    /// / [`Self::use_symbols_layout`] / [`Self::use_alpha_layout`].
+    /// pair whose `words` are a non-decreasing sorted set. The alpha page follows
+    /// the primary (first) language's script (`Layout::alpha_for`), so a Cyrillic
+    /// or Greek locale opens on a native block; switch pages with
+    /// [`Self::use_numeric_layout`] / [`Self::use_symbols_layout`] /
+    /// [`Self::use_alpha_layout`].
     ///
     /// # Errors
     /// - [`FeatherKeyError::NoLanguages`] if `languages` is empty.
@@ -116,8 +118,9 @@ impl FeatherKeyCore {
     /// - [`FeatherKeyError::Locale`] if two languages share a tag.
     pub fn new(languages: Vec<(String, Vec<String>)>) -> Result<Self, FeatherKeyError> {
         let packs = build_packs(languages)?;
+        let primary = primary_tag(&packs);
         Ok(Self {
-            layout: Layout::qwerty(),
+            layout: Layout::alpha_for(&primary),
             decoder: NearestKeyDecoder::new(),
             touch_model: TouchModel::default(),
             personalization: Personalization::new(),
@@ -137,6 +140,8 @@ impl FeatherKeyCore {
         languages: Vec<(String, Vec<String>)>,
     ) -> Result<(), FeatherKeyError> {
         self.packs = build_packs(languages)?;
+        // The alpha script follows the (new) primary language.
+        self.layout = Layout::alpha_for(&primary_tag(&self.packs));
         Ok(())
     }
 
@@ -155,9 +160,9 @@ impl FeatherKeyCore {
         self.layout = layout;
     }
 
-    /// Switch to the QWERTY letter page (the default).
+    /// Switch back to the alpha letter page for the primary active language.
     pub fn use_alpha_layout(&mut self) {
-        self.layout = Layout::qwerty();
+        self.layout = Layout::alpha_for(&primary_tag(&self.packs));
     }
 
     /// Switch to the numeric page.
@@ -244,4 +249,33 @@ fn build_packs(
     // `correct` rebuilds one on demand.
     LocaleManager::new(packs.clone())?;
     Ok(packs)
+}
+
+/// The primary (first) active language tag — the one whose script drives the
+/// alpha page. Falls back to `"en"` (QWERTY) when the set is empty, which the
+/// public API never produces (`build_packs` rejects an empty set).
+fn primary_tag(packs: &[(LangId, Dictionary)]) -> String {
+    packs
+        .first()
+        .map_or_else(|| "en".to_owned(), |(id, _)| id.as_str().to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn primary_tag_falls_back_to_en_on_an_empty_set() {
+        assert_eq!(primary_tag(&[]), "en");
+    }
+
+    #[test]
+    fn primary_tag_is_the_first_pack_in_preference_order() {
+        let core = FeatherKeyCore::new(vec![
+            ("ru".to_owned(), vec!["да".to_owned()]),
+            ("en".to_owned(), vec!["cat".to_owned()]),
+        ])
+        .expect("valid core");
+        assert_eq!(primary_tag(&core.packs), "ru");
+    }
 }

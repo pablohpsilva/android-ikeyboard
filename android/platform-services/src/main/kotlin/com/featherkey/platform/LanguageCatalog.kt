@@ -25,6 +25,11 @@ object LanguageCatalog {
         "fr" to "Français",
         "de" to "Deutsch",
         "it" to "Italiano",
+        // Non-Latin scripts: selectable and typeable (the Rust core swaps the alpha
+        // page to Cyrillic/Greek), but with no bundled word list yet — hasLexicon
+        // resolves false until `assets/lexicons/<tag>.txt` ships, so no predictions.
+        "ru" to "Русский",
+        "el" to "Ελληνικά",
     )
 
     /** All selectable languages; [KeyboardLanguage.hasLexicon] = a bundled asset exists. */
