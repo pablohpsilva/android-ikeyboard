@@ -414,7 +414,8 @@ class KeyboardView @JvmOverloads constructor(
 
     private fun drawShift(canvas: Canvas, r: RectF, c: Palette) {
         if (shifted) {
-            iconFill.color = c.accent
+            // Active: a solid arrow in the normal icon colour (not the accent).
+            iconFill.color = c.icon
             drawIcon(canvas, ICON_SHIFT, r, ICON_FRAC, iconFill)
         } else {
             iconPaint.color = c.icon; iconPaint.strokeWidth = dp(1.7f)
