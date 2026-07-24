@@ -38,6 +38,7 @@ import com.featherkey.keyboard.FunctionKey
 import com.featherkey.keyboard.KeyboardView
 import com.featherkey.keyboard.RenderKey
 import com.featherkey.onboarding.ConsentStore
+import com.featherkey.platform.DeviceDictionary
 import com.featherkey.platform.EditorInfoSensitivity
 import com.featherkey.platform.EmojiRecents
 import com.featherkey.platform.KeystoreKeyProvider
@@ -76,6 +77,13 @@ class FeatherKeyImeService : InputMethodService() {
     private var currentTags: List<String> = emptyList()
     /** Frequency-ranked vocabulary for suggestions + swipe (loaded off the input path). */
     @Volatile private var vocab: Vocabulary = Vocabulary.empty()
+    /**
+     * The device's own dictionary (Android TextServices) for the primary
+     * language — the base vocabulary for scripts we bundle no word list for
+     * (Russian, Greek, …). Its lookups are async; the callback refreshes the
+     * strip. Never queried in a sensitive field (E-2/BR-26).
+     */
+    private lateinit var deviceDict: DeviceDictionary
     /** On-device usage learning that biases ranking toward the user's own words. */
     private lateinit var usage: UsageModel
     /** On-device next-word (bigram) learning for context-aware prediction. */
@@ -94,6 +102,9 @@ class FeatherKeyImeService : InputMethodService() {
         currentTags = langPrefs.activeTags()
         usage = UsageModel(this).also { it.load() }
         bigrams = ContextModel(this).also { it.load() }
+        // The device dictionary's async lookups refresh the strip on completion.
+        deviceDict = DeviceDictionary(this) { keyboard?.post { updateSuggestions() } }
+        deviceDict.setPrimary(currentTags.firstOrNull() ?: "en")
         loadVocab(currentTags)
         ConsentStore(applicationContext).learningEnabled
             .onEach { learningEnabled = it }
@@ -136,6 +147,7 @@ class FeatherKeyImeService : InputMethodService() {
         if (tags != currentTags) {
             runCatching { bridge.setActiveLanguages(Lexicons.load(this, tags)) }
             currentTags = tags
+            deviceDict.setPrimary(tags.firstOrNull() ?: "en")
             loadVocab(tags)
             // The primary language may have changed the core's alpha script
             // (e.g. Latin → Cyrillic), so re-pull the rendered keys; renderKeys()
@@ -296,7 +308,7 @@ class FeatherKeyImeService : InputMethodService() {
      */
     private fun updateSuggestions() {
         val prefix = pending.toString().lowercase()
-        keyboard?.suggestions = when {
+        val base = when {
             prefix.isEmpty() -> lastWord?.let { bigrams.nextWords(it, 3) } ?: emptyList()
             // Taps in lockstep with the word: read them probabilistically against
             // the language model (fat-finger tolerant) instead of as hard keys.
@@ -306,6 +318,26 @@ class FeatherKeyImeService : InputMethodService() {
             // back to exact-prefix completion.
             else -> vocab.suggestions(prefix, usage.map, 3, bigrams.nextCounts(lastWord))
         }
+        keyboard?.suggestions = withDeviceSuggestions(prefix, base)
+    }
+
+    /**
+     * Top up the strip from the device dictionary when our bundled lists come up
+     * short — the common case for scripts we ship no word list for (Russian,
+     * Greek). The lookup is async: [DeviceDictionary.refresh] kicks it off and
+     * its callback re-runs this method once results are in. Skipped entirely in a
+     * sensitive field, so a password is never sent to the system spell checker.
+     */
+    private fun withDeviceSuggestions(prefix: String, base: List<String>): List<String> {
+        if (prefix.isEmpty() || field.isSensitive()) return base
+        deviceDict.refresh(prefix)
+        if (base.size >= SUGGESTIONS) return base
+        val out = LinkedHashSet(base)
+        for (w in deviceDict.suggestions()) {
+            if (out.size >= SUGGESTIONS) break
+            if (w.length > prefix.length && w.lowercase() != prefix) out.add(w)
+        }
+        return out.toList()
     }
 
     /** Commit a tapped suggestion, replacing the pending word. */
@@ -349,11 +381,22 @@ class FeatherKeyImeService : InputMethodService() {
         val core = runCatching { bridge.correct(word, "", word) }.getOrNull()
         if (core != null && core.applied) return core.primary
         if (word != word.lowercase()) return null // don't mangle Caps/ALLCAPS
-        if (vocab.rankOf(word) != Int.MAX_VALUE) return null // already a real word
-        if (tapDists.size != word.length) return null // no per-tap data to trust
-        return vocab.probableWords(tapDists, usage.map, bigrams.nextCounts(lastWord), 1)
-            .firstOrNull()
-            ?.takeIf { it != word }
+        if (vocab.rankOf(word) != Int.MAX_VALUE) return null // already a bundled real word
+        // The device dictionary is the base for languages we bundle no list for.
+        // Trust a word it confirms; otherwise keep its top correction in reserve.
+        // Skipped in a sensitive field (the word would go to the spell checker).
+        val deviceOn = !field.isSensitive()
+        if (deviceOn && deviceDict.isKnown(word)) return null
+        // Prefer the noisy-channel reading of the taps when we have per-tap data.
+        if (tapDists.size == word.length) {
+            vocab.probableWords(tapDists, usage.map, bigrams.nextCounts(lastWord), 1)
+                .firstOrNull()?.takeIf { it != word }?.let { return it }
+        }
+        // Otherwise fall back to the device dictionary's top correction.
+        if (deviceOn) {
+            deviceDict.suggestions().firstOrNull { it.lowercase() != word }?.let { return it }
+        }
+        return null
     }
 
     private fun backspace(ic: InputConnection) {
@@ -474,6 +517,7 @@ class FeatherKeyImeService : InputMethodService() {
 
     override fun onDestroy() {
         recognizer?.destroy()
+        deviceDict.close()
         usage.persist()
         bigrams.persist()
         ioScope.cancel()
@@ -484,6 +528,7 @@ class FeatherKeyImeService : InputMethodService() {
 
     private companion object {
         const val PERSIST_DEBOUNCE_MS = 3_000L
+        const val SUGGESTIONS = 3 // strip capacity
     }
 }
 
