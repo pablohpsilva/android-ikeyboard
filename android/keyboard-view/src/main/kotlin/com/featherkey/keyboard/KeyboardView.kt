@@ -380,7 +380,7 @@ class KeyboardView @JvmOverloads constructor(
             Sp.GLOBE -> drawGlobe(canvas, r, c)
             Sp.MIC -> drawMic(canvas, r, c)
             Sp.SHIFT -> { keyBg(canvas, r, c, p); drawShift(canvas, r, c) }
-            Sp.BACKSPACE -> { keyBg(canvas, r, c, p); drawBackspace(canvas, r, c) }
+            Sp.BACKSPACE -> { keyBg(canvas, r, c, p); drawBackspace(canvas, r, c, p) }
             Sp.ENTER -> { keyBg(canvas, r, c, p); drawReturn(canvas, r, c) }
             Sp.SPACE -> {
                 keyBg(canvas, r, c, p)
@@ -395,58 +395,96 @@ class KeyboardView @JvmOverloads constructor(
 
     // ---- Vector icons -------------------------------------------------------
 
+    /** Shift: an upward arrow — hollow, filled with the accent when active. */
     private fun drawShift(canvas: Canvas, r: RectF, c: Palette) {
-        val cx = r.centerX(); val cy = r.centerY(); val s = minOf(r.width(), r.height()) * 0.42f
-        iconFill.color = if (shifted) c.accent else c.icon
+        val cx = r.centerX(); val cy = r.centerY(); val s = minOf(r.width(), r.height()) * 0.33f
+        val head = s * 0.95f  // arrowhead half-width
+        val stem = s * 0.40f  // stem half-width
+        val top = cy - s      // apex
+        val mid = cy - s * 0.04f
+        val bot = cy + s
         path.reset()
-        path.moveTo(cx, cy - s * 0.6f); path.lineTo(cx - s * 0.6f, cy + s * 0.05f)
-        path.lineTo(cx - s * 0.28f, cy + s * 0.05f); path.lineTo(cx - s * 0.28f, cy + s * 0.55f)
-        path.lineTo(cx + s * 0.28f, cy + s * 0.55f); path.lineTo(cx + s * 0.28f, cy + s * 0.05f)
-        path.lineTo(cx + s * 0.6f, cy + s * 0.05f); path.close()
+        path.moveTo(cx, top)
+        path.lineTo(cx - head, mid)
+        path.lineTo(cx - stem, mid)
+        path.lineTo(cx - stem, bot)
+        path.lineTo(cx + stem, bot)
+        path.lineTo(cx + stem, mid)
+        path.lineTo(cx + head, mid)
+        path.close()
+        if (shifted) {
+            iconFill.color = c.accent
+            canvas.drawPath(path, iconFill)
+        } else {
+            iconPaint.color = c.icon; iconPaint.strokeWidth = dp(2.1f)
+            canvas.drawPath(path, iconPaint) // round joins soften the corners
+        }
+    }
+
+    /** Backspace: a solid left-pointing tag with a knocked-out ✕. */
+    private fun drawBackspace(canvas: Canvas, r: RectF, c: Palette, pressed: Boolean) {
+        val cx = r.centerX(); val cy = r.centerY(); val s = minOf(r.width(), r.height()) * 0.40f
+        path.reset()
+        path.moveTo(cx - s * 1.02f, cy)              // left tip
+        path.lineTo(cx - s * 0.40f, cy - s * 0.64f)  // top-left
+        path.lineTo(cx + s * 0.95f, cy - s * 0.64f)  // top-right
+        path.lineTo(cx + s * 0.95f, cy + s * 0.64f)  // bottom-right
+        path.lineTo(cx - s * 0.40f, cy + s * 0.64f)  // bottom-left
+        path.close()
+        iconFill.color = c.icon
         canvas.drawPath(path, iconFill)
+        // Knock the ✕ out in the key's own fill colour.
+        iconPaint.color = if (pressed) c.pressed else c.key
+        iconPaint.strokeWidth = dp(2.1f)
+        val bx = cx + s * 0.34f; val d = s * 0.24f
+        canvas.drawLine(bx - d, cy - d, bx + d, cy + d, iconPaint)
+        canvas.drawLine(bx - d, cy + d, bx + d, cy - d, iconPaint)
     }
 
-    private fun drawBackspace(canvas: Canvas, r: RectF, c: Palette) {
-        val cx = r.centerX(); val cy = r.centerY(); val s = minOf(r.width(), r.height()) * 0.42f
-        iconPaint.color = c.icon; iconPaint.strokeWidth = dp(1.8f)
-        path.reset()
-        path.moveTo(cx - s * 0.9f, cy); path.lineTo(cx - s * 0.35f, cy - s * 0.6f)
-        path.lineTo(cx + s * 0.9f, cy - s * 0.6f); path.lineTo(cx + s * 0.9f, cy + s * 0.6f)
-        path.lineTo(cx - s * 0.35f, cy + s * 0.6f); path.close()
-        canvas.drawPath(path, iconPaint)
-        val x0 = cx + s * 0.05f; val x1 = cx + s * 0.55f; val yy = s * 0.28f
-        canvas.drawLine(x0, cy - yy, x1, cy + yy, iconPaint)
-        canvas.drawLine(x0, cy + yy, x1, cy - yy, iconPaint)
-    }
-
+    /** Return: a hooked arrow pointing down-then-left. */
     private fun drawReturn(canvas: Canvas, r: RectF, c: Palette) {
         val cx = r.centerX(); val cy = r.centerY(); val s = minOf(r.width(), r.height()) * 0.4f
-        iconPaint.color = c.iconMuted; iconPaint.strokeWidth = dp(1.8f)
+        iconPaint.color = c.iconMuted; iconPaint.strokeWidth = dp(2.0f)
         path.reset()
-        path.moveTo(cx + s * 0.85f, cy - s * 0.7f); path.lineTo(cx + s * 0.85f, cy + s * 0.15f)
-        path.lineTo(cx - s * 0.75f, cy + s * 0.15f); canvas.drawPath(path, iconPaint)
+        path.moveTo(cx + s * 0.8f, cy - s * 0.62f)
+        path.lineTo(cx + s * 0.8f, cy + s * 0.12f)
+        path.lineTo(cx - s * 0.55f, cy + s * 0.12f)
+        canvas.drawPath(path, iconPaint)
         path.reset()
-        path.moveTo(cx - s * 0.3f, cy - s * 0.35f); path.lineTo(cx - s * 0.85f, cy + s * 0.15f)
-        path.lineTo(cx - s * 0.3f, cy + s * 0.65f); canvas.drawPath(path, iconPaint)
+        path.moveTo(cx - s * 0.12f, cy - s * 0.3f)
+        path.lineTo(cx - s * 0.68f, cy + s * 0.12f)
+        path.lineTo(cx - s * 0.12f, cy + s * 0.54f)
+        canvas.drawPath(path, iconPaint)
     }
 
+    /** Globe: a sphere with a meridian ellipse, equator, and curved latitudes. */
     private fun drawGlobe(canvas: Canvas, r: RectF, c: Palette) {
         val cx = r.centerX(); val cy = r.centerY(); val rad = minOf(r.width(), r.height()) * 0.3f
-        iconPaint.color = c.icon; iconPaint.strokeWidth = dp(1.6f)
+        iconPaint.color = c.icon; iconPaint.strokeWidth = dp(1.8f)
         canvas.drawCircle(cx, cy, rad, iconPaint)
-        canvas.drawOval(RectF(cx - rad * 0.5f, cy - rad, cx + rad * 0.5f, cy + rad), iconPaint)
+        canvas.drawOval(RectF(cx - rad * 0.52f, cy - rad, cx + rad * 0.52f, cy + rad), iconPaint)
         canvas.drawLine(cx - rad, cy, cx + rad, cy, iconPaint)
-        canvas.drawLine(cx - rad * 0.86f, cy - rad * 0.5f, cx + rad * 0.86f, cy - rad * 0.5f, iconPaint)
-        canvas.drawLine(cx - rad * 0.86f, cy + rad * 0.5f, cx + rad * 0.86f, cy + rad * 0.5f, iconPaint)
+        // Latitudes bow toward the equator, so the sphere reads as round.
+        val lx = rad * 0.82f; val ly = rad * 0.52f
+        path.reset()
+        path.moveTo(cx - lx, cy - ly); path.quadTo(cx, cy - ly * 0.35f, cx + lx, cy - ly)
+        canvas.drawPath(path, iconPaint)
+        path.reset()
+        path.moveTo(cx - lx, cy + ly); path.quadTo(cx, cy + ly * 0.35f, cx + lx, cy + ly)
+        canvas.drawPath(path, iconPaint)
     }
 
+    /** Microphone: a rounded capsule in a cradle arc on a small stand. */
     private fun drawMic(canvas: Canvas, r: RectF, c: Palette) {
         val cx = r.centerX(); val cy = r.centerY(); val s = minOf(r.width(), r.height()) * 0.3f
-        iconPaint.color = c.icon; iconPaint.strokeWidth = dp(1.6f); iconFill.color = c.icon
-        canvas.drawRoundRect(RectF(cx - s * 0.5f, cy - s * 1.1f, cx + s * 0.5f, cy + s * 0.25f), s * 0.5f, s * 0.5f, iconFill)
-        canvas.drawArc(RectF(cx - s * 0.85f, cy - s * 0.55f, cx + s * 0.85f, cy + s * 0.6f), 20f, 140f, false, iconPaint)
-        canvas.drawLine(cx, cy + s * 0.6f, cx, cy + s * 1.05f, iconPaint)
-        canvas.drawLine(cx - s * 0.45f, cy + s * 1.05f, cx + s * 0.45f, cy + s * 1.05f, iconPaint)
+        iconPaint.color = c.icon; iconPaint.strokeWidth = dp(1.9f); iconFill.color = c.icon
+        canvas.drawRoundRect(
+            RectF(cx - s * 0.46f, cy - s * 1.18f, cx + s * 0.46f, cy + s * 0.18f),
+            s * 0.46f, s * 0.46f, iconFill,
+        )
+        canvas.drawArc(RectF(cx - s * 0.8f, cy - s * 0.52f, cx + s * 0.8f, cy + s * 0.56f), 22f, 136f, false, iconPaint)
+        canvas.drawLine(cx, cy + s * 0.56f, cx, cy + s * 1.08f, iconPaint)
+        canvas.drawLine(cx - s * 0.44f, cy + s * 1.08f, cx + s * 0.44f, cy + s * 1.08f, iconPaint)
     }
 
     // ---- Touch --------------------------------------------------------------
