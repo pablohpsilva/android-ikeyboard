@@ -13,6 +13,7 @@ package com.featherkey.ime
  */
 
 import android.Manifest
+import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -24,9 +25,9 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.view.View
+import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
-import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
 import com.featherkey.ffi.FeatherKeyBridge
 import com.featherkey.ffi.FieldSensitivity
@@ -36,6 +37,7 @@ import com.featherkey.keyboard.KeyboardView
 import com.featherkey.keyboard.RenderKey
 import com.featherkey.platform.EditorInfoSensitivity
 import com.featherkey.platform.KeystoreKeyProvider
+import com.featherkey.platform.LanguageCatalog
 import com.featherkey.platform.LanguagePrefs
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
@@ -142,7 +144,7 @@ class FeatherKeyImeService : InputMethodService() {
                 sendDefaultEditorAction(true)
                 keyboard?.suggestions = emptyList()
             }
-            FunctionKey.GLOBE -> cycleLanguageOrSwitchIme()
+            FunctionKey.GLOBE -> showLanguageDialog()
             FunctionKey.MIC -> startVoiceInput()
         }
     }
@@ -209,18 +211,39 @@ class FeatherKeyImeService : InputMethodService() {
     }
 
     /**
-     * Globe: with two or more active languages, cycle which is primary (the core
-     * keeps them all active; the primary leads prediction and the space bar).
-     * With a single language there is nothing to cycle, so switch keyboards.
+     * Globe: choose the active languages right from the keyboard. Several may be
+     * active at once (checked); the core keeps them all active and the space bar
+     * shows the set. Rendered as a dialog attached to the input view's window
+     * (the standard way an IME shows a dialog).
      */
-    private fun cycleLanguageOrSwitchIme() {
-        val tags = langPrefs.activeTags()
-        if (tags.size >= 2) {
-            val rotated = langPrefs.cyclePrimary()
-            applyLanguages(rotated)
-        } else {
-            (getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)?.showInputMethodPicker()
+    private fun showLanguageDialog() {
+        val token = keyboard?.windowToken ?: return
+        val langs = LanguageCatalog.all(this)
+        val active = langPrefs.activeTags().toMutableSet()
+        val names = langs.map { it.displayName }.toTypedArray()
+        val checked = BooleanArray(langs.size) { active.contains(langs[it].tag) }
+        val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Languages")
+            .setMultiChoiceItems(names, checked) { _, which, isChecked ->
+                if (isChecked) active.add(langs[which].tag) else active.remove(langs[which].tag)
+            }
+            .setPositiveButton("OK") { _, _ ->
+                val ordered = langs.map { it.tag }.filter { active.contains(it) }
+                if (ordered.isNotEmpty()) {
+                    langPrefs.setActiveTags(ordered)
+                    applyLanguages(ordered)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.window?.apply {
+            attributes = attributes.also {
+                it.token = token
+                it.type = WindowManager.LayoutParams.TYPE_APPLICATION_ATTACHED_DIALOG
+            }
+            addFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
         }
+        dialog.show()
     }
 
     /** Mic: system voice typing via [SpeechRecognizer], committed into the field. */
