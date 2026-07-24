@@ -18,6 +18,7 @@ android {
 
 dependencies {
     implementation(project(":onboarding"))
+    implementation(project(":platform-services"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.kotlinx.coroutines.android)

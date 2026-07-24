@@ -13,6 +13,7 @@ package com.featherkey.ime
  */
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.inputmethodservice.InputMethodService
@@ -35,6 +36,7 @@ import com.featherkey.keyboard.KeyboardView
 import com.featherkey.keyboard.RenderKey
 import com.featherkey.platform.EditorInfoSensitivity
 import com.featherkey.platform.KeystoreKeyProvider
+import com.featherkey.platform.LanguagePrefs
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -56,17 +58,24 @@ class FeatherKeyImeService : InputMethodService() {
     private var keyboard: KeyboardView? = null
     private var recognizer: SpeechRecognizer? = null
 
+    private lateinit var langPrefs: LanguagePrefs
+    /** The active languages currently loaded into the core (order = preference). */
+    private var currentTags: List<String> = emptyList()
+
     override fun onCreate() {
         super.onCreate()
+        langPrefs = LanguagePrefs(this)
+        currentTags = langPrefs.activeTags()
         val key = KeystoreKeyProvider(this).provisionDataKey()
         val dbPath = File(filesDir, "featherkey.redb").absolutePath
-        bridge = FeatherKeyBridge.open(dbPath, key, Lexicons.bundled(this))
+        bridge = FeatherKeyBridge.open(dbPath, key, Lexicons.load(this, currentTags))
         key.fill(0) // wipe the shell's copy; the native side holds it zeroizing
     }
 
     override fun onCreateInputView(): View {
         val view = KeyboardView(this)
         view.keys = renderKeys()
+        view.spaceHint = spaceHint(currentTags)
         view.onKeyTouch = { x, y -> handleTouch(x, y) }
         view.onCharKey = { ch -> handleChar(ch) }
         view.onFunctionKey = { fk -> handleFunction(fk) }
@@ -82,7 +91,22 @@ class FeatherKeyImeService : InputMethodService() {
         pending.clear()
         keyboard?.suggestions = emptyList()
         keyboard?.resetPage()
+        // Pick up any language changes made in settings since the last field.
+        applyLanguages(langPrefs.activeTags())
     }
+
+    /** Push [tags] to the core (if changed) and reflect them on the space bar. */
+    private fun applyLanguages(tags: List<String>) {
+        if (tags != currentTags) {
+            runCatching { bridge.setActiveLanguages(Lexicons.load(this, tags)) }
+            currentTags = tags
+        }
+        keyboard?.spaceHint = spaceHint(tags)
+    }
+
+    /** The space-bar language hint, e.g. "EN" or "EN PT" (primary first). */
+    private fun spaceHint(tags: List<String>): String =
+        tags.take(3).joinToString(" ") { it.uppercase() }
 
     override fun onFinishInput() {
         super.onFinishInput()
@@ -118,7 +142,7 @@ class FeatherKeyImeService : InputMethodService() {
                 sendDefaultEditorAction(true)
                 keyboard?.suggestions = emptyList()
             }
-            FunctionKey.GLOBE -> showImePicker()
+            FunctionKey.GLOBE -> cycleLanguageOrSwitchIme()
             FunctionKey.MIC -> startVoiceInput()
         }
     }
@@ -184,9 +208,19 @@ class FeatherKeyImeService : InputMethodService() {
         pending.clear()
     }
 
-    /** Globe: let the user switch to another keyboard. */
-    private fun showImePicker() {
-        (getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)?.showInputMethodPicker()
+    /**
+     * Globe: with two or more active languages, cycle which is primary (the core
+     * keeps them all active; the primary leads prediction and the space bar).
+     * With a single language there is nothing to cycle, so switch keyboards.
+     */
+    private fun cycleLanguageOrSwitchIme() {
+        val tags = langPrefs.activeTags()
+        if (tags.size >= 2) {
+            val rotated = langPrefs.cyclePrimary()
+            applyLanguages(rotated)
+        } else {
+            (getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)?.showInputMethodPicker()
+        }
     }
 
     /** Mic: system voice typing via [SpeechRecognizer], committed into the field. */
@@ -255,12 +289,20 @@ class FeatherKeyImeService : InputMethodService() {
 }
 
 /**
- * Bundled MVP lexicons. Ships a tiny placeholder; replace with real per-language
- * word lists loaded from `assets/lexicons/<tag>.txt` (sorted, one word per line).
+ * Loads the active languages' lexicons from `assets/lexicons/<tag>.txt` (one word
+ * per line, pre-sorted by byte order — the core rejects an unsorted list). A tag
+ * with no bundled file loads as an empty lexicon: the language is still active
+ * (it appears in the space bar and can win language-ID), it just contributes no
+ * predictions until a word list is added. Only `en.txt` ships today.
  */
 object Lexicons {
-    fun bundled(service: InputMethodService): List<Language> {
-        val en = listOf("a", "an", "and", "hello", "the", "world").sorted()
-        return listOf(Language("en", en))
-    }
+    fun load(context: Context, tags: List<String>): List<Language> =
+        tags.map { tag ->
+            val words = runCatching {
+                context.assets.open("lexicons/$tag.txt").bufferedReader().useLines { lines ->
+                    lines.map { it.trim() }.filter { it.isNotEmpty() }.toList()
+                }
+            }.getOrDefault(emptyList())
+            Language(tag, words)
+        }
 }

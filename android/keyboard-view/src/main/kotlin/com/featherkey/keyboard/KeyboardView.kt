@@ -67,6 +67,10 @@ class KeyboardView @JvmOverloads constructor(
     var shifted: Boolean = false
         set(value) { field = value; invalidate() }
 
+    /** Active-language hint shown on the space bar, e.g. "EN" or "EN PT". */
+    var spaceHint: String = "EN"
+        set(value) { field = value; invalidate() }
+
     private enum class Page { ALPHA, NUMBERS, SYMBOLS }
     private var page = Page.ALPHA
 
@@ -117,7 +121,7 @@ class KeyboardView @JvmOverloads constructor(
         typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     }
     private val hintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textAlign = Paint.Align.CENTER
+        textAlign = Paint.Align.RIGHT
         typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     }
     private val dividerPaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -317,7 +321,7 @@ class KeyboardView @JvmOverloads constructor(
             Sp.SPACE -> {
                 keyBg(canvas, r, c, p)
                 hintPaint.textSize = funcRowHeight * 0.26f
-                canvas.drawText("EN", r.right - dp(18f), r.bottom - dp(10f), hintPaint)
+                canvas.drawText(spaceHint, r.right - dp(12f), r.bottom - dp(10f), hintPaint)
             }
             Sp.TO_NUMBERS -> drawTextKey(canvas, r, c, p, "123", r.height() * 0.34f)
             Sp.TO_SYMBOLS -> drawTextKey(canvas, r, c, p, "#+=", r.height() * 0.34f)
