@@ -1,0 +1,18 @@
+[package]
+name = "featherkey-touch-model"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Per-user adaptive tap-distribution model; improves targeting over time."
+
+[package.metadata.featherkey]
+layer = "domain"
+
+[dependencies]
+featherkey-kernel = { path = "../kernel" }
+
+
+[lints]
+workspace = true

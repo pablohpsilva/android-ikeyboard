@@ -1,0 +1,18 @@
+[package]
+name = "featherkey-secure-store"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Encrypted persistence of personal data; implements the SecureStore port."
+
+[package.metadata.featherkey]
+layer = "adapter"
+
+[dependencies]
+featherkey-kernel = { path = "../kernel" }
+featherkey-contracts = { path = "../contracts" }
+
+[lints]
+workspace = true

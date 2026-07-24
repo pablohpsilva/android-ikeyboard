@@ -1,0 +1,18 @@
+[package]
+name = "featherkey-diagnostics"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Opt-in, content-free local diagnostics ring buffer."
+
+[package.metadata.featherkey]
+layer = "domain"
+
+[dependencies]
+featherkey-kernel = { path = "../kernel" }
+featherkey-contracts = { path = "../contracts" }
+
+[lints]
+workspace = true

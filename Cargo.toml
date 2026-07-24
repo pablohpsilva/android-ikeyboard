@@ -15,6 +15,14 @@ members = [
     "crates/contracts",
     "crates/layout-engine",
     "crates/input-decoder",
+    "crates/dictionary",
+    "crates/secure-store",
+    "crates/touch-model",
+    "crates/sensitive-context",
+    "crates/smart-typing",
+    "crates/editing",
+    "crates/diagnostics",
+    "crates/crash-guard",
 ]
 
 [workspace.package]

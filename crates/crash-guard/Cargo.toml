@@ -1,0 +1,18 @@
+[package]
+name = "featherkey-crash-guard"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Isolate panics at the FFI seam; safe-mode fallback (core half)."
+
+[package.metadata.featherkey]
+layer = "adapter"
+
+[dependencies]
+featherkey-kernel = { path = "../kernel" }
+
+
+[lints]
+workspace = true

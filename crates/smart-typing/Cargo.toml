@@ -1,0 +1,18 @@
+[package]
+name = "featherkey-smart-typing"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Auto-capitalization, double-space-period, smart punctuation."
+
+[package.metadata.featherkey]
+layer = "domain"
+
+[dependencies]
+featherkey-kernel = { path = "../kernel" }
+
+
+[lints]
+workspace = true
