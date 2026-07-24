@@ -4,7 +4,7 @@
 **Document type:** Implementation Plan / Delivery Sequencing & Execution Protocol
 **Version:** 0.1 (Draft)
 **Date:** 2026-07-24
-**Source-of-truth chain:** [`BUSINESS_REQUIREMENTS.md`](./BUSINESS_REQUIREMENTS.md) (BRD v0.7, **source of truth**) → [`SOFTWARE_ENGINEERING.md`](./SOFTWARE_ENGINEERING.md) (SEDD v0.6) → [`ARCHITECTURE.md`](./ARCHITECTURE.md) (ARCH v0.2) → **this plan**.
+**Source-of-truth chain:** [`BUSINESS_REQUIREMENTS.md`](./BUSINESS_REQUIREMENTS.md) (BRD v0.7, **source of truth**) → [`SOFTWARE_ENGINEERING.md`](./SOFTWARE_ENGINEERING.md) (SEDD v0.7) → [`ARCHITECTURE.md`](./ARCHITECTURE.md) (ARCH v0.3) → **this plan**.
 
 ### Revision History
 
@@ -163,7 +163,7 @@ The grounding analysis found ambiguities in the docs and gaps in enforcement tha
 | **E-1** | Fitness does **not** enforce the inward Dependency Rule (a domain crate could import an adapter and nothing would catch it). | Extend `tools/fitness/check.py` with a layer map (domain / port / adapter / composition) and assert no domain→adapter edge. Add a negative test proving it bites. |
 | **E-2** | `sensitive-context` ordering (BR-26: password fields *structurally* cannot be learned) is prose-only; no test guarantees the gate runs before `personalization`/`prediction`. | An application-layer property test at the `featherkey-core` composition root. Scheduled with Wave 4 but the *contract* is written when `sensitive-context` lands (Wave 1). |
 | **E-3** | CI stages promised by SEDD §13.1 are missing: supply-chain (`cargo-deny`/`cargo-audit`, BR-65), permission/network guard (BR-20/BR-27), reproducibility (BR-24). Several **Must** privacy/security BRs currently have *no active guardrail*. | Add these as CI jobs. `cargo-deny` + `cargo-audit` first (cheap, high value). These are process-owned BRs (see §7) and must not wait for a module. |
-| **E-4** | Two required build nodes are absent from the SEDD §5 registry: **`featherkey-core`** (composition façade) and **`featherkey-ffi`** (UniFFI facade). | Add both to SEDD §5 as first-class modules; they are Wave 4. Without them the Android wave has no entry point. |
+| **E-4** | The **`featherkey-core`** composition façade was absent from the SEDD §5.2 registry though named in §3.6/ARCH; the `contracts` port crate (ADR-12) was also unregistered. | **Done (SEDD v0.7):** added `contracts` + `featherkey-core` to §5.2. `featherkey-core` keeps the UniFFI surface (no separate `featherkey-ffi` crate — consistent with §3.6/ARCH); it is Wave 4, `contracts` is Wave 0.5. |
 
 > These pre-flight items are themselves increments: each goes through the §3 protocol (a decision D-item via a Plan subagent + user ratification; an enforcement E-item via the full build/verify/`/r-u-sure` loop).
 
@@ -214,7 +214,7 @@ Sandbox-verifiable: **Yes**.
 Sandbox-verifiable: **Yes**.
 
 ### Wave 4 — Rust composition (last sandbox-buildable wave)
-`featherkey-core` (compose all MVP core crates; enforce the E-2 sensitive-context ordering property here) + `featherkey-ffi` (UniFFI surface, per E-4). Closes no new product BR directly but is the prerequisite for the shell. Sandbox-verifiable: **Yes** (Rust side; the generated bindings compile against the shell in Wave 5).
+`featherkey-core` — compose all MVP core crates behind the ports in `contracts`, present the UniFFI surface, and enforce the E-2 sensitive-context ordering property here. Closes no new product BR directly but is the prerequisite for the shell. Sandbox-verifiable: **Yes** (Rust side; the generated bindings compile against the shell in Wave 5).
 
 ### Wave 5 — Android shell integration (NOT sandbox-buildable)
 Needs JDK/Gradle/Android SDK/NDK. Order within the wave: `ffi-bridge` → `ime-service`, `keyboard-view`, `platform-services` → `onboarding`, `settings-ui`, `accessibility-adapter`.

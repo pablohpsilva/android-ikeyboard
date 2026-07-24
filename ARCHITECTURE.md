@@ -2,12 +2,12 @@
 
 **Project (working name):** FeatherKey — A Fast, Private, Modular Android Keyboard
 **Document type:** Software Architecture — rules, structure, and "how-to"
-**Version:** 0.2 (Draft)
+**Version:** 0.3 (Draft)
 **Date:** 2026-07-24
 **Status:** Draft — for engineering review
 **Document chain:**
 - [`BUSINESS_REQUIREMENTS.md`](./BUSINESS_REQUIREMENTS.md) (BRD v0.7) — *what & why* (**source of truth**)
-- [`SOFTWARE_ENGINEERING.md`](./SOFTWARE_ENGINEERING.md) (SEDD v0.6) — *the tech idea & decisions*
+- [`SOFTWARE_ENGINEERING.md`](./SOFTWARE_ENGINEERING.md) (SEDD v0.7) — *the tech idea & decisions*
 - **This document (ARCH)** — *the how-to: architecture, rules, conventions* (**normative**)
 
 > **How to read this document.** It is **normative**: rules use **MUST / SHOULD / MUST NOT** (RFC-2119 sense). Where this document conflicts with the BRD, the **BRD wins**; where it refines the SEDD, it must stay consistent with the SEDD's ratified decisions (ADR-1/2/3). This document exists to make the BRD's modularity and maintainability requirements (**BR-38, BR-39, BR-40**) *enforceable* — not aspirational. Rules here are backed by CI "fitness functions" wherever possible (§13).
@@ -18,6 +18,7 @@
 |---|---|---|
 | 0.1 | 2026-07-24 | Initial architecture: Hexagonal/Clean style, SOLID rules, module registry, anti-god-file caps, mandatory TDD/BDD workflow, ports & adapters catalog, repo layout, add-a-module recipe, fitness functions, traceability |
 | 0.2 | 2026-07-24 | Set minimum test coverage to **98%** line+branch (§7.3); added this revision history for consistency with the BRD/SEDD; synced document-chain references to BRD v0.7 / SEDD v0.6 (after the BR-17 resolution) |
+| 0.3 | 2026-07-24 | Synced SEDD chain reference to v0.7 (adds ADR-12–16, the `contracts`/`featherkey-core` registry entries, and the two-domain writer split). No architectural change in this document. |
 
 ---
 
@@ -526,4 +527,4 @@ How this document's rules satisfy the BRD's architecture-relevant requirements a
 
 ---
 
-*End of Architecture Document (Draft v0.2). Document chain: BUSINESS_REQUIREMENTS.md (BRD v0.7, source of truth) → SOFTWARE_ENGINEERING.md (SEDD v0.6) → this.*
+*End of Architecture Document (Draft v0.3). Document chain: BUSINESS_REQUIREMENTS.md (BRD v0.7, source of truth) → SOFTWARE_ENGINEERING.md (SEDD v0.7) → this.*

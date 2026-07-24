@@ -2,7 +2,7 @@
 
 **Project (working name):** FeatherKey — A Fast, Private, Modular Android Keyboard
 **Document type:** Software Engineering / Technical Design
-**Version:** 0.6 (Draft — expanded)
+**Version:** 0.7 (Draft — expanded)
 **Date:** 2026-07-24
 **Status:** Draft — for engineering review
 **Source of truth:** [`BUSINESS_REQUIREMENTS.md`](./BUSINESS_REQUIREMENTS.md) (BRD v0.7)
@@ -17,6 +17,7 @@
 | 0.4 | 2026-07-24 | Coherence-review fixes: reconciled the MVP accuracy bar (keystroke accuracy = MVP/beat-iOS; prediction quality = competitive at MVP, beat-iOS in v1.x) in ADR-3 + BR-10 traceability; tightened the `no_std` claim; added a note on cohesive module grouping vs strict BR-38 |
 | 0.5 | 2026-07-24 | Added the `kernel` crate (shared value objects + error types) to §5.2, for consistency with the Architecture Document (ARCH v0.1) |
 | 0.6 | 2026-07-24 | Set minimum coverage to **98%** (§12.5); moved BR-17 to **MVP** in the §15 traceability (consistent with BRD v0.7); synced BRD reference to v0.7 |
+| 0.7 | 2026-07-24 | Added ADR-12–16 (proposed: `contracts` port crate; `locale-manager`→`dictionary` edge; two-domain writer split; `input-decoder` signature break; RTL deferral); added `contracts` + `featherkey-core` to §5.2; two-domain writer split rewrite (§5.5 r1, §5.4); doc-fidelity fixes — BR-37 into `accessibility-adapter` §5.1, BR-38 marked structural, BR-62 secure-store/platform-services split (§5.1/§5.2/§15). Supports IMPLEMENTATION_PLAN.md Wave 0.5. |
 
 > **Purpose & relationship to the BRD.** The BRD defines *what* and *why* (business requirements BR-1…BR-67, objectives OBJ-1…9, problems P-1…10). **This document defines *how*** — the concrete technologies, architecture, module decomposition, and engineering practices we will use to satisfy those requirements. The BRD is the **source of truth**: where this document and the BRD conflict, the BRD wins and this document must be corrected (or the BRD explicitly revised). Every significant choice here traces back to one or more BR IDs.
 >
@@ -274,15 +275,16 @@ Every module has **one responsibility** (BR-38). Each entry lists its job, the r
 | `keyboard-view` | Render the keyboard; capture touch; animations | BR-1, BR-32–34 | Custom `View` + `Canvas` |
 | `settings-ui` | Configuration screens (dictionary, autocorrect, theme, haptics, consent) | BR-9, BR-14, BR-15, BR-22, BR-36, BR-52 | Jetpack Compose |
 | `onboarding` | First-run; the IME-enablement **trust** flow | BR-35, BR-58 | Compose |
-| `accessibility-adapter` | Expose keys/actions to TalkBack & switch access | BR-55, BR-56 | Accessibility framework |
-| `platform-services` | Keystore access, storage paths, system clipboard, backup exclusion | BR-62, BR-63 | Android Keystore, backup rules |
+| `accessibility-adapter` | Expose keys/actions to TalkBack & switch access | BR-37, BR-55, BR-56 | Accessibility framework |
+| `platform-services` | Keystore access, storage paths, system clipboard, backup exclusion | BR-62 (key provisioning), BR-63 | Android Keystore, backup rules |
 | `ffi-bridge` | Marshal calls between Kotlin and the Rust core | (glue) | UniFFI / JNI |
 
 ### 5.2 Rust Core Modules
 
 | Module (crate) | Single responsibility | Serves | Key tech |
 |---|---|---|---|
-| `kernel` | Define shared value objects and error types that cross module boundaries (no logic, no dependencies) | BR-38 | Plain Rust types |
+| `kernel` | Define shared value objects and error types that cross module boundaries (no logic, no dependencies) | (all) | Plain Rust types |
+| `contracts` | Define the port traits (driven & driving) that domain crates depend on instead of adapters (no logic, no dependencies) | (all) | Plain Rust traits |
 | `input-decoder` | Map touch coordinates + key geometry → intended key & candidate set (the accuracy engine) | BR-5, BR-6, BR-46 | Geometry + probabilistic scoring |
 | `touch-model` | Per-user adaptive model of tap distributions; improves targeting over time | BR-7, BR-46 | On-device incremental learning |
 | `layout-engine` | Key layouts & geometry: alpha, number/symbol, RTL, ergonomic variants | BR-47, BR-51, BR-53 | Data-driven layout defs |
@@ -296,11 +298,14 @@ Every module has **one responsibility** (BR-38). Each entry lists its job, the r
 | `editing` | Cursor movement & text-selection operations | BR-49 | Cursor state machine |
 | `clipboard-core` | Clipboard history model; sensitive exclusion; auto-expiry | BR-50 | `secure-store` (encrypted) |
 | `sensitive-context` | Detect password/sensitive fields; suppress learning/prediction | BR-26 | `EditorInfo` flags via shell |
-| `secure-store` | Encrypted persistence of all personal data; key-use interface | BR-8, BR-23, BR-62 | `redb` + AES-256-GCM |
+| `secure-store` | Encrypted persistence of all personal data; key-use interface | BR-8, BR-23, BR-62 (at-rest encryption) | `redb` + AES-256-GCM |
 | `crash-guard` | Isolate panics at FFI; watchdog; safe-mode fallback keyboard | BR-29, BR-30, BR-31 | `catch_unwind`, watchdog |
 | `diagnostics` | Opt-in, content-free local diagnostics ring buffer; user-exportable | BR-60, BR-61 | In-memory ring + optional export |
 | `neural-runtime` *(v1.x)* | Small neural model inference for prediction/decoding | BR-11 | `tract`/`candle` |
 | `dictation` *(v2+)* | Optional voice-to-text, privacy-preserving | BR-43 | On-device / consented only |
+| `featherkey-core` | Composition façade: wire concrete adapters to ports at the composition root, compose the core crates, and present the UniFFI-typed API to the shell | (glue) | Manual DI, UniFFI |
+
+> **On BR-38 (single-responsibility modules):** this is a **structural** requirement satisfied by the whole decomposition and enforced by fitness functions (EP-3, §5.5, ARCH §13), not owned by any single crate — hence `kernel`/`contracts` show `(all)` above and §15 lists `§5, EP-3` as its owner.
 
 ### 5.3 Module Interaction — Keystroke Example
 
@@ -334,7 +339,7 @@ pub trait AutoCorrect {
         -> Correction; // { primary, alternatives[], applied: bool }
 }
 
-// personalization — the only writer of learned state; sensitive contexts excluded upstream
+// personalization — the only writer of *lexical* learned state (tap-geometry is owned by touch-model); sensitive contexts excluded upstream
 pub trait Personalization {
     fn observe(&mut self, event: TypingEvent);        // async, off input path
     fn export(&self) -> UserModelSnapshot;            // for user view/reset (BR-9)
@@ -350,12 +355,12 @@ pub trait SecureStore {
 
 **Boundary invariants enforced by these interfaces:**
 - `input-decoder` and `Predictor::suggest` are **read-only** — they cannot mutate learned state or persist, so the hot path has no write/crypto cost.
-- `personalization` is the **sole writer** of learned data; `secure-store` is the **sole** component that encrypts/persists. Nothing else can leak or corrupt personal data.
+- `personalization` is the **sole writer** of *lexical* learned data and `touch-model` the **sole writer** of the tap-geometry model (one writer per data domain, ADR-14); `secure-store` is the **sole** component that encrypts/persists. Nothing else can leak or corrupt personal data.
 - `sensitive-context` gates calls *before* they reach `personalization`/`prediction`, so password fields structurally cannot be learned (BR-26).
 
 ### 5.5 Module Design Rules
 
-1. **One writer per data domain.** Exactly one module owns mutation of each kind of state (learned model → `personalization`; persistence → `secure-store`). Others read snapshots.
+1. **One writer per data domain.** Exactly one module owns mutation of each kind of state. Learned state is split by domain: **lexical/vocabulary learning** (user dictionary, whitelist, personal n-grams) is owned solely by `personalization`; the **per-user tap-geometry model** is a separate data domain owned solely by `touch-model` (ADR-14). Persistence/crypto is owned solely by `secure-store`. Others read immutable snapshots.
 2. **No Android types in the core.** Rust crates never import Android APIs; the shell adapts. This keeps the core host-testable and portable (EP-3).
 3. **Errors are values, not panics.** Core functions return `Result`; panics are reserved for truly unreachable states and are caught at the FFI seam (EP-6).
 4. **Acyclic dependencies.** The crate graph is a DAG; the façade composes, internal crates don't cross-import. CI-enforced.
@@ -811,7 +816,37 @@ The technical backbone of the "verifiable privacy" promise:
 **Why:** Table-stakes tactile quality (BR-52) with zero added dependencies; respects battery and user preference.
 **Alternatives:** Third-party haptics libraries (unnecessary footprint).
 
-> **ADR status:** ADR-1/2/3 are **ratified** (sponsor-approved). ADR-4–11 are **proposed defaults** — recorded here with rationale for engineering review; each can be revisited with data before implementation locks it in.
+### ADR-12 — Port traits live in a dependency-free `contracts` crate
+**Decision:** Put all port traits (`SecureStore`, `Predictor`, `AutoCorrect`, `SensitiveContextSource`, `KeyProvider`, …) in a new `contracts` crate — a peer of `kernel` with zero dependencies. Domain/application crates depend on `contracts` for the trait; adapters depend on it to implement.
+**Why:** The Dependency Rule (ARCH §3.2, DIP) requires a domain crate to depend on a *port*, not an adapter — e.g. `personalization` needs `SecureStore` but must never see `secure-store`. A single port-only crate makes the legal edge the easy one. Kept separate from `kernel` because `kernel` is logic-free *data* while `contracts` is *behaviour* — two reasons to change (§5.5 r5).
+**Alternatives:** Traits in `kernel` (merges data + behaviour, forces recompiles on any port change); a trait per consumer (no single home, breaks shared contract-tests, re-creates domain→adapter coupling).
+**Consequences:** A second universal DAG sink beside `kernel` (`contracts` → nothing; everything → `contracts`); gives fitness rule **E-1** its concrete "port" layer. Serves BR-38, BR-39.
+
+### ADR-13 — `locale-manager` depends on `dictionary` (Wave 2)
+**Decision:** `locale-manager` depends on `dictionary`; it is a Wave-2 module, not a `kernel`-only leaf.
+**Why:** Per-word language identification (ADR-10, §6.1) scores the in-progress token against *each active language's lexicon*, so locale scoring must read `dictionary`; §5.3 step 3 and the §5.4 `suggest(ctx, langs)` sketch imply the edge; §15 co-owns BR-16/BR-18 across these crates.
+**Alternatives:** Invert the edge (puts language policy inside a pure lexicon leaf — wrong); a third scorer crate (needless module for a §6.1 relationship).
+**Consequences:** Locks `dictionary` (W1) → `locale-manager` (W2) → `prediction` (W3). Serves BR-16, BR-18, BR-19b.
+
+### ADR-14 — Two-domain writer split (`touch-model` vs `personalization`)
+**Decision:** Split learned state into two single-writer domains: `touch-model` owns *only* the tap-geometry model (`touch_model` namespace, §7.2); `personalization` owns *only* lexical learning (user dictionary, whitelist, personal n-grams). "Sole writer" is scoped per-domain, not global.
+**Why:** §5.5 r1 and the §5.4 invariant call `personalization` the *sole* writer of "learned data," yet §5.2/§15 give `touch-model` incremental tap learning (BR-7, BR-46) — a literal contradiction. Tap-geometry is a distinct domain (different namespace, consumer, reason-to-change) from vocabulary, so one-writer-per-domain preserves r1's intent while letting both learn.
+**Alternatives:** Fold tap-geometry into `personalization` (merges unrelated concerns, SRP §4); keep `personalization` globally sole (forbids `touch-model` from learning, contradicts BR-7/46).
+**Consequences:** Requires the §5.5 r1 + §5.4 rewrites made in this revision. Serves BR-7, BR-46.
+
+### ADR-15 — `input-decoder::decode` gains a `model` parameter in Wave 2 (the one scheduled API break)
+**Decision:** Evolve `decode(touch, layout)` → `decode(touch, layout, model: &TouchModel)` per §5.4 when `touch-model` lands (Wave 2), providing an unbiased default `TouchModel` so the Wave-0 tracer tests keep passing with identical behaviour. This is the **single** scheduled public-API break in the MVP plan.
+**Why:** Wave 0 shipped `input-decoder` deliberately sans touch-model, so integrating it is *breaking*, not additive. Planning it as a known break with a neutral default keeps the tracer/BDD green and honours plan R3 (no unscheduled breaks) + DoD interface-fidelity to §5.4.
+**Alternatives:** Add a second `decode_with_model` (permanent drift from the §5.4 single signature); break during shell integration (Wave 5) — ripples into live shell wiring (Risk R-1). Doing it in Wave 2, before any shell consumes the port, contains the blast radius.
+**Consequences:** The Wave-0 "unbiased nearest-key" note becomes the default-model path. Serves BR-6, BR-7 (targeting), BR-46.
+
+### ADR-16 — RTL/bidi (BR-53) deferred until the launch language set is fixed; port stays RTL-ready
+**Decision:** Keep `layout-engine`'s port and layout-data model RTL-ready (`unicode-bidi` reserved, §6.2) but defer *implementing and shipping* bidi until the initial language set (§16 Q2 / BRD §18) is fixed. BR-53 stays **MVP\*** — conditional on an RTL language being in the launch set.
+**Why:** §15 already marks BR-53 conditional; §16 Q2 lists the language set as unresolved. Building full bidi (visual reordering, caret logic across bidi runs, mirrored layouts) before knowing whether any RTL language ships is speculative against an undecided requirement; an RTL-ready port costs nothing now (OCP, ARCH §4).
+**Alternatives:** Ship full bidi unconditionally at MVP (spends the hardest i18n budget on a maybe-language; violates principle precedence §1.1); drop RTL from the port (forces a breaking change if an RTL language is later added).
+**Consequences:** Scopes Wave-1 `layout-engine` finalize to LTR + number/symbol/punctuation (BR-47); complex-script depth (BR-54) stays v2+. Trigger: resolution of §16 Q2 / BRD §18.
+
+> **ADR status:** ADR-1/2/3 are **ratified** (sponsor-approved). ADR-4–11 and **ADR-12–16** are **proposed** — recorded here with rationale for engineering review, pending sponsor ratification; each can be revisited with data before implementation locks it in.
 
 ---
 
@@ -884,7 +919,7 @@ Every one of the BRD's 69 requirements is listed below on its own row with its *
 | BR-59 | Fully offline core | EP-1, §10 | offline functional test | MVP |
 | BR-60 | Privacy-preserving measurement principle | `diagnostics`, §10 | design review + no-network check | MVP |
 | BR-61 | Opt-in, content-free diagnostics | `diagnostics` | opt-in gating test | v1.x |
-| BR-62 | Encryption at rest | `secure-store`, §7 | encryption test | MVP |
+| BR-62 | Encryption at rest | `secure-store` (at-rest), `platform-services` (keys), §7 | encryption test | MVP |
 | BR-63 | Backup exclusion of personal data | `platform-services`, §7 | backup-rule test | MVP |
 | BR-64 | Vulnerability disclosure policy | §9.3, process | policy exists (`SECURITY.md`) | v1.x |
 | BR-65 | Supply-chain management | §9, §13.5 | `cargo-deny`/`audit` CI | v1.x |
@@ -950,4 +985,4 @@ These require input before or during implementation; several mirror the BRD's Op
 
 ---
 
-*End of Software Engineering Design Document (Draft v0.6 — expanded). Source of truth: BUSINESS_REQUIREMENTS.md (BRD v0.7).*
+*End of Software Engineering Design Document (Draft v0.7 — expanded). Source of truth: BUSINESS_REQUIREMENTS.md (BRD v0.7).*
