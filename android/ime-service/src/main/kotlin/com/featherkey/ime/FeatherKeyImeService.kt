@@ -71,6 +71,10 @@ class FeatherKeyImeService : InputMethodService() {
     @Volatile private var vocab: Vocabulary = Vocabulary.empty()
     /** On-device usage learning that biases ranking toward the user's own words. */
     private lateinit var usage: UsageModel
+    /** On-device next-word (bigram) learning for context-aware prediction. */
+    private lateinit var bigrams: ContextModel
+    /** The last committed word, lowercased — the context for the next prediction. */
+    @Volatile private var lastWord: String? = null
     /** Logical-space centre of each letter key, for computing tap offsets to learn. */
     @Volatile private var keyCenters: Map<Char, PointF> = emptyMap()
     /** The learning-consent toggle (BR-22); learning is off until opted in. */
@@ -81,6 +85,7 @@ class FeatherKeyImeService : InputMethodService() {
         langPrefs = LanguagePrefs(this)
         currentTags = langPrefs.activeTags()
         usage = UsageModel(this).also { it.load() }
+        bigrams = ContextModel(this).also { it.load() }
         loadVocab(currentTags)
         ConsentStore(applicationContext).learningEnabled
             .onEach { learningEnabled = it }
@@ -109,6 +114,7 @@ class FeatherKeyImeService : InputMethodService() {
         val sensitive = EditorInfoSensitivity.isSensitive(info)
         field = FieldSensitivity { sensitive } // captured once per field (E-2)
         pending.clear()
+        lastWord = null // a new field starts with no preceding-word context
         keyboard?.suggestions = emptyList()
         keyboard?.resetPage()
         // Pick up any language changes made in settings since the last field.
@@ -155,6 +161,10 @@ class FeatherKeyImeService : InputMethodService() {
         if (word.isEmpty() || field.isSensitive() || !learningEnabled) return
         runCatching { bridge.learnWord(word, field) }
         usage.record(word)
+        // Record the transition from the previous word, then advance the context.
+        val w = word.lowercase()
+        lastWord?.let { bigrams.record(it, w) }
+        lastWord = w
     }
 
     /** The space-bar language hint, e.g. "EN" or "EN PT" (primary first). */
@@ -228,11 +238,18 @@ class FeatherKeyImeService : InputMethodService() {
         keyboard?.suggestions = emptyList()
     }
 
-    /** Live predictions: user-learned words first, then frequency across languages. */
+    /**
+     * Live predictions. While typing a word: words that usually follow the
+     * previous one (context) and the user's own learned words first, then
+     * frequency across languages. On an empty prefix just after a word: the
+     * next-word predictions for the previous word (BR-10 next-word ranking).
+     */
     private fun updateSuggestions() {
         val prefix = pending.toString().lowercase()
-        keyboard?.suggestions =
-            if (prefix.isEmpty()) emptyList() else vocab.suggestions(prefix, usage.map, 3)
+        keyboard?.suggestions = when {
+            prefix.isNotEmpty() -> vocab.suggestions(prefix, usage.map, 3, bigrams.nextCounts(lastWord))
+            else -> lastWord?.let { bigrams.nextWords(it, 3) } ?: emptyList()
+        }
     }
 
     /** Commit a tapped suggestion, replacing the pending word. */
@@ -244,7 +261,7 @@ class FeatherKeyImeService : InputMethodService() {
         ic.commitText("$word ", 1)
         learnWord(word)
         pending.clear()
-        keyboard?.suggestions = emptyList()
+        updateSuggestions() // now show next-word predictions for this word
         schedulePersist()
     }
 
@@ -261,7 +278,7 @@ class FeatherKeyImeService : InputMethodService() {
         }
         ic.commitText(" ", 1)
         pending.clear()
-        keyboard?.suggestions = emptyList()
+        updateSuggestions() // next-word predictions for the word just committed
         schedulePersist()
     }
 
@@ -273,6 +290,7 @@ class FeatherKeyImeService : InputMethodService() {
     private fun flushWord(ic: InputConnection) {
         learnWord(pending.toString())
         pending.clear()
+        lastWord = null // Enter ends the line: start the next with no context
     }
 
     /**
@@ -361,12 +379,14 @@ class FeatherKeyImeService : InputMethodService() {
             if (!immediate) delay(PERSIST_DEBOUNCE_MS)
             runCatching { bridge.persist() }
             usage.persist()
+            bigrams.persist()
         }
     }
 
     override fun onDestroy() {
         recognizer?.destroy()
         usage.persist()
+        bigrams.persist()
         ioScope.cancel()
         runCatching { bridge.persist() }
         runCatching { bridge.close() }

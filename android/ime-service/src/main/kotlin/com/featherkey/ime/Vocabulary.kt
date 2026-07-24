@@ -29,22 +29,36 @@ class Vocabulary private constructor(private val langs: List<Lang>) {
     }
 
     /**
-     * Up to [limit] completions of [prefix]: learned words first (by use count),
-     * then the most frequent completion from each language in round-robin, so a
-     * multilingual user sees every active language.
+     * Up to [limit] completions of [prefix]: words that usually follow the
+     * previous word ([context]) first, then the user's learned words (by use
+     * count), then the most frequent completion from each language in
+     * round-robin, so a multilingual user sees every active language.
      */
-    fun suggestions(prefix: String, learned: Map<String, Int>, limit: Int): List<String> {
+    fun suggestions(
+        prefix: String,
+        learned: Map<String, Int>,
+        limit: Int,
+        context: Map<String, Int> = emptyMap(),
+    ): List<String> {
         if (prefix.isEmpty()) return emptyList()
         val out = LinkedHashSet<String>()
 
-        // 1) Words the user has actually used that match the prefix, most-used first.
+        // 1) Context continuations: words that usually follow the previous word
+        //    and match the prefix, most-likely first — the strongest signal.
+        context.keys.asSequence()
+            .filter { it.startsWith(prefix) }
+            .sortedWith(compareByDescending<String> { context[it] ?: 0 }.thenBy { rankOf(it) })
+            .forEach { if (out.size < limit) out.add(it) }
+        if (out.size >= limit) return out.toList()
+
+        // 2) Words the user has actually used that match the prefix, most-used first.
         learned.keys.asSequence()
             .filter { it.startsWith(prefix) }
             .sortedWith(compareByDescending<String> { learned[it] ?: 0 }.thenBy { rankOf(it) })
             .forEach { if (out.size < limit) out.add(it) }
         if (out.size >= limit) return out.toList()
 
-        // 2) Round-robin the most-frequent matches across languages.
+        // 3) Round-robin the most-frequent matches across languages.
         val perLang = langs.map { prefixMatches(it, prefix, limit + 2) }
         var i = 0
         while (out.size < limit) {

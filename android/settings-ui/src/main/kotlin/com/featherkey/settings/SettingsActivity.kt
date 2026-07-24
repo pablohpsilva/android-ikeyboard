@@ -80,6 +80,7 @@ class SettingsActivity : ComponentActivity() {
     private fun clearLearnedData() {
         File(filesDir, "featherkey.redb").delete()
         File(filesDir, "usage.tsv").delete() // shell-side usage learning
+        File(filesDir, "context.tsv").delete() // shell-side next-word learning
     }
 }
 
