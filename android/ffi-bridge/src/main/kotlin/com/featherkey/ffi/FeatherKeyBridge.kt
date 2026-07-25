@@ -14,6 +14,9 @@ package com.featherkey.ffi
 
 import com.featherkey.ffi.generated.FfiCorrection
 import com.featherkey.ffi.generated.FfiDecode
+import com.featherkey.ffi.generated.FfiRankCandidate
+import com.featherkey.ffi.generated.FfiRanked
+import com.featherkey.ffi.generated.FfiSource
 import com.featherkey.ffi.generated.FfiSuggestion
 import com.featherkey.ffi.generated.KeyboardCore
 import com.featherkey.ffi.generated.LanguagePack
@@ -64,6 +67,22 @@ class FeatherKeyBridge private constructor(private val core: KeyboardCore) : Aut
 
     fun correct(text: String, preceding: String, prefix: String): FfiCorrection =
         core.correct(text, preceding, prefix)
+
+    /** Rank shell-gathered candidates with current language momentum. */
+    fun rank(candidates: List<FfiRankCandidate>, k: UInt): List<FfiRanked> = core.rank(candidates, k)
+
+    /** Multilingual momentum-aware correction (never clobbers a known word). */
+    fun chooseCorrection(
+        text: String,
+        deviceKnown: List<String>,
+        deviceCands: List<FfiRankCandidate>,
+    ): FfiCorrection = core.chooseCorrection(text, deviceKnown, deviceCands)
+
+    /**
+     * Fold a committed word's recogniser languages into momentum. The caller must
+     * only invoke this when consent is on and the field is not sensitive.
+     */
+    fun observeLanguage(recognizers: List<String>) = core.observeLanguage(recognizers)
 
     /** Learn a committed word unless the field is sensitive (E-2 / BR-26). */
     fun learnWord(word: String, field: FieldSensitivity) =

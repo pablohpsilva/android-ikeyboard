@@ -766,6 +766,12 @@ internal open class UniffiVTableCallbackInterfaceSensitiveField(
 
 
 
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -796,6 +802,8 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_featherkey_core_fn_method_keyboardcore_add_to_dictionary(`ptr`: Pointer,`word`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_featherkey_core_fn_method_keyboardcore_choose_correction(`ptr`: Pointer,`text`: RustBuffer.ByValue,`deviceKnown`: RustBuffer.ByValue,`deviceCands`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_featherkey_core_fn_method_keyboardcore_correct(`ptr`: Pointer,`text`: RustBuffer.ByValue,`preceding`: RustBuffer.ByValue,`prefix`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_featherkey_core_fn_method_keyboardcore_decode(`ptr`: Pointer,`x`: Float,`y`: Float,uniffi_out_err: UniffiRustCallStatus, 
@@ -804,10 +812,14 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_featherkey_core_fn_method_keyboardcore_learn_word(`ptr`: Pointer,`word`: RustBuffer.ByValue,`field`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_featherkey_core_fn_method_keyboardcore_observe_language(`ptr`: Pointer,`recognizers`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun uniffi_featherkey_core_fn_method_keyboardcore_observe_tap(`ptr`: Pointer,`key`: RustBuffer.ByValue,`dx`: Float,`dy`: Float,`field`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_featherkey_core_fn_method_keyboardcore_persist(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_featherkey_core_fn_method_keyboardcore_rank(`ptr`: Pointer,`candidates`: RustBuffer.ByValue,`k`: Int,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_featherkey_core_fn_method_keyboardcore_set_active_languages(`ptr`: Pointer,`languages`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_featherkey_core_fn_method_keyboardcore_suggest(`ptr`: Pointer,`preceding`: RustBuffer.ByValue,`prefix`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -942,6 +954,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_add_to_dictionary(
     ): Short
+    fun uniffi_featherkey_core_checksum_method_keyboardcore_choose_correction(
+    ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_correct(
     ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_decode(
@@ -950,9 +964,13 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_learn_word(
     ): Short
+    fun uniffi_featherkey_core_checksum_method_keyboardcore_observe_language(
+    ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_observe_tap(
     ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_persist(
+    ): Short
+    fun uniffi_featherkey_core_checksum_method_keyboardcore_rank(
     ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_set_active_languages(
     ): Short
@@ -991,6 +1009,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_add_to_dictionary() != 64687.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_choose_correction() != 52718.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_correct() != 22143.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1003,10 +1024,16 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_learn_word() != 25093.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_observe_language() != 19234.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_observe_tap() != 53684.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_persist() != 3164.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_rank() != 44508.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_set_active_languages() != 10043.toShort()) {
@@ -1402,6 +1429,11 @@ public interface KeyboardCoreInterface {
     fun `addToDictionary`(`word`: kotlin.String)
     
     /**
+     * Multilingual momentum-aware correction (never clobbers a known word).
+     */
+    fun `chooseCorrection`(`text`: kotlin.String, `deviceKnown`: List<kotlin.String>, `deviceCands`: List<FfiRankCandidate>): FfiCorrection
+    
+    /**
      * Correct `text` in its context (never clobbers an intended word).
      */
     fun `correct`(`text`: kotlin.String, `preceding`: kotlin.String, `prefix`: kotlin.String): FfiCorrection
@@ -1423,6 +1455,12 @@ public interface KeyboardCoreInterface {
     fun `learnWord`(`word`: kotlin.String, `field`: SensitiveField)
     
     /**
+     * Fold a committed word's recogniser languages into momentum. The shell must
+     * only call this when consent is on and the field is not sensitive.
+     */
+    fun `observeLanguage`(`recognizers`: List<kotlin.String>)
+    
+    /**
      * Fold a tap offset for `key` — unless `field` is sensitive (E-2 / BR-26).
      */
     fun `observeTap`(`key`: kotlin.String, `dx`: kotlin.Float, `dy`: kotlin.Float, `field`: SensitiveField)
@@ -1432,6 +1470,11 @@ public interface KeyboardCoreInterface {
      * a debounce; it is off the input path.
      */
     fun `persist`()
+    
+    /**
+     * Rank shell-gathered candidates with current language momentum.
+     */
+    fun `rank`(`candidates`: List<FfiRankCandidate>, `k`: kotlin.UInt): List<FfiRanked>
     
     /**
      * Replace the active language set atomically.
@@ -1578,6 +1621,22 @@ open class KeyboardCore: Disposable, AutoCloseable, KeyboardCoreInterface {
 
     
     /**
+     * Multilingual momentum-aware correction (never clobbers a known word).
+     */
+    @Throws(FfiException::class)override fun `chooseCorrection`(`text`: kotlin.String, `deviceKnown`: List<kotlin.String>, `deviceCands`: List<FfiRankCandidate>): FfiCorrection {
+            return FfiConverterTypeFfiCorrection.lift(
+    callWithPointer {
+    uniffiRustCallWithError(FfiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_featherkey_core_fn_method_keyboardcore_choose_correction(
+        it, FfiConverterString.lower(`text`),FfiConverterSequenceString.lower(`deviceKnown`),FfiConverterSequenceTypeFfiRankCandidate.lower(`deviceCands`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Correct `text` in its context (never clobbers an intended word).
      */
     @Throws(FfiException::class)override fun `correct`(`text`: kotlin.String, `preceding`: kotlin.String, `prefix`: kotlin.String): FfiCorrection {
@@ -1640,6 +1699,21 @@ open class KeyboardCore: Disposable, AutoCloseable, KeyboardCoreInterface {
 
     
     /**
+     * Fold a committed word's recogniser languages into momentum. The shell must
+     * only call this when consent is on and the field is not sensitive.
+     */override fun `observeLanguage`(`recognizers`: List<kotlin.String>)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_featherkey_core_fn_method_keyboardcore_observe_language(
+        it, FfiConverterSequenceString.lower(`recognizers`),_status)
+}
+    }
+    
+    
+
+    
+    /**
      * Fold a tap offset for `key` — unless `field` is sensitive (E-2 / BR-26).
      */
     @Throws(FfiException::class)override fun `observeTap`(`key`: kotlin.String, `dx`: kotlin.Float, `dy`: kotlin.Float, `field`: SensitiveField)
@@ -1667,6 +1741,21 @@ open class KeyboardCore: Disposable, AutoCloseable, KeyboardCoreInterface {
 }
     }
     
+    
+
+    
+    /**
+     * Rank shell-gathered candidates with current language momentum.
+     */override fun `rank`(`candidates`: List<FfiRankCandidate>, `k`: kotlin.UInt): List<FfiRanked> {
+            return FfiConverterSequenceTypeFfiRanked.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_featherkey_core_fn_method_keyboardcore_rank(
+        it, FfiConverterSequenceTypeFfiRankCandidate.lower(`candidates`),FfiConverterUInt.lower(`k`),_status)
+}
+    }
+    )
+    }
     
 
     
@@ -2264,6 +2353,85 @@ public object FfiConverterTypeFfiKey: FfiConverterRustBuffer<FfiKey> {
 
 
 /**
+ * One correction/suggestion candidate the shell gathered (e.g. from the device
+ * spell-checker), tagged by language and its rank within its own source.
+ */
+data class FfiRankCandidate (
+    var `word`: kotlin.String, 
+    var `lang`: kotlin.String, 
+    var `source`: FfiSource, 
+    var `sourceRank`: kotlin.UInt
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiRankCandidate: FfiConverterRustBuffer<FfiRankCandidate> {
+    override fun read(buf: ByteBuffer): FfiRankCandidate {
+        return FfiRankCandidate(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterTypeFfiSource.read(buf),
+            FfiConverterUInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiRankCandidate) = (
+            FfiConverterString.allocationSize(value.`word`) +
+            FfiConverterString.allocationSize(value.`lang`) +
+            FfiConverterTypeFfiSource.allocationSize(value.`source`) +
+            FfiConverterUInt.allocationSize(value.`sourceRank`)
+    )
+
+    override fun write(value: FfiRankCandidate, buf: ByteBuffer) {
+            FfiConverterString.write(value.`word`, buf)
+            FfiConverterString.write(value.`lang`, buf)
+            FfiConverterTypeFfiSource.write(value.`source`, buf)
+            FfiConverterUInt.write(value.`sourceRank`, buf)
+    }
+}
+
+
+
+/**
+ * A candidate after ranking, in final blended-score order.
+ */
+data class FfiRanked (
+    var `word`: kotlin.String, 
+    var `lang`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiRanked: FfiConverterRustBuffer<FfiRanked> {
+    override fun read(buf: ByteBuffer): FfiRanked {
+        return FfiRanked(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiRanked) = (
+            FfiConverterString.allocationSize(value.`word`) +
+            FfiConverterString.allocationSize(value.`lang`)
+    )
+
+    override fun write(value: FfiRanked, buf: ByteBuffer) {
+            FfiConverterString.write(value.`word`, buf)
+            FfiConverterString.write(value.`lang`, buf)
+    }
+}
+
+
+
+/**
  * A ranked completion.
  */
 data class FfiSuggestion (
@@ -2498,6 +2666,39 @@ public object FfiConverterTypeFfiError : FfiConverterRustBuffer<FfiException> {
 
 
 
+/**
+ * Where a shell-gathered candidate came from — mirrors [`featherkey_contracts::Source`].
+ */
+
+enum class FfiSource {
+    
+    LEXICON,
+    DEVICE;
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiSource: FfiConverterRustBuffer<FfiSource> {
+    override fun read(buf: ByteBuffer) = try {
+        FfiSource.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: FfiSource) = 4UL
+
+    override fun write(value: FfiSource, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
 
 /**
  * @suppress
@@ -2608,6 +2809,62 @@ public object FfiConverterSequenceTypeFfiKey: FfiConverterRustBuffer<List<FfiKey
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeFfiKey.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeFfiRankCandidate: FfiConverterRustBuffer<List<FfiRankCandidate>> {
+    override fun read(buf: ByteBuffer): List<FfiRankCandidate> {
+        val len = buf.getInt()
+        return List<FfiRankCandidate>(len) {
+            FfiConverterTypeFfiRankCandidate.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<FfiRankCandidate>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeFfiRankCandidate.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<FfiRankCandidate>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeFfiRankCandidate.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeFfiRanked: FfiConverterRustBuffer<List<FfiRanked>> {
+    override fun read(buf: ByteBuffer): List<FfiRanked> {
+        val len = buf.getInt()
+        return List<FfiRanked>(len) {
+            FfiConverterTypeFfiRanked.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<FfiRanked>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeFfiRanked.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<FfiRanked>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeFfiRanked.write(it, buf)
         }
     }
 }
