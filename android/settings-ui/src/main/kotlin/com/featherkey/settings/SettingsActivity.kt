@@ -116,7 +116,7 @@ class SettingsActivity : ComponentActivity() {
                             onEnableKeyboard = { openImeSettings() },
                             languages = languages,
                             initialActive = langPrefs.activeTags(),
-                            onActiveChanged = { langPrefs.setActiveTags(it) },
+                            onActiveChanged = { langPrefs.setActiveTags(it); langPrefs.activeTags() },
                             learningEnabled = learning,
                             onLearningChanged = { scope.launch { consent.setLearningEnabled(it) } },
                             appearance = appearance,
@@ -179,7 +179,7 @@ private fun SettingsScreen(
     onEnableKeyboard: () -> Unit,
     languages: List<KeyboardLanguage>,
     initialActive: List<String>,
-    onActiveChanged: (List<String>) -> Unit,
+    onActiveChanged: (List<String>) -> List<String>,
     learningEnabled: Boolean,
     onLearningChanged: (Boolean) -> Unit,
     appearance: KeyboardAppearancePrefs,
@@ -272,15 +272,16 @@ private fun StatusRow(ok: Boolean, text: String) {
 private fun LanguagesSection(
     languages: List<KeyboardLanguage>,
     initialActive: List<String>,
-    onActiveChanged: (List<String>) -> Unit,
+    onActiveChanged: (List<String>) -> List<String>,
 ) {
     // Ordered active tags (first = primary). All edits go through [update], which
-    // keeps at least one active and reports the new order to the caller.
+    // keeps at least one active and reflects the *persisted* result — setActiveTags
+    // may expand/reorder the set (e.g. the Luxembourgish companion bundle), so we
+    // adopt what it actually saved rather than the raw request.
     var active by remember { mutableStateOf(initialActive.filter { tag -> languages.any { it.tag == tag } }) }
     fun update(next: List<String>) {
         if (next.isEmpty()) return // never leave zero languages selected
-        active = next
-        onActiveChanged(next)
+        active = onActiveChanged(next).filter { tag -> languages.any { it.tag == tag } }
     }
 
     val byTag = languages.associateBy { it.tag }
