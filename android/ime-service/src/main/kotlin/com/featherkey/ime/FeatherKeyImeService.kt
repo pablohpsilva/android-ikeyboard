@@ -33,7 +33,6 @@ import android.widget.Toast
 import com.featherkey.ffi.FeatherKeyBridge
 import com.featherkey.ffi.FieldSensitivity
 import com.featherkey.ffi.Language
-import com.featherkey.ffi.generated.FfiDecode
 import com.featherkey.ffi.generated.FfiRankCandidate
 import com.featherkey.ffi.generated.FfiSource
 import com.featherkey.keyboard.FunctionKey
@@ -64,9 +63,6 @@ class FeatherKeyImeService : InputMethodService() {
 
     private var field: FieldSensitivity = FieldSensitivity { false }
     private val pending = StringBuilder()
-    /** Per-tap key-probability distributions for the word in [pending], kept in
-     *  lockstep with it, so the word can be re-read probabilistically (BR-10). */
-    private val tapDists = ArrayList<Map<Char, Float>>()
     private var persistJob: Job? = null
 
     private var keyboard: KeyboardView? = null
@@ -136,7 +132,7 @@ class FeatherKeyImeService : InputMethodService() {
         super.onStartInput(info, restarting)
         val sensitive = EditorInfoSensitivity.isSensitive(info)
         field = FieldSensitivity { sensitive } // captured once per field (E-2)
-        pending.clear(); tapDists.clear()
+        pending.clear()
         lastWord = null // a new field starts with no preceding-word context
         keyboard?.suggestions = emptyList()
         keyboard?.resetPage()
@@ -191,8 +187,6 @@ class FeatherKeyImeService : InputMethodService() {
             pending.clear()
         }
         ic.commitText(best, 1)
-        // Swipe result has no per-tap data; drop any so suggestions use prefixes.
-        tapDists.clear()
         pending.clear(); pending.append(best) // treat as the current word: alts replace it
         keyboard?.suggestions = ranked.take(3).ifEmpty { words.take(3) }
         schedulePersist()
@@ -245,24 +239,12 @@ class FeatherKeyImeService : InputMethodService() {
         val result = runCatching { bridge.decode(x, y) }.getOrNull() ?: return
         val decoded = result.best ?: return
         observeTap(decoded, x, y)
-        tapDists.add(distributionOf(result)) // remember the tap as a distribution
         val kb = keyboard
         val ch = if (kb?.shifted == true) decoded.uppercase() else decoded
         pending.append(ch)
         ic.commitText(ch, 1)
         if (kb?.shifted == true) kb.shifted = false
         updateSuggestions()
-    }
-
-    /** A tap's key -> probability map (lowercased), from the decoder's candidates. */
-    private fun distributionOf(result: FfiDecode): Map<Char, Float> {
-        val m = HashMap<Char, Float>(result.candidates.size)
-        for (c in result.candidates) {
-            val ch = c.key.firstOrNull()?.lowercaseChar() ?: continue
-            val cur = m[ch]
-            if (cur == null || c.confidence > cur) m[ch] = c.confidence
-        }
-        return m
     }
 
     /**
@@ -299,7 +281,7 @@ class FeatherKeyImeService : InputMethodService() {
     private fun handleChar(ch: String) {
         val ic = currentInputConnection ?: return
         ic.commitText(ch, 1)
-        pending.clear(); tapDists.clear()
+        pending.clear()
         keyboard?.suggestions = emptyList()
     }
 
@@ -313,7 +295,7 @@ class FeatherKeyImeService : InputMethodService() {
     private fun handleEmoji(emoji: String) {
         val ic = currentInputConnection ?: return
         ic.commitText(emoji, 1)
-        pending.clear(); tapDists.clear()
+        pending.clear()
         lastWord = null
         keyboard?.suggestions = emptyList()
         keyboard?.recents = emojiRecents.record(emoji)
@@ -366,7 +348,7 @@ class FeatherKeyImeService : InputMethodService() {
         if (cur.isNotEmpty()) ic.deleteSurroundingText(cur.length, 0)
         ic.commitText("$word ", 1)
         learnWord(word)
-        pending.clear(); tapDists.clear()
+        pending.clear()
         updateSuggestions() // now show next-word predictions for this word
         schedulePersist()
     }
@@ -383,7 +365,7 @@ class FeatherKeyImeService : InputMethodService() {
             learnWord(corrected ?: word)
         }
         ic.commitText(" ", 1)
-        pending.clear(); tapDists.clear()
+        pending.clear()
         updateSuggestions() // next-word predictions for the word just committed
         schedulePersist()
     }
@@ -414,13 +396,12 @@ class FeatherKeyImeService : InputMethodService() {
 
     private fun backspace(ic: InputConnection) {
         if (pending.isNotEmpty()) pending.deleteCharAt(pending.length - 1)
-        if (tapDists.isNotEmpty()) tapDists.removeAt(tapDists.size - 1)
         ic.deleteSurroundingText(1, 0)
     }
 
     private fun flushWord(ic: InputConnection) {
         learnWord(pending.toString())
-        pending.clear(); tapDists.clear()
+        pending.clear()
         lastWord = null // Enter ends the line: start the next with no context
     }
 
