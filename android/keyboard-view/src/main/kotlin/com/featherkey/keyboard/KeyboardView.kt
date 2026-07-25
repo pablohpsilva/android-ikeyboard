@@ -60,6 +60,9 @@ class KeyboardView @JvmOverloads constructor(
     /** An emoji was tapped on the emoji page: commit this exact string verbatim. */
     var onEmoji: ((String) -> Unit)? = null
 
+    /** A long-press accent variant (or base letter) was chosen: commit it verbatim. */
+    var onAccentKey: ((String) -> Unit)? = null
+
     private var keysVersion = 0
 
     /** The active alpha layout's keys (from the core). */
@@ -203,6 +206,15 @@ class KeyboardView @JvmOverloads constructor(
     private var gestureCell: Cell.Letter? = null
     private var gesturing = false
     private var trailLen = 0f
+
+    // --- Long-press accent popup state ---
+    private var accentBase: Cell.Letter? = null
+    private var accentVariants: List<String> = emptyList()
+    private var accentIndex: Int = -1            // -1 = nothing highlighted (release = base letter)
+    private var accentPopup: RectF? = null       // popup band in view pixels
+    private val longPressRunnable = Runnable { startAccentMode() }
+    private fun longPressTimeoutMs() = 300L
+    private fun accentActive() = accentBase != null
 
     private enum class Sp { SHIFT, BACKSPACE, ENTER, SPACE, GLOBE, MIC, TO_NUMBERS, TO_SYMBOLS, TO_ALPHA, TO_EMOJI }
 
@@ -425,6 +437,8 @@ class KeyboardView @JvmOverloads constructor(
             for (i in 1 until trail.size) path.lineTo(trail[i].x, trail[i].y)
             canvas.drawPath(path, trailPaint)
         }
+
+        if (accentActive()) drawAccentPopup(canvas, c)
     }
 
     /**
@@ -477,6 +491,32 @@ class KeyboardView @JvmOverloads constructor(
         labelPaint.textSize = size
         val cy = r.centerY() - (labelPaint.ascent() + labelPaint.descent()) / 2
         canvas.drawText(text, r.centerX(), cy, labelPaint)
+    }
+
+    private fun drawAccentPopup(canvas: Canvas, c: Palette) {
+        val rect = accentPopup ?: return
+        val n = accentVariants.size
+        if (n == 0) return
+        val cellW = rect.width() / n
+        // Shadow + base plate.
+        canvas.drawRoundRect(rect.left, rect.top + dp(1f), rect.right, rect.bottom + dp(1.5f),
+            keyRadius, keyRadius, shadowPaint)
+        canvas.drawRoundRect(rect, keyRadius, keyRadius, keyPaint)
+        labelPaint.textSize = rowHeight * 0.44f
+        for (i in 0 until n) {
+            val cell = RectF(rect.left + i * cellW, rect.top, rect.left + (i + 1) * cellW, rect.bottom)
+            if (i == accentIndex) {
+                iconFill.color = c.accent
+                canvas.drawRoundRect(cell, keyRadius, keyRadius, iconFill)
+                labelPaint.color = Color.WHITE
+            } else {
+                labelPaint.color = c.label
+            }
+            val text = if (shifted) accentVariants[i].uppercase() else accentVariants[i]
+            val cy = cell.centerY() - (labelPaint.ascent() + labelPaint.descent()) / 2
+            canvas.drawText(text, cell.centerX(), cy, labelPaint)
+        }
+        labelPaint.color = c.label
     }
 
     private fun drawSpecial(canvas: Canvas, cell: Cell.Special, c: Palette) {
@@ -569,6 +609,9 @@ class KeyboardView @JvmOverloads constructor(
                     trailLen = 0f
                     trail.clear(); trail.add(PointF(event.x, event.y))
                     pressed = hit; invalidate()
+                    if (Accents.hasVariants(hit.label.firstOrNull() ?: ' ')) {
+                        postDelayed(longPressRunnable, longPressTimeoutMs())
+                    }
                 } else {
                     gestureCell = null
                     pressed = hit; invalidate()
@@ -577,6 +620,7 @@ class KeyboardView @JvmOverloads constructor(
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
+                if (accentActive()) { updateAccentSelection(event.x); return true }
                 val g = gestureCell ?: return true
                 val last = trail.lastOrNull()
                 val p = PointF(event.x, event.y)
@@ -584,11 +628,19 @@ class KeyboardView @JvmOverloads constructor(
                 trail.add(p)
                 if (!gesturing && trailLen > gestureStartThreshold()) {
                     gesturing = true; pressed = null
+                    removeCallbacks(longPressRunnable) // finger moved: it's a swipe
                 }
                 if (gesturing) invalidate()
                 return true
             }
             MotionEvent.ACTION_UP -> {
+                removeCallbacks(longPressRunnable)
+                if (accentActive()) {
+                    val chosen = accentVariants.getOrNull(accentIndex) ?: accentBase?.label
+                    if (chosen != null) onAccentKey?.invoke(chosen)
+                    resetAccent(); resetGesture()
+                    return true
+                }
                 val g = gestureCell
                 if (g != null) {
                     if (gesturing && trail.size >= 3) {
@@ -603,7 +655,9 @@ class KeyboardView @JvmOverloads constructor(
                 resetGesture()
                 return true
             }
-            MotionEvent.ACTION_CANCEL -> { resetGesture(); return true }
+            MotionEvent.ACTION_CANCEL -> {
+                removeCallbacks(longPressRunnable); resetAccent(); resetGesture(); return true
+            }
         }
         return super.onTouchEvent(event)
     }
@@ -615,6 +669,49 @@ class KeyboardView @JvmOverloads constructor(
         trail.clear()
         if (pressed != null) pressed = null
         invalidate()
+    }
+
+    /** Fired by the long-press timer: if the held letter has accents, open the popup. */
+    private fun startAccentMode() {
+        val base = gestureCell ?: return
+        val variants = Accents.variantsFor(base.label.firstOrNull() ?: return)
+        if (variants.isEmpty()) return
+        gesturing = false                        // long-press wins over swipe
+        accentBase = base
+        accentVariants = variants
+        accentIndex = -1
+        accentPopup = accentPopupRect(base, variants.size)
+        pressed = base
+        invalidate()
+    }
+
+    /** The popup band above [base]: one key-width cell per variant, centred over the
+     *  key and clamped into the view; if it would clip the top, it is pinned to y=0. */
+    private fun accentPopupRect(base: Cell.Letter, count: Int): RectF {
+        val cellW = base.rect.width()
+        val totalW = cellW * count
+        val left = (base.rect.centerX() - totalW / 2f)
+            .coerceIn(sideMargin, (width - sideMargin - totalW).coerceAtLeast(sideMargin))
+        val h = rowHeight
+        val top = (base.rect.top - h - dp(6f)).coerceAtLeast(0f)
+        return RectF(left, top, left + totalW, top + h)
+    }
+
+    private fun updateAccentSelection(x: Float) {
+        val rect = accentPopup ?: return
+        val n = accentVariants.size
+        val cellW = rect.width() / n
+        Accents.variantIndexAt(x, rect.left, cellW, n)?.let {
+            if (it != accentIndex) { accentIndex = it; invalidate() }
+        }
+    }
+
+    private fun resetAccent() {
+        accentBase = null
+        accentVariants = emptyList()
+        accentIndex = -1
+        accentPopup = null
+        pressed = null
     }
 
     private fun fire(cell: Cell, tx: Float, ty: Float) {
