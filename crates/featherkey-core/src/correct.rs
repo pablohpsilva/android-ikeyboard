@@ -257,4 +257,16 @@ mod tests {
         let got = core.choose_correction("cit", &[], vec![]).expect("ok");
         assert_eq!(got.primary, "cat");
     }
+
+    #[test]
+    fn a_nonword_with_no_neighbour_in_any_language_is_left_unchanged() {
+        // "qqqq" is far from every dictionary word and unknown to the device:
+        // no candidates -> nothing to correct, returned as typed.
+        let core = FeatherKeyCore::new(vec![("en".into(), vec!["cat".into(), "dog".into()])])
+            .expect("core");
+        let got = core.choose_correction("qqqq", &[], vec![]).expect("ok");
+        assert_eq!(got.primary, "qqqq");
+        assert!(!got.applied);
+        assert!(got.alternatives.is_empty());
+    }
 }

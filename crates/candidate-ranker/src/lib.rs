@@ -131,6 +131,19 @@ mod tests {
         assert!(rank(&[], &mom, 3).is_empty());
     }
 
+    #[test]
+    fn a_device_sourced_candidate_is_ranked() {
+        let mom = Momentum::new("en", &["en".into()]);
+        let cands = vec![Candidate {
+            word: "hello".into(),
+            lang: "en".into(),
+            source: Source::Device,
+            source_rank: 0,
+        }];
+        let out = rank(&cands, &mom, 1);
+        assert_eq!(out[0].word, "hello");
+    }
+
     use proptest::prelude::*;
     proptest! {
         #[test]
