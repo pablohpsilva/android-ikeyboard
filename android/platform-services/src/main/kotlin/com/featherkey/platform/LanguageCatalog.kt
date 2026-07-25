@@ -30,6 +30,9 @@ object LanguageCatalog {
         // resolves false until `assets/lexicons/<tag>.txt` ships, so no predictions.
         "ru" to "Русский",
         "el" to "Ελληνικά",
+        // Luxembourgish: QWERTZ layout (shared with German) + a bundled lexicon.
+        // hasLexicon flips true automatically once assets/lexicons/lb.txt ships.
+        "lb" to "Lëtzebuergesch",
     )
 
     /** All selectable languages; [KeyboardLanguage.hasLexicon] = a bundled asset exists. */
