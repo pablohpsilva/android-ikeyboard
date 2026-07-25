@@ -35,7 +35,7 @@ jobs:
       - name: Clippy — library code (strict, no-panic invariant)
         # Library/bin code must be panic-averse: unwrap/expect/panic are denied
         # here (SEDD §5.5 r3). Runs on lib+bin targets only.
-        run: cargo clippy --workspace --lib --bins -- -D warnings
+        run: cargo clippy --workspace --lib --bins --locked -- -D warnings
 
       - name: Clippy — test code (real lints, but unwrap/expect allowed)
         # Tests legitimately unwrap/expect; still catch every other clippy lint.
@@ -44,7 +44,10 @@ jobs:
             -A clippy::unwrap_used -A clippy::expect_used -A clippy::panic
 
       - name: Tests
-        run: cargo test --workspace --all-targets
+        # --locked: build against the committed Cargo.lock exactly; a stale lock
+        # (manifest changed without updating the lock) fails the build. This is
+        # what makes the pinned, reproducible dependency graph real (BR-65).
+        run: cargo test --workspace --all-targets --locked
 
       - name: Architectural fitness functions
         # No-god-files, core purity, acyclic DAG, inward dependency rule
@@ -96,11 +99,21 @@ jobs:
         # sources, no yanked/advisory crates, no wildcard versions.
         run: cargo deny check
       - name: cargo-audit (RustSec advisory DB)
-        # Needs a lockfile; the workspace gitignores Cargo.lock (libraries), so
-        # generate one for the audit.
+        # Audits the committed Cargo.lock directly. --locked asserts the lock is
+        # in sync with the manifests, so the advisory scan reflects exactly what
+        # ships — no on-the-fly resolution that could differ from the pinned graph.
+        run: cargo audit --locked
+
+      - name: No committed native binaries
+        # The native core (libfeatherkey_core.so) is a build artifact reproduced
+        # from source (android/ffi-bridge/build-jni.sh); a prebuilt .so in the tree
+        # is unverifiable against its source and is barred (F-Droid posture, BR-65).
         run: |
-          cargo generate-lockfile
-          cargo audit
+          if git ls-files '*.so' '*.dylib' '*.dll' | grep .; then
+            echo "::error::Native binaries are committed above. They must be built from source, not checked in."
+            exit 1
+          fi
+          echo "OK: no native binaries tracked in git."
 
   android-shell:
     name: Android shell — assemble & unit test

@@ -36,6 +36,10 @@ class KeystoreKeyProvider(private val context: Context) {
         const val MASTER_ALIAS = "featherkey.master.v1"
         const val KEYSTORE = "AndroidKeyStore"
         const val WRAPPED_KEY_FILE = "featherkey.datakey.wrapped"
+        // The encrypted store the data key opens; dropped when the key is reset so a
+        // fresh key never faces an old, now-undecryptable store. Must match the path
+        // FeatherKeyImeService opens (File(filesDir, "featherkey.redb")).
+        const val STORE_FILE = "featherkey.redb"
         const val DATA_KEY_BYTES = 32
         const val GCM_TAG_BITS = 128
         const val GCM_IV_BYTES = 12
@@ -45,22 +49,46 @@ class KeystoreKeyProvider(private val context: Context) {
      * Return the 32-byte data key for the encrypted store, provisioning it on
      * first run. Caller must hand it straight to the native core and hold no
      * long-lived copy.
+     *
+     * Self-healing: if a persisted wrapped key cannot be unwrapped — the
+     * Keystore master key was invalidated (device restore/migration, secure-lock
+     * reset) or the blob on disk is corrupt — we do NOT crash the IME (which
+     * would leave the user unable to type). We discard the unusable material and
+     * provision a fresh data key. The trade-off is explicit: the prior encrypted
+     * store becomes undecryptable and its learned data is effectively reset,
+     * which is the correct failure mode for a device-bound key (BR-62) — better a
+     * fresh, empty, still-encrypted store than a dead keyboard.
      */
     fun provisionDataKey(): ByteArray {
         val blobFile = File(context.filesDir, WRAPPED_KEY_FILE)
-        return if (blobFile.exists()) {
-            unwrap(blobFile.readBytes())
-        } else {
-            val dataKey = ByteArray(DATA_KEY_BYTES).also { java.security.SecureRandom().nextBytes(it) }
-            blobFile.writeBytes(wrap(dataKey))
-            dataKey
+        if (blobFile.exists()) {
+            runCatching { unwrap(blobFile.readBytes()) }.getOrNull()?.let { return it }
+            // Unwrap failed: the master key or blob is no longer usable. Drop both
+            // the wrapped key and the now-unreadable store so we start clean.
+            runCatching { blobFile.delete() }
+            runCatching { deleteMasterKey() }
+            runCatching { File(context.filesDir, STORE_FILE).delete() }
         }
+        val dataKey = ByteArray(DATA_KEY_BYTES).also { java.security.SecureRandom().nextBytes(it) }
+        runCatching { blobFile.writeBytes(wrap(dataKey)) }
+        return dataKey
+    }
+
+    /** Remove the master key so the next [masterKey] call regenerates a fresh one. */
+    private fun deleteMasterKey() {
+        KeyStore.getInstance(KEYSTORE).apply { load(null) }.deleteEntry(MASTER_ALIAS)
     }
 
     private fun masterKey(): SecretKey {
         val ks = KeyStore.getInstance(KEYSTORE).apply { load(null) }
         (ks.getKey(MASTER_ALIAS, null) as? SecretKey)?.let { return it }
 
+        // Deliberately NOT user-authentication- or unlocked-device-bound: the IME
+        // provisions this key at service startup, which can occur on the lock
+        // screen (e.g. a direct-reply field), so requiring an unlocked device
+        // would make the keyboard unusable exactly when it is needed. Confidentiality
+        // rests on the non-exportable, hardware-held (StrongBox where available)
+        // master key plus the app sandbox and allowBackup=false, not on lock state.
         val builder = KeyGenParameterSpec.Builder(
             MASTER_ALIAS,
             KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,

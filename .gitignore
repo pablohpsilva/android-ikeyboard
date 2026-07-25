@@ -1,8 +1,9 @@
 # Rust
 /target
 **/*.rs.bk
-# Workspace of libraries; an app crate that needs a pinned lock re-adds it.
-Cargo.lock
+# Cargo.lock IS committed: this workspace produces a shipped artifact (the native
+# libfeatherkey_core.so), so the exact transitive dependency graph must be pinned
+# and reproducible for the supply-chain gate (deny.toml / BR-65) to mean anything.
 
 # Android / Gradle
 android/.gradle/
@@ -11,6 +12,11 @@ android/**/build/
 android/local.properties
 *.iml
 .idea/
+# Native libraries are BUILD ARTIFACTS, not source: they are reproduced from the
+# Rust core by `android/ffi-bridge/build-jni.sh` (see BUILD_AND_RUN.md §4). An
+# opaque prebuilt .so committed to the tree cannot be verified against the audited
+# source, so it must never be checked in (F-Droid reproducible-build posture).
+android/ffi-bridge/src/main/jniLibs/**/*.so
 
 # Python fitness tooling
 __pycache__/
