@@ -17,6 +17,7 @@ members = [
     "crates/kernel",
     "crates/contracts",
     "crates/layout-engine",
+    "crates/language-momentum",
     "crates/input-decoder",
     "crates/dictionary",
     "crates/secure-store",

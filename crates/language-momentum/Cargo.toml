@@ -1,0 +1,19 @@
+[package]
+name = "featherkey-language-momentum"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Recency-weighted per-language momentum: which language the user is writing in now."
+
+[package.metadata.featherkey]
+layer = "domain"
+
+[lints]
+workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+proptest = "1.11.0"
