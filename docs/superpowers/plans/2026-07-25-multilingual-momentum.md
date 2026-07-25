@@ -1030,16 +1030,30 @@ fn core_fuzzy_prior_keeps_the_primary_fix_against_a_slightly_hotter_language() {
   - `fn choose_correction(&self, text: String, device_known: Vec<String>, device_cands: Vec<FfiCandidate>) -> Result<FfiCorrection, FfiError>`
   - `fn observe_language(&self, recognizers: Vec<String>)`
 
+**Reality check (verified):** `mod ffi` is `#[cfg(feature = "uniffi")]` and the coverage/test gate (`cargo llvm-cov --workspace`, `cargo test`) runs **without** that feature — so `ffi.rs` is NOT compiled or coverage-measured by the default gate, and the file's own header says "AUTHORED, NOT COMPILED". The exported methods are thin delegations to `FeatherKeyCore::{rank_candidates, choose_correction, observe_language}`, which are already fully unit-tested (Tasks C1–C4). Therefore the verification for this task is **compilation + lint under `--features uniffi`**, plus a pure unit test of the one piece of real logic here — the `From<FfiCandidate>` conversion. Do NOT build a `KeyboardCore::open` store-backed smoke test: there is no existing pattern to copy and it adds fragility for no gate coverage.
+
 - [ ] **Step 1: Write the failing test**
 
-FFI methods are exercised via the core; add a Rust test in `ffi.rs` `#[cfg(test)]` that constructs a `KeyboardCore` in a temp dir and calls the new methods. If the existing `ffi.rs` has no test harness (it may be covered by the Kotlin side), instead add a smoke test in `crates/featherkey-core/tests/` that opens a core and calls `choose_correction` through the object. Minimum:
+Add a test module at the bottom of `ffi.rs` (it is already inside `#[cfg(feature = "uniffi")]` via `mod ffi`, so it only compiles/runs under the feature):
 ```rust
-// crates/featherkey-core/tests/ffi_smoke.rs (new)
-// Uses a temp redb path + 32-byte key; asserts observe_language + rank compile & run.
-```
-Provide the temp-store scaffold by copying the pattern from the existing integration test that opens `KeyboardCore` (search `KeyboardCore::open` in `tests/`). Assert: after 5× `observe_language(["es"])`, `rank([hello/en, hola/es])` returns `hola` first.
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-- [ ] **Step 2: Run → fail.** `cargo test -p featherkey-core --test ffi_smoke` → FAIL (methods undefined).
+    #[test]
+    fn ffi_candidate_converts_to_contract_candidate() {
+        let c: featherkey_contracts::Candidate = FfiCandidate {
+            word: "hola".into(), lang: "es".into(), source: FfiSource::Device, source_rank: 2,
+        }.into();
+        assert_eq!(c.word, "hola");
+        assert_eq!(c.lang, "es");
+        assert_eq!(c.source, featherkey_contracts::Source::Device);
+        assert_eq!(c.source_rank, 2);
+    }
+}
+```
+
+- [ ] **Step 2: Run → fail.** `cargo test -p featherkey-core --features uniffi ffi_candidate_converts` → FAIL to compile (types/`From` undefined).
 
 - [ ] **Step 3: Implement**
 
@@ -1101,13 +1115,17 @@ pub fn observe_language(&self, recognizers: Vec<String>) {
 }
 ```
 
-- [ ] **Step 4: Run → pass.** `cargo test -p featherkey-core --test ffi_smoke` → PASS. Also `cargo build -p featherkey-core --features uniffi` → builds.
+- [ ] **Step 4: Verify — build, test, and lint under the feature.**
+  - `cargo build -p featherkey-core --features uniffi` → builds (this is the real check that the macros/paths are valid).
+  - `cargo test -p featherkey-core --features uniffi ffi_candidate_converts` → PASS.
+  - `cargo clippy -p featherkey-core --features uniffi --lib -- -D warnings` → clean; `cargo clippy -p featherkey-core --features uniffi --tests -- -D warnings -A clippy::unwrap_used -A clippy::expect_used -A clippy::panic` → clean.
+  - `cargo test -p featherkey-core` (NO feature — the default gate) → still PASS (ffi not compiled; nothing else changed).
+  - `cargo fmt --check` → clean.
 
-- [ ] **Step 5: Regenerate bindings check + commit**
+- [ ] **Step 5: Commit**
 
-Run: `cargo test -p featherkey-core` (all) → PASS.
 ```bash
-git add crates/featherkey-core/src/ffi.rs crates/featherkey-core/tests/ffi_smoke.rs
+git add crates/featherkey-core/src/ffi.rs
 git commit -m "feat(ffi): FfiCandidate + rank/choose_correction/observe_language exports"
 ```
 
