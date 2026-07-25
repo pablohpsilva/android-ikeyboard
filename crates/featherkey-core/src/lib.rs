@@ -41,8 +41,8 @@ pub use crate::error::FeatherKeyError;
 // Re-exported so the shell depends only on this façade, never on the internal
 // crates directly (SEDD §3.6, EP-3 boundary).
 pub use featherkey_contracts::{
-    Correction, Namespace, SecureStore, SensitiveContextSource, StoreError, Suggestion,
-    Suggestions, Token, TypingContext,
+    Candidate, Correction, Namespace, RankedCandidate, SecureStore, SensitiveContextSource,
+    StoreError, Suggestion, Suggestions, Token, TypingContext,
 };
 pub use featherkey_layout_engine::Layout;
 pub use featherkey_secure_store::RedbSecureStore;
@@ -254,6 +254,13 @@ impl FeatherKeyCore {
         })
     }
 
+    /// Rank shell-gathered candidates (bundled + device + decode) with the current
+    /// language momentum. Read-only.
+    #[must_use]
+    pub fn rank_candidates(&self, cands: Vec<Candidate>, k: usize) -> Vec<RankedCandidate> {
+        featherkey_candidate_ranker::rank(&cands, &self.momentum, k)
+    }
+
     /// Clone each active lexicon — the derived read engines (predictor, corrector)
     /// own their inputs by value, so the façade hands them clones of its packs.
     fn lexicon_clones(&self) -> Vec<Dictionary> {
@@ -324,5 +331,34 @@ mod tests {
         core.set_active_languages(vec![("es".into(), vec!["hola".into()])])
             .expect("switch");
         assert!(core.language_weight("es") >= core.language_weight("en"));
+    }
+
+    #[test]
+    fn rank_candidates_uses_momentum() {
+        use featherkey_contracts::{Candidate, Source};
+        let mut core = FeatherKeyCore::new(vec![
+            ("en".into(), vec!["hello".into()]),
+            ("es".into(), vec!["hola".into()]),
+        ])
+        .expect("core");
+        for _ in 0..5 {
+            core.observe_language(vec!["es".into()]);
+        }
+        let cands = vec![
+            Candidate {
+                word: "hello".into(),
+                lang: "en".into(),
+                source: Source::Lexicon,
+                source_rank: 0,
+            },
+            Candidate {
+                word: "hola".into(),
+                lang: "es".into(),
+                source: Source::Lexicon,
+                source_rank: 0,
+            },
+        ];
+        let out = core.rank_candidates(cands, 2);
+        assert_eq!(out[0].word, "hola");
     }
 }
