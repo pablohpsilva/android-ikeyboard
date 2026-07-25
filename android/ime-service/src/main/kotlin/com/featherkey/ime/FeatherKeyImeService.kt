@@ -13,7 +13,6 @@ package com.featherkey.ime
  */
 
 import android.Manifest
-import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -26,7 +25,6 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.view.View
-import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.widget.Toast
@@ -43,7 +41,6 @@ import com.featherkey.platform.DeviceDictionary
 import com.featherkey.platform.EditorInfoSensitivity
 import com.featherkey.platform.EmojiRecents
 import com.featherkey.platform.KeystoreKeyProvider
-import com.featherkey.platform.LanguageCatalog
 import com.featherkey.platform.LanguagePrefs
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
@@ -272,7 +269,7 @@ class FeatherKeyImeService : InputMethodService() {
                 sendDefaultEditorAction(true)
                 keyboard?.suggestions = emptyList()
             }
-            FunctionKey.GLOBE -> cycleLanguage()
+            FunctionKey.GLOBE -> openKeyboardPreferences()
             FunctionKey.MIC -> startVoiceInput()
         }
     }
@@ -406,53 +403,17 @@ class FeatherKeyImeService : InputMethodService() {
     }
 
     /**
-     * Globe: cycle the primary language among the active set by rotating the
-     * first tag to the end (which swaps the alpha script/layout and the space-bar
-     * hint in place). With fewer than two languages active there is nothing to
-     * cycle, so fall back to the picker so single-language users can add more.
+     * Globe: open FeatherKey's own preferences — the keyboard's settings screen,
+     * where languages (several at once), on-device learning, and learned data are
+     * managed. Launched as a new task (the standard way an IME hands off to an
+     * Activity, mirroring [startVoiceInput]'s permission escape hatch). Addressed
+     * by class name so this module needs no compile dependency on settings-ui.
      */
-    private fun cycleLanguage() {
-        val active = langPrefs.activeTags()
-        if (active.size < 2) { showLanguageDialog(); return }
-        val rotated = active.drop(1) + active.first()
-        langPrefs.setActiveTags(rotated)
-        applyLanguages(rotated)
-    }
-
-    /**
-     * Globe long-form: choose the active languages right from the keyboard. Several may be
-     * active at once (checked); the core keeps them all active and the space bar
-     * shows the set. Rendered as a dialog attached to the input view's window
-     * (the standard way an IME shows a dialog).
-     */
-    private fun showLanguageDialog() {
-        val token = keyboard?.windowToken ?: return
-        val langs = LanguageCatalog.all(this)
-        val active = langPrefs.activeTags().toMutableSet()
-        val names = langs.map { it.displayName }.toTypedArray()
-        val checked = BooleanArray(langs.size) { active.contains(langs[it].tag) }
-        val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-            .setTitle("Languages")
-            .setMultiChoiceItems(names, checked) { _, which, isChecked ->
-                if (isChecked) active.add(langs[which].tag) else active.remove(langs[which].tag)
-            }
-            .setPositiveButton("OK") { _, _ ->
-                val ordered = langs.map { it.tag }.filter { active.contains(it) }
-                if (ordered.isNotEmpty()) {
-                    langPrefs.setActiveTags(ordered)
-                    applyLanguages(ordered)
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .create()
-        dialog.window?.apply {
-            attributes = attributes.also {
-                it.token = token
-                it.type = WindowManager.LayoutParams.TYPE_APPLICATION_ATTACHED_DIALOG
-            }
-            addFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
-        }
-        dialog.show()
+    private fun openKeyboardPreferences() {
+        val intent = Intent()
+            .setClassName(packageName, "com.featherkey.settings.SettingsActivity")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { startActivity(intent) }
     }
 
     /** Mic: system voice typing via [SpeechRecognizer], committed into the field. */

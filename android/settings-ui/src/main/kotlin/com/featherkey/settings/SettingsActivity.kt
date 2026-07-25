@@ -38,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.featherkey.onboarding.ConsentStore
+import com.featherkey.platform.DefaultImeStatus
 import com.featherkey.platform.KeyboardLanguage
 import com.featherkey.platform.LanguageCatalog
 import com.featherkey.platform.LanguagePrefs
@@ -45,6 +46,13 @@ import java.io.File
 import kotlinx.coroutines.launch
 
 class SettingsActivity : ComponentActivity() {
+
+    /**
+     * Whether FeatherKey is the system's selected keyboard. Refreshed in
+     * [onResume] so returning from system input-method settings (where the user
+     * may have just switched to us) updates the "set as default" button live.
+     */
+    private val isDefaultKeyboard = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -60,6 +68,7 @@ class SettingsActivity : ComponentActivity() {
                         learningEnabled = learning,
                         onLearningChanged = { scope.launch { consent.setLearningEnabled(it) } },
                         onClearLearned = { clearLearnedData() },
+                        isDefaultKeyboard = isDefaultKeyboard.value,
                         onEnableKeyboard = {
                             startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
                         },
@@ -72,6 +81,12 @@ class SettingsActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        val selected = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+        isDefaultKeyboard.value = DefaultImeStatus.isDefault(selected, packageName, IME_SERVICE_CLASS)
+    }
+
     /**
      * Clear learned data by deleting the encrypted store. The next IME session
      * re-provisions a fresh (empty) store. This is the BR-22 "withdraw + erase"
@@ -82,6 +97,11 @@ class SettingsActivity : ComponentActivity() {
         File(filesDir, "usage.tsv").delete() // shell-side usage learning
         File(filesDir, "context.tsv").delete() // shell-side next-word learning
     }
+
+    private companion object {
+        /** The IME service class, used to build our flattened default-IME component. */
+        const val IME_SERVICE_CLASS = "com.featherkey.ime.FeatherKeyImeService"
+    }
 }
 
 @Composable
@@ -89,6 +109,7 @@ private fun SettingsScreen(
     learningEnabled: Boolean,
     onLearningChanged: (Boolean) -> Unit,
     onClearLearned: () -> Unit,
+    isDefaultKeyboard: Boolean,
     onEnableKeyboard: () -> Unit,
     languages: List<KeyboardLanguage>,
     initialActive: List<String>,
@@ -99,7 +120,13 @@ private fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("FeatherKey", style = MaterialTheme.typography.headlineSmall)
-        Button(onClick = onEnableKeyboard) { Text("Enable FeatherKey in system settings") }
+        // Disabled once FeatherKey is the system default — there is nothing to set.
+        Button(onClick = onEnableKeyboard, enabled = !isDefaultKeyboard) {
+            Text(
+                if (isDefaultKeyboard) "FeatherKey is your default keyboard"
+                else "Enable FeatherKey in system settings",
+            )
+        }
 
         LanguageSection(languages, initialActive, onActiveChanged)
 
@@ -117,10 +144,9 @@ private fun SettingsScreen(
 }
 
 /**
- * Multi-select language list. Every checked language is active at the same time;
- * the keyboard's globe key cycles which one is primary. At least one language
- * stays selected. Languages with no bundled word list are still selectable —
- * they contribute predictions only once a list is added.
+ * Multi-select language list. Every checked language is active at the same time,
+ * and at least one stays selected. Languages with no bundled word list are still
+ * selectable — they contribute predictions only once a list is added.
  */
 @Composable
 private fun LanguageSection(
@@ -132,8 +158,8 @@ private fun LanguageSection(
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("Languages", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Text(
-            "Choose one or more. Several can be active at once; the globe key on " +
-                "the keyboard cycles between them.",
+            "Choose one or more. Several can be active at once; the keyboard blends " +
+                "them and follows the language you are writing in.",
             style = MaterialTheme.typography.bodySmall,
         )
         languages.forEach { lang ->
