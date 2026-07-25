@@ -973,11 +973,18 @@ git commit -m "feat(core): choose_correction — all-language fuzz, device-known
 
 ---
 
-### Task C4: Single-language regression lock (unit)
+### Task C4: Single-language regression lock + dial-isolation (unit)
 
 **Files:** `crates/featherkey-core/src/correct.rs` tests.
 
-- [ ] **Step 1: Failing test** — a single-language typo must match legacy `Core::correct`:
+This task adds TWO tests: (1) the single-language regression lock, and (2) a test that
+**isolates `CORE_FUZZY_PRIOR`** — the C3 crux test passes even at `PRIOR=0` because the
+primary language's momentum head-start already supplies the mild-momentum stickiness, so
+nothing pins the dial from below. This second test makes the competing language *slightly
+hotter* than the primary (one Spanish word), so the primary fix wins **only** because of
+the bonus — it fails if `CORE_FUZZY_PRIOR` is 0.
+
+- [ ] **Step 1: Failing tests**:
 ```rust
 #[test]
 fn single_language_choose_correction_matches_legacy_correct() {
@@ -986,6 +993,21 @@ fn single_language_choose_correction_matches_legacy_correct() {
     let now = core.choose_correction("zat", &[], vec![]).expect("now");
     assert_eq!(now.primary, legacy.primary);
     assert_eq!(now.applied, legacy.applied);
+}
+
+#[test]
+fn core_fuzzy_prior_keeps_the_primary_fix_against_a_slightly_hotter_language() {
+    // "cit" is one edit from "cat" (en, primary) and "cot" (es). After ONE Spanish
+    // word, es's weight (~1.045) edges just above en's decayed head-start (~0.945) —
+    // so WITHOUT the sticky bonus "cot" would win. CORE_FUZZY_PRIOR must keep the
+    // primary fix "cat". This test fails if the const regresses to 0, locking the dial.
+    let mut core = FeatherKeyCore::new(vec![
+        ("en".into(), vec!["cat".into()]),
+        ("es".into(), vec!["cot".into()]),
+    ]).expect("core");
+    core.observe_language(vec!["es".into()]); // one Spanish word: es edges just ahead
+    let got = core.choose_correction("cit", &[], vec![]).expect("ok");
+    assert_eq!(got.primary, "cat");
 }
 ```
 - [ ] **Step 2: Run → fail or pass.** With one active language `fuzzy_all` == `dictionary.fuzzy` (lexicographic order), momentum is uniform, and the sticky fix is that language's rank-0 neighbour — so the winner is the first `fuzzy` result, exactly `Core::correct`'s primary. It should pass as written. If it does not, do NOT weaken the assertion — report the discrepancy (it would indicate a real ordering bug in `choose_correction`).
