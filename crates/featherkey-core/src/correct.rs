@@ -34,52 +34,55 @@ impl FeatherKeyCore {
         device_known: &[String],
         device_cands: Vec<featherkey_contracts::Candidate>,
     ) -> Result<Correction, FeatherKeyError> {
-        use featherkey_contracts::{Candidate, Source};
         let locales = LocaleManager::new(self.packs.clone())?;
-        let lower = text.to_lowercase();
 
-        // (1) No-clobber: real in any active language, known to the user, or in the
-        // device's known set. Empty text has nothing to correct.
-        let known_device = device_known.iter().any(|w| w.eq_ignore_ascii_case(text));
-        if text.is_empty()
-            || self.personalization.is_known(text)
-            || locales.detect(text).is_some()
-            || locales.detect(&lower).is_some()
-            || known_device
-        {
-            return Ok(Correction {
-                primary: text.to_owned(),
-                alternatives: Vec::new(),
-                applied: false,
-            });
+        // (1) No-clobber: empty text, a word intended by the user, or one the
+        // device knows is left exactly as typed.
+        if text.is_empty() || self.is_intended(&locales, text, device_known) {
+            return Ok(unchanged(text));
         }
 
         // (2) Candidates: all-language fuzzy (per-language rank) ∪ device candidates.
-        let mut cands: Vec<Candidate> = Vec::new();
-        let mut per_lang_rank: std::collections::HashMap<String, u32> =
-            std::collections::HashMap::new();
-        for (id, w) in locales.fuzzy_all(text) {
-            let r = per_lang_rank.entry(id.as_str().to_owned()).or_insert(0);
-            cands.push(Candidate {
-                word: w,
-                lang: id.as_str().to_owned(),
-                source: Source::Lexicon,
-                source_rank: *r,
-            });
-            *r += 1;
-        }
-        cands.extend(device_cands);
+        let cands = gather_candidates(&locales, text, device_cands);
         if cands.is_empty() {
-            return Ok(Correction {
-                primary: text.to_owned(),
-                alternatives: Vec::new(),
-                applied: false,
-            });
+            return Ok(unchanged(text));
         }
 
-        // (3) The sticky fix = the primary language's closest lexicon neighbour
-        // (fallback: the first lexicon candidate). It carries CORE_FUZZY_PRIOR so a
-        // trusted fix holds unless a competing candidate's momentum score overtakes it.
+        // (3) Score with the sticky-fix bonus, then take the winner + alternatives.
+        let scored = self.score_with_sticky(&cands);
+        let winner = cands[scored[0].0].word.clone();
+        let applied = winner != text;
+        let alternatives = if applied {
+            distinct_alternatives(&scored, &cands, &winner)
+        } else {
+            Vec::new()
+        };
+        Ok(Correction {
+            primary: if applied { winner } else { text.to_owned() },
+            alternatives,
+            applied,
+        })
+    }
+
+    /// The no-clobber test (BR-12): a word the user clearly intended — already
+    /// learned/whitelisted, valid in any active language (raw or lowercased), or
+    /// confirmed by the device dictionary — must never be rewritten.
+    fn is_intended(&self, locales: &LocaleManager, text: &str, device_known: &[String]) -> bool {
+        let lower = text.to_lowercase();
+        self.personalization.is_known(text)
+            || locales.detect(text).is_some()
+            || locales.detect(&lower).is_some()
+            || device_known.iter().any(|w| w.eq_ignore_ascii_case(text))
+    }
+
+    /// Score every candidate with the shared ranker, adding [`CORE_FUZZY_PRIOR`]
+    /// to the sticky fix, and return `(index, score)` pairs sorted best-first.
+    ///
+    /// The sticky fix is the primary language's closest lexicon neighbour
+    /// (fallback: the first lexicon candidate), so a trusted fix holds unless a
+    /// competing candidate's momentum-weighted score overtakes the bonus.
+    fn score_with_sticky(&self, cands: &[featherkey_contracts::Candidate]) -> Vec<(usize, f64)> {
+        use featherkey_contracts::Source;
         let primary = self.packs.first().map(|(id, _)| id.as_str().to_owned());
         let sticky = cands
             .iter()
@@ -102,30 +105,7 @@ impl FeatherKeyCore {
             })
             .collect();
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-        let winner = cands[scored[0].0].word.clone();
-        let applied = winner != text;
-        let alternatives: Vec<String> = if applied {
-            // Distinct words only: pre-seed the winner so it is filtered, then let
-            // the set drop any cognate already emitted for another language (the
-            // same word can be a fuzzy neighbour in several active languages).
-            let mut seen = std::collections::HashSet::new();
-            seen.insert(winner.clone());
-            scored
-                .iter()
-                .skip(1)
-                .map(|&(i, _)| cands[i].word.clone())
-                .filter(|w| seen.insert(w.clone()))
-                .take(2)
-                .collect()
-        } else {
-            Vec::new()
-        };
-        Ok(Correction {
-            primary: if applied { winner } else { text.to_owned() },
-            alternatives,
-            applied,
-        })
+        scored
     }
 
     /// Correct `text` in its `(preceding, prefix)` context. A word already known
@@ -167,6 +147,60 @@ impl FeatherKeyCore {
             locales,
         ))
     }
+}
+
+/// A correction that leaves `text` exactly as typed.
+fn unchanged(text: &str) -> Correction {
+    Correction {
+        primary: text.to_owned(),
+        alternatives: Vec::new(),
+        applied: false,
+    }
+}
+
+/// Correction candidates for `text`: every active language's edit-distance-1
+/// neighbours (each ranked within its own language, [`Source::Lexicon`]) unioned
+/// with the device-supplied candidates.
+fn gather_candidates(
+    locales: &LocaleManager,
+    text: &str,
+    device_cands: Vec<featherkey_contracts::Candidate>,
+) -> Vec<featherkey_contracts::Candidate> {
+    use featherkey_contracts::{Candidate, Source};
+    let mut cands: Vec<Candidate> = Vec::new();
+    let mut per_lang_rank: std::collections::HashMap<String, u32> =
+        std::collections::HashMap::new();
+    for (id, w) in locales.fuzzy_all(text) {
+        let r = per_lang_rank.entry(id.as_str().to_owned()).or_insert(0);
+        cands.push(Candidate {
+            word: w,
+            lang: id.as_str().to_owned(),
+            source: Source::Lexicon,
+            source_rank: *r,
+        });
+        *r += 1;
+    }
+    cands.extend(device_cands);
+    cands
+}
+
+/// The up-to-two best alternatives after the winner, as **distinct** words: a
+/// cognate emitted for several active languages appears once, and the winner is
+/// never echoed (the spec requires distinct alternative words).
+fn distinct_alternatives(
+    scored: &[(usize, f64)],
+    cands: &[featherkey_contracts::Candidate],
+    winner: &str,
+) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    seen.insert(winner.to_owned());
+    scored
+        .iter()
+        .skip(1)
+        .map(|&(i, _)| cands[i].word.clone())
+        .filter(|w| seen.insert(w.clone()))
+        .take(2)
+        .collect()
 }
 
 #[cfg(test)]
