@@ -16,8 +16,11 @@ import kotlin.math.ln
 
 class Vocabulary private constructor(private val langs: List<Lang>) {
 
-    /** One language: words sorted for prefix search, plus each word's freq rank. */
-    private class Lang(val sorted: Array<String>, val rank: HashMap<String, Int>)
+    /** One language: its tag, words sorted for prefix search, plus each word's freq rank. */
+    private class Lang(val tag: String, val sorted: Array<String>, val rank: HashMap<String, Int>)
+
+    /** One prefix/correction candidate tagged by language and its rank within it. */
+    data class Candidate(val word: String, val lang: String, val sourceRank: Int)
 
     /** One live hypothesis in the tap-decode beam: a prefix + its spatial log-prob. */
     private class Hyp(val prefix: String, val score: Float)
@@ -77,6 +80,27 @@ class Vocabulary private constructor(private val langs: List<Lang>) {
             i++
         }
         return out.toList()
+    }
+
+    /** Active languages whose frequency list contains [word] (soft momentum signal). */
+    fun languagesOf(word: String): Set<String> =
+        langs.asSequence().filter { it.rank.containsKey(word) }.map { it.tag }.toSet()
+
+    /** Up to [k] prefix matches per language, ranked within each by frequency. */
+    fun candidatesByLanguage(
+        prefix: String,
+        learned: Map<String, Int>,
+        context: Map<String, Int>,
+        k: Int,
+    ): List<Candidate> {
+        if (prefix.isEmpty()) return emptyList()
+        val out = ArrayList<Candidate>()
+        for (l in langs) {
+            prefixMatches(l, prefix, k).forEachIndexed { i, w ->
+                out.add(Candidate(w, l.tag, i))
+            }
+        }
+        return out
     }
 
     /** The [k] most frequent words in one language that start with [prefix]. */
@@ -189,7 +213,17 @@ class Vocabulary private constructor(private val langs: List<Lang>) {
                 if (ordered.isEmpty()) return@mapNotNull null
                 val rank = HashMap<String, Int>(ordered.size * 2)
                 ordered.forEachIndexed { i, w -> rank.putIfAbsent(w, i) }
-                Lang(ordered.toTypedArray().also { it.sort() }, rank)
+                Lang(tag, ordered.toTypedArray().also { it.sort() }, rank)
+            }
+            return Vocabulary(langs)
+        }
+
+        /** Test-only builder from in-memory frequency lists (index = frequency rank). */
+        fun forTest(byLang: Map<String, List<String>>): Vocabulary {
+            val langs = byLang.map { (tag, words) ->
+                val rank = HashMap<String, Int>(words.size * 2)
+                words.forEachIndexed { i, w -> rank.putIfAbsent(w, i) }
+                Lang(tag, words.toTypedArray().also { it.sort() }, rank)
             }
             return Vocabulary(langs)
         }
