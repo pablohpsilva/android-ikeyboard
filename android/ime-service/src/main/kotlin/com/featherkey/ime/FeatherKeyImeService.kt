@@ -53,6 +53,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 class FeatherKeyImeService : InputMethodService() {
 
@@ -75,6 +76,8 @@ class FeatherKeyImeService : InputMethodService() {
     private var currentTags: List<String> = emptyList()
     /** Frequency-ranked vocabulary for suggestions + swipe (loaded off the input path). */
     @Volatile private var vocab: Vocabulary = Vocabulary.empty()
+    /** The in-flight [vocab] load, joined by [ensureVocabReady] on a cold-start gesture. */
+    private var vocabJob: Job? = null
     /**
      * The device's own dictionary (Android TextServices) for the primary
      * language — the base vocabulary for scripts we bundle no word list for
@@ -120,6 +123,8 @@ class FeatherKeyImeService : InputMethodService() {
         val dbPath = File(filesDir, "featherkey.redb").absolutePath
         bridge = FeatherKeyBridge.open(dbPath, key, Lexicons.load(this, currentTags))
         key.fill(0) // wipe the shell's copy; the native side holds it zeroizing
+        // Ease the whole keyboard up when it shows and down when it hides.
+        window?.window?.setWindowAnimations(R.style.ImeWindowAnimation)
     }
 
     override fun onCreateInputView(): View {
@@ -183,19 +188,38 @@ class FeatherKeyImeService : InputMethodService() {
         keyboard?.spaceHint = spaceHint(tags)
     }
 
-    /** Build the frequency vocabulary off the input thread; swap it in when ready. */
+    /** Build the frequency vocabulary off the input thread; swap it in when ready.
+     *  The [Job] is kept so a gesture arriving before the load lands can wait for
+     *  it (see [ensureVocabReady]) rather than decoding against an empty list. */
     private fun loadVocab(tags: List<String>) {
-        ioScope.launch {
-            vocab = Vocabulary.load(applicationContext, tags)
+        vocabJob?.cancel()
+        vocabJob = ioScope.launch {
+            val loaded = Vocabulary.load(applicationContext, tags)
+            vocab = loaded
             // On a cold start the strip may be empty for the word already being
             // typed (the load is async); refresh it now that the data is ready.
             keyboard?.post { updateSuggestions() }
         }
     }
 
+    /**
+     * Swipe decoding needs the full word list synchronously, but the vocabulary
+     * loads asynchronously ([loadVocab]). On a cold start the very first gesture
+     * can beat that load and — with an empty word set — decode to nothing (the
+     * "first swipe does nothing, second works" bug). If the list isn't ready yet,
+     * briefly join the in-flight load (reusing its work, not reloading) so the
+     * first swipe decodes against a real vocabulary. Only ever blocks once, and
+     * only for the load's remaining time.
+     */
+    private fun ensureVocabReady() {
+        if (vocab.words.isNotEmpty()) return
+        runCatching { runBlocking { vocabJob?.join() } }
+    }
+
     /** A swipe over the letters: decode to a word, commit it, offer alternatives. */
     private fun handleGesture(pathPts: List<PointF>, centers: Map<Char, PointF>) {
         val ic = currentInputConnection ?: return
+        ensureVocabReady() // cold start: don't decode the first swipe against an empty list
         val words = GestureDecoder.decode(pathPts, centers, vocab.words, vocab::rankOf, usage.map, limit = 4)
         if (words.isEmpty()) return
         // Tag each decoded word by the languages that recognise it (fallback: the
