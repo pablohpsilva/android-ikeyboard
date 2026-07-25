@@ -59,17 +59,17 @@ class KeyboardView @JvmOverloads constructor(
     /** An emoji was tapped on the emoji page: commit this exact string verbatim. */
     var onEmoji: ((String) -> Unit)? = null
 
+    private var keysVersion = 0
+
     /** The active alpha layout's keys (from the core). */
     var keys: List<RenderKey> = emptyList()
-        set(value) { field = value; requestLayout(); invalidate() }
+        set(value) { field = value; keysVersion++; requestLayout(); invalidate() }
 
     /** Predictive suggestions; the strip collapses entirely when this is empty. */
     var suggestions: List<String> = emptyList()
         set(value) {
-            val wasEmpty = field.isEmpty()
             field = value
-            if (wasEmpty != value.isEmpty()) requestLayout()
-            invalidate()
+            invalidate() // height is constant now; only the strip text repaints
         }
 
     /** Shift state (next letter uppercase; highlights the shift key). */
@@ -182,12 +182,26 @@ class KeyboardView @JvmOverloads constructor(
     private var cells: List<Cell> = emptyList()
     private var pressed: Cell? = null
 
+    private var cachedCells: List<Cell>? = null
+    private var cachedKey: CellLayoutKey? = null
+
+    private fun layoutCells(): List<Cell> {
+        val key = CellLayoutKey(width, height, page.ordinal, keysVersion)
+        val hit = cachedCells
+        if (hit != null && key == cachedKey) return hit
+        val built = buildCells(width, height)
+        cachedCells = built; cachedKey = key
+        return built
+    }
+
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = MeasureSpec.getSize(widthMeasureSpec)
-        // The emoji page owns its full height (no prediction strip), so it fits in
-        // the same envelope as the normal pages regardless of any pending strip.
-        val strip = if (page == Page.EMOJI || suggestions.isEmpty()) 0f else stripHeight
-        val h = strip + rowHeight * 3 + funcRowHeight + bottomBarHeight + bottomInset
+        val stripReserved = page != Page.EMOJI
+        val h = KeyboardGeometry.totalHeightPx(
+            stripReserved = stripReserved,
+            rowPx = rowHeight, funcPx = funcRowHeight, barPx = bottomBarHeight,
+            insetPx = bottomInset.toFloat(), stripPx = stripHeight,
+        )
         setMeasuredDimension(w, h.toInt())
     }
 
@@ -214,12 +228,12 @@ class KeyboardView @JvmOverloads constructor(
 
         fun rowStart(n: Int) = sideMargin + (contentW - (n * baseKeyW + (n - 1) * keyGap)) / 2f
 
-        var top = 0f
-        if (suggestions.isNotEmpty()) {
-            val cw = w / 3f
-            for (i in 0..2) out += Cell.Suggest(RectF(i * cw, 0f, (i + 1) * cw, stripHeight), i)
-            top = stripHeight
-        }
+        // Strip band is always reserved on this (non-emoji) page, so the key grid
+        // sits at a constant offset whether or not suggestions are shown. The three
+        // Suggest cells always exist (they draw nothing while suggestions is empty).
+        val cw = w / 3f
+        for (i in 0..2) out += Cell.Suggest(RectF(i * cw, 0f, (i + 1) * cw, stripHeight), i)
+        var top = KeyboardGeometry.contentTopPx(stripReserved = true, stripPx = stripHeight)
 
         // A char/letter row of equal-width keys, centred.
         fun charRow(labels: List<String>, decodeKeys: List<RenderKey>?) {
@@ -336,7 +350,7 @@ class KeyboardView @JvmOverloads constructor(
         // takes no part in the cell grid or the prediction strip below.
         if (page == Page.EMOJI) { cells = emptyList(); drawEmojiPage(canvas, c); return }
 
-        cells = buildCells(width, height)
+        cells = layoutCells()
 
         // Suggestion strip.
         if (suggestions.isNotEmpty()) {
