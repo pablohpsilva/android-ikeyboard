@@ -110,6 +110,21 @@ of their internal maths. A small **per-source prior** (`SOURCE_PRIOR[source]`, t
 bundled ≥ device by default) prevents either source from flooding the strip. This is
 the only place scores are combined, and it is pure and unit-tested.
 
+**Per-language bucketing (a source with a joint ranking must be re-bucketed).**
+`Vocabulary.probableWords`/`suggestions` today return a *single list with all active
+languages interleaved by a joint score*. Before candidates are emitted, that output is
+**re-bucketed per recognizing language** (via `Vocabulary.languagesOf(word)`, see
+below), and `source_rank` is the word's position **within its language bucket**, not in
+the joint list — otherwise cross-language frequency differences would be double-counted
+against momentum.
+
+**Cognates emit one candidate per recognizing language.** A word valid in several
+active languages (e.g. `no` ∈ en, es, it) is emitted as **multiple candidates**, one per
+recognizing language, each with that language's `source_rank`. The Ranker's dedupe
+("keep best score") then resolves it to whichever active language currently has the most
+momentum — the desired tie-break. Implementing one-candidate-per-word would silently
+lose this and is explicitly wrong.
+
 ### Component 1 — Multi-session `DeviceDictionary` (Kotlin, `platform-services`)
 
 Responsibility: gather per-language spell-checker results. **No ranking logic.**
@@ -172,21 +187,51 @@ and the correction:
   never demotes that language's candidates; a decisive `source_rank` still beats weak
   momentum).
 
-### Correction flow (closing the "deliberate foreign word" gap)
+### Correction flow — a weighted compromise (momentum has real weight; a clean typo-fix still holds)
 
-`correctedWord(word)` becomes:
+The audit's key open question was: does the new momentum signal override the existing,
+BDD-tested core autocorrect? Neither extreme is right. "Core always wins" neuters the
+improvement; "momentum always wins" could un-fix an obvious typo. **The resolution is a
+weighted contest, not a fixed precedence:** momentum competes *among the correction
+candidates the core itself proposes*, tuned by a stickiness dial. To keep this decision
+in one tested place, the whole thing moves **into the Rust core** as a new orchestrating
+entry (see §FFI); Kotlin only supplies what the core cannot see (`deviceDict`'s
+`knownLanguages` and device suggestions) and commits the result. Order:
 
-1. **Never rewrite a word recognized by *any* active language** — `vocab.rankOf(word) ≠ ∞`
-   **or** `word ∈ deviceDict.knownLanguages(word)`. Returns `null`. This is what lets a
-   deliberate Spanish word among English survive.
-2. Otherwise assemble correction candidates, each tagged `{lang, source, source_rank}`:
-   the core `correct` alternatives, `probableWords` (when per-tap data exists), and
-   device suggestions per language.
-3. Run them through the **same Ranker**. If the top ≠ typed word and clears a
-   confidence margin, commit it; else `null`. Momentum thus decides *which* correction
-   wins, and the runner-up stays in the strip for a one-tap fix.
+1. **Protect real words.** If the typed word is recognized by **any** active language —
+   `Core` knows the bundled dictionaries (`languagesOf(word)`); Kotlin passes in
+   `deviceDict.knownLanguages(word)` — return "no correction." This lets a deliberate
+   Spanish word among English survive. *An intentional refinement over today, where
+   `core.applied` could rewrite a word valid in another active language; locked by a BDD
+   scenario. In a single-language setup it is a no-op — the core already declines to
+   "correct" a real word — so existing scenarios are unaffected.*
+2. **Weighted selection over the candidate set.** Run the existing `Core::correct`. Take
+   its `primary` + `alternatives`, tag each with its language, and combine them with
+   `probableWords` (per language, when per-tap data exists) and device suggestions (per
+   language) into one candidate set. Run it through the **Ranker with momentum**, with
+   two dials:
+   - The core's `primary` carries a **`CORE_PRIMARY_PRIOR`** bonus — the "stickiness" of
+     the old, trusted typo-fix. High prior ⇒ old behaviour; lower ⇒ momentum matters
+     more. This is *the compromise knob*.
+   - Momentum (`LM_WEIGHT_LANG`) can promote a **competing candidate** over the core's
+     primary **only when that candidate is itself a legitimate correction** (one the
+     core offered as an alternative, or a real word from another source) **and** its
+     momentum-weighted score beats the core primary by a margin. So an unambiguous typo
+     with a single sensible fix keeps that fix (nothing legitimate competes); an
+     *ambiguous* fix whose alternatives span languages resolves toward the language the
+     user is actually writing in — the improvement, with real weight.
+   Crucially, the Ranker never invents a correction outside this proposed set, so it
+   cannot wreck a clean typo-fix into an unrelated word.
+3. **Commit gate.** Apply the winner only if it ≠ the typed word and clears the commit
+   margin; else "no correction." The runner-up stays in the strip for a one-tap fix.
 
-(Existing consent + sensitivity guards and the "don't mangle Caps/ALLCAPS" rule stay.)
+Why existing autocorrect BDD tests still pass: they run in a single active language, so
+every candidate shares one language, momentum is uniform across them, and the
+`CORE_PRIMARY_PRIOR` bonus leaves the core's primary on top — identical output. The new
+multi-language scenarios are what exercise the momentum override.
+
+(Existing consent + sensitivity guards and the "don't mangle Caps/ALLCAPS" rule stay,
+applied by the caller before invoking the core entry.)
 
 ### FFI surface (additive, no breaking change)
 
@@ -196,20 +241,38 @@ Follows the existing `#[derive(uniffi::Record)]` + bridge-method pattern
 - New record `FfiCandidate { word, lang, source, source_rank }` (in) and a ranked
   result record (out; reuse `FfiSuggestion` where `lang` need not round-trip, else a
   thin new record).
-- New bridge methods: `rank(candidates) -> Vec<...>`, `observe_language(recognizers)`,
-  `session_plan(desired_tags) -> {open, close}` (optional — the Kotlin `SessionPlan`
-  may stay in Kotlin-with-JUnit instead; decided in the plan, whichever keeps the
-  untested surface smaller), and momentum `set_languages`.
+- New bridge methods:
+  - `rank(candidates) -> Vec<...>` — the strip ranker.
+  - `choose_correction(word, preceding, prefix, device_known: Vec<String>, device_cands: Vec<FfiCandidate>) -> FfiCorrection`
+    — the full correction decision (protect → `Core::correct` → momentum-ranked
+    fallback) executed **inside the core** so the precedence and margin live in one
+    unit-tested place. It calls the existing `Core::correct` internally, so that
+    function and its BDD tests are untouched.
+  - `observe_language(recognizers)`, momentum `set_languages`, and (optional)
+    `session_plan(desired_tags) -> {open, close}` — the Kotlin `SessionPlan` may stay in
+    Kotlin-with-JUnit instead; decided in the plan by whichever keeps the untested
+    surface smaller.
 - Momentum **state lives in the core**; Kotlin never marshals weights.
-- **No change** to `correct`, `suggest`, `decode`, `set_active_languages`, or layout
-  method signatures.
+- **No change** to the existing `correct`, `suggest`, `decode`, `set_active_languages`,
+  or layout method signatures (the new correction decision is an *additional* entry).
 
 ### IME orchestration (Kotlin, `ime-service`)
 
-- `Vocabulary` gains `candidatesByLanguage(prefix|taps, learned, context, k)` returning
-  **per-language, `source_rank`-ordered** candidates (today it returns a merged
-  untagged `List<String>`; this is the explicit API change the audit flagged). Existing
-  `suggestions`/`probableWords` are refactored to feed it, preserving their scoring.
+- `Vocabulary` gains two methods (the explicit API changes the audit flagged; today it
+  returns a merged untagged `List<String>` and only a scalar `rankOf`):
+  - `candidatesByLanguage(prefix|taps, learned, context, k)` returning **per-language,
+    `source_rank`-ordered** candidates. Existing `suggestions`/`probableWords` are
+    refactored to feed it, preserving their scoring, and their joint output is
+    re-bucketed per language (Component 0).
+  - `languagesOf(word): Set<String>` — which bundled languages contain the word (backs
+    the correction "protect real words" guard and the `observe_language` recognizers).
+    `rankOf` stays for scoring.
+- **Where the Kotlin line is drawn:** the IME's branch *selection* (empty-prefix vs
+  tap-decode vs prefix; which sources to query) is **orchestration/routing** — thin, no
+  scoring, left in Kotlin. Every **decision** (normalization, momentum, ranking,
+  correction precedence + margins) lives in the Rust core and is unit/BDD-tested. The
+  only branching Kotlin with real logic — `SessionPlan` and the `Candidate`-tagging
+  helper — is extracted to pure functions and JUnit-tested (§Testing).
 - `applyLanguages(tags)` → `deviceDict.setLanguages(tags)` + core momentum
   `set_languages`.
 - `updateSuggestions`: gather candidates from Vocabulary (per-language) + device
@@ -219,8 +282,8 @@ Follows the existing `#[derive(uniffi::Record)]` + bridge-method pattern
   languages, `source_rank` = position), `rank`, show top 3 — no more direct write.
 - `correctedWord`: as the Correction flow above.
 - Word boundary / commit / swipe-commit: after the existing consent + sensitivity
-  gate, call core `observe_language(recognizers)` where `recognizers` = bundled
-  `rankOf ≠ ∞` languages ∪ `deviceDict.knownLanguages(word)`.
+  gate, call core `observe_language(recognizers)` where `recognizers` =
+  `vocab.languagesOf(word)` ∪ `deviceDict.knownLanguages(word)`.
 
 ## Data Flow
 
@@ -240,6 +303,10 @@ Follows the existing `#[derive(uniffi::Record)]` + bridge-method pattern
 - Cold start / single language → primary head-start ⇒ behaviour identical to today.
 - Empty candidate set → empty strip.
 - Momentum read/write race → guarded by the core mutex; `rank` uses a snapshot.
+- **Field switch** (`onStartInput`) resets `lastWord` (no cross-field bigram context) but
+  **does not reset momentum** — it decays naturally, so drifting between apps/fields in
+  the same language stays biased; a genuine language change decays out within a few
+  words. Momentum is only re-seeded on an **active-language change** (`set_languages`).
 
 ## Testing (TDD/BDD-first, ≥ 98% coverage on the gate)
 
@@ -247,15 +314,24 @@ Follows the existing `#[derive(uniffi::Record)]` + bridge-method pattern
 - Unit — `Momentum` (decay lowers all; bump raises exactly the recognizers; floor;
   primary head-start; `set_languages` add/drop/retain); `Ranker` (momentum never
   demotes the boosted language; decisive `source_rank` beats weak momentum; dedupe
-  keeps best; top-K); score normalization (bundled vs device commensurable; source
-  prior bounds flooding).
-- Property tests — momentum-monotonicity of rank.
+  keeps best incl. cognate → highest-momentum language; top-K); score normalization
+  (bundled vs device commensurable; source prior bounds flooding); `choose_correction`
+  (protect-real-word returns none; single-language input ⇒ core primary wins — old
+  behaviour; ambiguous cross-language fix ⇒ momentum promotes the current-language
+  candidate; `CORE_PRIMARY_PRIOR` high ⇒ core sticks, low ⇒ momentum moves it; commit
+  margin respected).
+- Property tests — momentum-monotonicity of rank; raising `CORE_PRIMARY_PRIOR` never
+  moves the winner *away* from the core primary.
 - **BDD `.feature`:**
   - "Mostly-English with one deliberate Spanish word → not autocorrected; its
     suggestion is offered."
   - "Sustained typing in language A → A's completions rank first."
   - "Switch A→B for several words → bias follows to B."
   - "Swipe in a momentum-B context → B word ranked first."
+  - "Single active language → autocorrect output unchanged from today" (regression lock
+    on the existing behaviour).
+  - "Ambiguous typo correctable in either active language → the current-language fix is
+    chosen" (the compromise's improvement).
 - Fitness / clippy / rustfmt / cargo-deny unchanged; real coverage measured with
   `--ignore-filename-regex '(^|/)workspace/'`.
 
@@ -282,8 +358,11 @@ Follows the existing `#[derive(uniffi::Record)]` + bridge-method pattern
 ## Open Questions / Risks
 
 - Constant tuning (`DECAY`, `FLOOR`, head-start, `LM_WEIGHT_LANG`, `SOURCE_PRIOR`,
-  correction margin) — sensible defaults, refined against the BDD scenarios; all pure
-  and cheap to tune.
+  **`CORE_PRIMARY_PRIOR`** — the correction stickiness/compromise dial — and the commit
+  margin) — sensible defaults, refined against the BDD scenarios; all pure and cheap to
+  tune. Default `CORE_PRIMARY_PRIOR` is set so a single-language setup reproduces today's
+  autocorrect exactly, and momentum only overrides on a genuinely competing
+  cross-language alternative.
 - `SessionPlan` home — pure Kotlin+JUnit vs Rust FFI; decided in the plan by whichever
   minimizes untested surface.
 - Persisted long-run language prior — include only if clean; else v1 in-memory,
