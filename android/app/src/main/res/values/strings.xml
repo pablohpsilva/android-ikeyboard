@@ -3,10 +3,32 @@
     <string name="app_name">FeatherKey</string>
     <string name="settings_title">FeatherKey settings</string>
     <string name="subtype_en">English</string>
-    <string name="consent_title">Your typing stays on this device</string>
-    <string name="consent_body">FeatherKey learns your words on-device to improve suggestions. Nothing you type is ever sent off your phone. Password and secure fields are never learned. You can review or clear what it has learned any time.</string>
-    <string name="consent_enable_learning">Let FeatherKey learn from my typing</string>
+
+    <!-- First-run consent (BR-22). Copy tightened from the design brief: the
+         promise is stated before anything is asked for, and the explanation names
+         what is learned, where it lives (encrypted, on device), and what is
+         always excluded. -->
+    <string name="consent_title">Your typing never leaves this device</string>
+    <string name="consent_body">FeatherKey can learn the words you use so suggestions fit how you write. That learning happens here, on your phone, in encrypted storage. It\'s never uploaded, shared or synced — and passwords and payment fields are always skipped.</string>
+    <string name="consent_enable_learning">Learn from what I type</string>
     <string name="consent_continue">Continue</string>
-    <string name="settings_learning">On-device learning</string>
+
+    <!-- Onboarding: turn-on-keyboard step (the hardest step, per the brief). -->
+    <string name="onboarding_turn_on_title">Turn on FeatherKey</string>
+    <string name="onboarding_turn_on_body">Two quick steps in your system settings: switch FeatherKey on in the keyboard list, then pick it as your keyboard. You can change back at any time.</string>
+    <string name="onboarding_step_enable">Switch FeatherKey on</string>
+    <string name="onboarding_step_pick">Choose FeatherKey as your keyboard</string>
+    <string name="onboarding_done">Done</string>
+
+    <!-- Settings. -->
+    <string name="settings_learning">Learn from what I type</string>
+    <string name="settings_privacy_line">Learned words stay on this device. Nothing is uploaded, ever.</string>
     <string name="settings_clear">Clear learned data</string>
+
+    <!-- Guarded destructive action: confirmation + consequence + after-state. -->
+    <string name="clear_dialog_title">Clear learned data?</string>
+    <string name="clear_dialog_body">This erases everything FeatherKey has learned on this device — your added words, typing habits and next-word patterns. It can\'t be undone, and nothing is backed up anywhere to restore from.</string>
+    <string name="clear_dialog_confirm">Clear everything</string>
+    <string name="clear_dialog_cancel">Keep it</string>
+    <string name="clear_done">Learned data cleared</string>
 </resources>

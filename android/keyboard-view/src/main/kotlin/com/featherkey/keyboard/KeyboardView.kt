@@ -24,6 +24,7 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import android.util.AttributeSet
 import android.util.TypedValue
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import androidx.core.graphics.PathParser
@@ -84,6 +85,41 @@ class KeyboardView @JvmOverloads constructor(
     var recents: List<String> = emptyList()
         set(value) { field = value; if (page == Page.EMOJI) invalidate() }
 
+    // --- Appearance (driven by KeyboardAppearancePrefs via the IME; see
+    // FeatherKeyImeService.applyAppearance). Defaults reproduce the original look,
+    // so an unset view renders exactly as before. ---
+
+    /** Multiplies the height bands (rows/strip/function/bar); gaps stay constant. */
+    var heightScale: Float = 1f
+        set(value) {
+            val v = value.coerceIn(0.7f, 1.4f)
+            if (v != field) { field = v; requestLayout(); invalidate() }
+        }
+
+    /** Draw a hairline outline around each key (off = flat, iOS-style). */
+    var keyOutlines: Boolean = false
+        set(value) { if (value != field) { field = value; invalidate() } }
+
+    /** Emit a haptic tick when a key is pressed. */
+    var hapticsEnabled: Boolean = true
+
+    /** Apply all appearance prefs at once (the IME calls this per field). */
+    fun applyAppearance(heightScale: Float, keyOutlines: Boolean, haptics: Boolean) {
+        this.hapticsEnabled = haptics
+        this.keyOutlines = keyOutlines
+        this.heightScale = heightScale // triggers relayout/invalidate if changed
+    }
+
+    /** A key was pressed: a light haptic tick, if enabled and the device supports it. */
+    private fun keyPressFeedback() {
+        if (hapticsEnabled) {
+            performHapticFeedback(
+                HapticFeedbackConstants.KEYBOARD_TAP,
+                HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING,
+            )
+        }
+    }
+
     private enum class Page { ALPHA, NUMBERS, SYMBOLS, EMOJI }
     private var page = Page.ALPHA
 
@@ -127,10 +163,13 @@ class KeyboardView @JvmOverloads constructor(
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
 
     // --- Geometry ---
-    private val stripHeight get() = dp(42f)
-    private val rowHeight get() = dp(52f)
-    private val funcRowHeight get() = dp(54f)
-    private val bottomBarHeight get() = dp(46f)
+    // The vertical bands scale with [heightScale] (the "Keyboard height" setting);
+    // horizontal spacing (margins, gaps, radius) is left fixed so the board grows
+    // in height without the keys drifting apart.
+    private val stripHeight get() = dp(42f) * heightScale
+    private val rowHeight get() = dp(52f) * heightScale
+    private val funcRowHeight get() = dp(54f) * heightScale
+    private val bottomBarHeight get() = dp(46f) * heightScale
     private val sideMargin get() = dp(4f)
     private val keyGap get() = dp(5f)     // horizontal gap
     private val rowGap get() = dp(6f)     // vertical gap (inset per row)
@@ -149,6 +188,7 @@ class KeyboardView @JvmOverloads constructor(
         typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     }
     private val dividerPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
     }
@@ -424,6 +464,12 @@ class KeyboardView @JvmOverloads constructor(
     private fun keyBg(canvas: Canvas, r: RectF, c: Palette, isPressed: Boolean) {
         canvas.drawRoundRect(r.left, r.top + dp(1f), r.right, r.bottom + dp(1.5f), keyRadius, keyRadius, shadowPaint)
         canvas.drawRoundRect(r, keyRadius, keyRadius, if (isPressed) pressedPaint else keyPaint)
+        // "Key outlines" setting: a hairline border for users who want defined keys.
+        if (keyOutlines) {
+            borderPaint.color = c.border
+            borderPaint.strokeWidth = dp(1f)
+            canvas.drawRoundRect(r, keyRadius, keyRadius, borderPaint)
+        }
     }
 
     private fun drawTextKey(canvas: Canvas, r: RectF, c: Palette, isPressed: Boolean, text: String, size: Float) {
@@ -514,6 +560,7 @@ class KeyboardView @JvmOverloads constructor(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 val hit = cells.firstOrNull { it.rect.contains(event.x, event.y) }
+                if (hit != null) keyPressFeedback()
                 // A letter press may become a swipe: defer its commit to UP and
                 // start tracking a path. Everything else fires immediately.
                 if (page == Page.ALPHA && hit is Cell.Letter) {
@@ -726,7 +773,7 @@ class KeyboardView @JvmOverloads constructor(
                 }
             }
             MotionEvent.ACTION_UP -> {
-                if (!emojiDragging) onEmojiTap(L, event.x, event.y)
+                if (!emojiDragging) { keyPressFeedback(); onEmojiTap(L, event.x, event.y) }
                 emojiDragging = false
             }
             MotionEvent.ACTION_CANCEL -> emojiDragging = false
@@ -758,7 +805,7 @@ class KeyboardView @JvmOverloads constructor(
     private class Palette(
         val bg: Int, val key: Int, val shadow: Int, val pressed: Int,
         val label: Int, val icon: Int, val iconMuted: Int, val accent: Int,
-        val suggestion: Int, val divider: Int, val hint: Int,
+        val suggestion: Int, val divider: Int, val hint: Int, val border: Int,
     ) {
         companion object {
             val LIGHT = Palette(
@@ -767,7 +814,7 @@ class KeyboardView @JvmOverloads constructor(
                 label = Color.parseColor("#111114"), icon = Color.parseColor("#1A1A1D"),
                 iconMuted = Color.parseColor("#8A8D93"), accent = Color.parseColor("#1177FF"),
                 suggestion = Color.parseColor("#1A1A1D"), divider = Color.parseColor("#AEB2B9"),
-                hint = Color.parseColor("#9A9DA3"),
+                hint = Color.parseColor("#9A9DA3"), border = Color.parseColor("#B7BBC2"),
             )
             val DARK = Palette(
                 bg = Color.parseColor("#2B2B2E"), key = Color.parseColor("#6C6C70"),
@@ -775,7 +822,7 @@ class KeyboardView @JvmOverloads constructor(
                 label = Color.parseColor("#FFFFFF"), icon = Color.parseColor("#F2F2F5"),
                 iconMuted = Color.parseColor("#9A9A9E"), accent = Color.parseColor("#3B9BFF"),
                 suggestion = Color.parseColor("#EDEDEF"), divider = Color.parseColor("#4A4A4E"),
-                hint = Color.parseColor("#B8B8BC"),
+                hint = Color.parseColor("#B8B8BC"), border = Color.parseColor("#54545A"),
             )
         }
     }

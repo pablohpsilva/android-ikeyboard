@@ -25,6 +25,7 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 class ConsentStore(private val context: Context) {
 
     private val learningEnabledKey = booleanPreferencesKey("learning_enabled")
+    private val onboardingCompleteKey = booleanPreferencesKey("onboarding_complete")
 
     /** Whether the user has opted into on-device learning. Default: false. */
     val learningEnabled: Flow<Boolean> =
@@ -32,5 +33,19 @@ class ConsentStore(private val context: Context) {
 
     suspend fun setLearningEnabled(enabled: Boolean) {
         context.dataStore.edit { it[learningEnabledKey] = enabled }
+    }
+
+    /**
+     * Whether first-run onboarding has been completed. Default: false. This is
+     * kept separate from [learningEnabled] on purpose: "learning is off" and
+     * "we have never asked" are different states, and only the latter should show
+     * the consent flow. The launcher activity reads this to decide whether to open
+     * onboarding or settings.
+     */
+    val onboardingComplete: Flow<Boolean> =
+        context.dataStore.data.map { it[onboardingCompleteKey] ?: false }
+
+    suspend fun setOnboardingComplete(complete: Boolean) {
+        context.dataStore.edit { it[onboardingCompleteKey] = complete }
     }
 }

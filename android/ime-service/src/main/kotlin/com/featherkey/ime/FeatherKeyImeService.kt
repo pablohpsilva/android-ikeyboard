@@ -40,6 +40,7 @@ import com.featherkey.onboarding.ConsentStore
 import com.featherkey.platform.DeviceDictionary
 import com.featherkey.platform.EditorInfoSensitivity
 import com.featherkey.platform.EmojiRecents
+import com.featherkey.platform.KeyboardAppearancePrefs
 import com.featherkey.platform.KeystoreKeyProvider
 import com.featherkey.platform.LanguagePrefs
 import java.io.File
@@ -66,6 +67,8 @@ class FeatherKeyImeService : InputMethodService() {
     private var recognizer: SpeechRecognizer? = null
 
     private lateinit var langPrefs: LanguagePrefs
+    /** Keyboard height / outlines / haptics prefs, re-read per field like languages. */
+    private lateinit var appearancePrefs: KeyboardAppearancePrefs
     /** Persisted most-recently-used emoji for the emoji page's recents tab. */
     private lateinit var emojiRecents: EmojiRecents
     /** The active languages currently loaded into the core (order = preference). */
@@ -98,6 +101,7 @@ class FeatherKeyImeService : InputMethodService() {
     override fun onCreate() {
         super.onCreate()
         langPrefs = LanguagePrefs(this)
+        appearancePrefs = KeyboardAppearancePrefs(this)
         emojiRecents = EmojiRecents(this)
         currentTags = langPrefs.activeTags()
         usage = UsageModel(this).also { it.load() }
@@ -130,7 +134,23 @@ class FeatherKeyImeService : InputMethodService() {
         view.onEmoji = { emoji -> handleEmoji(emoji) }
         view.recents = emojiRecents.list()
         keyboard = view
+        applyAppearance()
         return view
+    }
+
+    /**
+     * Push the current appearance preferences (height, key outlines, haptics) into
+     * the keyboard view. Read synchronously and re-applied on each [onStartInput],
+     * so a change made in settings takes effect on the next field — the same
+     * pattern [applyLanguages] uses.
+     */
+    private fun applyAppearance() {
+        val a = appearancePrefs.snapshot()
+        keyboard?.applyAppearance(
+            heightScale = a.height.scale,
+            keyOutlines = a.keyOutlines,
+            haptics = a.haptics,
+        )
     }
 
     override fun onStartInput(info: EditorInfo?, restarting: Boolean) {
@@ -141,8 +161,10 @@ class FeatherKeyImeService : InputMethodService() {
         lastWord = null // a new field starts with no preceding-word context
         keyboard?.suggestions = emptyList()
         keyboard?.resetPage()
-        // Pick up any language changes made in settings since the last field.
+        // Pick up any language or appearance changes made in settings since the
+        // last field (both are read synchronously and take effect from here on).
         applyLanguages(langPrefs.activeTags())
+        applyAppearance()
     }
 
     /** Push [tags] to the core (if changed) and reflect them on the space bar. */
