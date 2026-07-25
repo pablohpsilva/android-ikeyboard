@@ -57,4 +57,16 @@ class LanguageBundleTest {
         assertEquals(listOf("en", "pt"), r.tags)
         assertFalse(r.bundleApplied)
     }
+
+    @Test fun adding_lb_to_an_existing_set_promotes_it_to_primary() {
+        // The "Add" action appends lb to the end; the bundle must move it to
+        // primary so its QWERTZ layout and momentum head-start take effect.
+        val r = LanguageBundle.withCompanions(
+            current = listOf("en", "pt", "es", "fr"),
+            requested = listOf("en", "pt", "es", "fr", "lb"),
+            alreadyApplied = false,
+        )
+        assertEquals(listOf("lb", "en", "pt", "es", "fr", "de"), r.tags)
+        assertTrue(r.bundleApplied)
+    }
 }
