@@ -22,14 +22,23 @@ fn positional_score(rank: u32) -> f64 {
     -((1 + rank) as f64).ln()
 }
 
+/// The blended score the ranker assigns one candidate under `momentum`:
+/// positional score + language-momentum term + per-source prior. Public so a
+/// caller that must add its own bias (correction's sticky-fix bonus) shares the
+/// exact scoring the strip uses.
+#[must_use]
+pub fn score(cand: &Candidate, momentum: &Momentum) -> f64 {
+    positional_score(cand.source_rank)
+        + LM_WEIGHT_LANG * momentum.weight_of(&cand.lang).ln()
+        + source_prior(cand.source)
+}
+
 /// Rank `cands` using `momentum`, deduping by word (best score wins), top `k`.
 #[must_use]
 pub fn rank(cands: &[Candidate], momentum: &Momentum, k: usize) -> Vec<RankedCandidate> {
     let mut best: Vec<RankedCandidate> = Vec::new();
     for cand in cands {
-        let score = positional_score(cand.source_rank)
-            + LM_WEIGHT_LANG * momentum.weight_of(&cand.lang).ln()
-            + source_prior(cand.source);
+        let score = score(cand, momentum);
         match best.iter_mut().find(|r| r.word == cand.word) {
             Some(existing) if existing.score >= score => {}
             Some(existing) => {
@@ -55,7 +64,7 @@ pub fn rank(cands: &[Candidate], momentum: &Momentum, k: usize) -> Vec<RankedCan
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
-    use super::rank;
+    use super::{rank, score};
     use featherkey_contracts::{Candidate, Source};
     use featherkey_language_momentum::Momentum;
 
@@ -106,6 +115,14 @@ mod tests {
         let cands = vec![c("a", "en", 0), c("b", "en", 1), c("c", "en", 2)];
         let mom = Momentum::new("en", &["en".into()]);
         assert_eq!(rank(&cands, &mom, 2).len(), 2);
+    }
+
+    #[test]
+    fn score_matches_rank_ordering_for_a_single_candidate() {
+        let mom = Momentum::new("en", &["en".into(), "es".into()]);
+        let a = c("hello", "en", 0);
+        let b = c("hola", "es", 3);
+        assert!(score(&a, &mom) > score(&b, &mom)); // en primary + better rank
     }
 
     #[test]
