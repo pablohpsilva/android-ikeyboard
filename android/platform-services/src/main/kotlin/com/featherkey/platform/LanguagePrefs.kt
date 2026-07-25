@@ -3,7 +3,7 @@ package com.featherkey.platform
 /*
  * The user's chosen active languages, ordered — first is the *primary* (shown
  * first in the space bar, used as the display subtype and prediction tie-break).
- * The globe key cycles the primary; settings edits the whole set.
+ * Settings edits the whole set; the primary is simply the first entry.
  *
  * Plain SharedPreferences: a language choice is a preference, not personal data.
  * The IME service and the settings activity share the app process, so a write in
@@ -45,7 +45,11 @@ class LanguagePrefs(context: Context) {
             .apply()
     }
 
-    /** Rotate so the next language becomes primary; returns the new order. */
+    /**
+     * Rotate so the next language becomes primary; returns the new order.
+     * Currently unused (the globe key opens the IME picker rather than cycling);
+     * kept for a future in-keyboard language-switch affordance.
+     */
     fun cyclePrimary(): List<String> {
         val cur = activeTags()
         if (cur.size < 2) return cur
