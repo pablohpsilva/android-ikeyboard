@@ -90,6 +90,11 @@ class FeatherKeyImeService : InputMethodService() {
     /** The learning-consent toggle (BR-22); learning is off until opted in. */
     @Volatile private var learningEnabled = false
 
+    // Coalesces multiple device-dictionary results that land within a frame into a
+    // single strip refresh (each language answers separately; without this a
+    // keystroke re-runs rankForStrip once per answering language).
+    private val refreshStrip = Runnable { updateSuggestions() }
+
     override fun onCreate() {
         super.onCreate()
         langPrefs = LanguagePrefs(this)
@@ -98,7 +103,10 @@ class FeatherKeyImeService : InputMethodService() {
         usage = UsageModel(this).also { it.load() }
         bigrams = ContextModel(this).also { it.load() }
         // The device dictionary's async lookups refresh the strip on completion.
-        deviceDict = DeviceDictionary(this) { keyboard?.post { updateSuggestions() } }
+        deviceDict = DeviceDictionary(this) {
+            keyboard?.removeCallbacks(refreshStrip)
+            keyboard?.postDelayed(refreshStrip, DEVICE_REFRESH_COALESCE_MS)
+        }
         deviceDict.setLanguages(currentTags)
         loadVocab(currentTags)
         ConsentStore(applicationContext).learningEnabled
@@ -218,6 +226,7 @@ class FeatherKeyImeService : InputMethodService() {
         super.onFinishInput()
         pending.clear()
         keyboard?.suggestions = emptyList()
+        keyboard?.removeCallbacks(refreshStrip)
         schedulePersist(immediate = true)
     }
 
@@ -484,6 +493,7 @@ class FeatherKeyImeService : InputMethodService() {
     private companion object {
         const val PERSIST_DEBOUNCE_MS = 3_000L
         const val SUGGESTIONS = 3 // strip capacity
+        private const val DEVICE_REFRESH_COALESCE_MS = 16L // ~one frame; batch same-keystroke device results
     }
 }
 
