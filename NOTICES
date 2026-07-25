@@ -10,8 +10,12 @@ and .../freq/lb.txt)
   Licensed under the European Union Public Licence v.1.1 (EUPL v1.1).
   The derived word list is made available under the EUPL v1.1.
 
-- Frequency ordering derived from the Leipzig Corpora Collection (Wortschatz),
-  Luxembourgish corpus "ltz_wikipedia_2021_100K":
+- Word frequencies derived from the Leipzig Corpora Collection (Wortschatz),
+  Luxembourgish collection, combining the following corpora (summed word counts):
+    * ltz-lu_web_2015_300K       (web)
+    * ltz_newscrawl_2016_300K    (news)
+    * ltz_wikipedia_2021_100K    (Wikipedia)
+    * ltz_wikipedia_2016_100K    (Wikipedia)
   https://wortschatz.uni-leipzig.de/en/download/Luxembourgish
   © Universität Leipzig / Sächsische Akademie der Wissenschaften / InfAI.
   Licensed under Creative Commons Attribution (CC-BY 3.0).
