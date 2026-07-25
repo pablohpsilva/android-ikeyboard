@@ -34,6 +34,8 @@ import com.featherkey.ffi.FeatherKeyBridge
 import com.featherkey.ffi.FieldSensitivity
 import com.featherkey.ffi.Language
 import com.featherkey.ffi.generated.FfiDecode
+import com.featherkey.ffi.generated.FfiRankCandidate
+import com.featherkey.ffi.generated.FfiSource
 import com.featherkey.keyboard.FunctionKey
 import com.featherkey.keyboard.KeyboardView
 import com.featherkey.keyboard.RenderKey
@@ -104,7 +106,7 @@ class FeatherKeyImeService : InputMethodService() {
         bigrams = ContextModel(this).also { it.load() }
         // The device dictionary's async lookups refresh the strip on completion.
         deviceDict = DeviceDictionary(this) { keyboard?.post { updateSuggestions() } }
-        deviceDict.setPrimary(currentTags.firstOrNull() ?: "en")
+        deviceDict.setLanguages(currentTags)
         loadVocab(currentTags)
         ConsentStore(applicationContext).learningEnabled
             .onEach { learningEnabled = it }
@@ -147,7 +149,7 @@ class FeatherKeyImeService : InputMethodService() {
         if (tags != currentTags) {
             runCatching { bridge.setActiveLanguages(Lexicons.load(this, tags)) }
             currentTags = tags
-            deviceDict.setPrimary(tags.firstOrNull() ?: "en")
+            deviceDict.setLanguages(tags)
             loadVocab(tags)
             // The primary language may have changed the core's alpha script
             // (e.g. Latin → Cyrillic), so re-pull the rendered keys; renderKeys()
@@ -171,7 +173,18 @@ class FeatherKeyImeService : InputMethodService() {
     private fun handleGesture(pathPts: List<PointF>, centers: Map<Char, PointF>) {
         val ic = currentInputConnection ?: return
         val words = GestureDecoder.decode(pathPts, centers, vocab.words, vocab::rankOf, usage.map, limit = 4)
-        val best = words.firstOrNull() ?: return
+        if (words.isEmpty()) return
+        // Tag each decoded word by the languages that recognise it (fallback: the
+        // primary language) and let the core ranker blend in language momentum.
+        val fallback = currentTags.firstOrNull() ?: "en"
+        val cands = ArrayList<FfiRankCandidate>()
+        words.forEachIndexed { i, w ->
+            val langs = vocab.languagesOf(w).ifEmpty { setOf(fallback) }
+            for (lang in langs) cands.add(FfiRankCandidate(w, lang, FfiSource.LEXICON, i.toUInt()))
+        }
+        val ranked = runCatching { bridge.rank(cands, SUGGESTIONS.toUInt()).map { it.word } }
+            .getOrDefault(emptyList())
+        val best = ranked.firstOrNull() ?: words.firstOrNull() ?: return
         if (pending.isNotEmpty()) { // finalise a half-typed word with a space
             learnWord(pending.toString())
             ic.commitText(" ", 1)
@@ -181,7 +194,7 @@ class FeatherKeyImeService : InputMethodService() {
         // Swipe result has no per-tap data; drop any so suggestions use prefixes.
         tapDists.clear()
         pending.clear(); pending.append(best) // treat as the current word: alts replace it
-        keyboard?.suggestions = words.take(3)
+        keyboard?.suggestions = ranked.take(3).ifEmpty { words.take(3) }
         schedulePersist()
     }
 
@@ -196,6 +209,12 @@ class FeatherKeyImeService : InputMethodService() {
         usage.record(word)
         // Record the transition from the previous word, then advance the context.
         val w = word.lowercase()
+        // Fold the committing word's recogniser languages into core momentum. The
+        // device dictionary is only consulted when the field is not sensitive
+        // (E-2/BR-26); this whole method is already gated on consent + sensitivity.
+        val recognizers = (vocab.languagesOf(w) +
+            (if (!field.isSensitive()) deviceDict.knownLanguages(w) else emptySet())).toList()
+        runCatching { bridge.observeLanguage(recognizers) }
         lastWord?.let { bigrams.record(it, w) }
         lastWord = w
     }
@@ -307,37 +326,32 @@ class FeatherKeyImeService : InputMethodService() {
      * next-word predictions for the previous word (BR-10 next-word ranking).
      */
     private fun updateSuggestions() {
-        val prefix = pending.toString().lowercase()
-        val base = when {
-            prefix.isEmpty() -> lastWord?.let { bigrams.nextWords(it, 3) } ?: emptyList()
-            // Taps in lockstep with the word: read them probabilistically against
-            // the language model (fat-finger tolerant) instead of as hard keys.
-            tapDists.size == prefix.length ->
-                vocab.probableWords(tapDists, usage.map, bigrams.nextCounts(lastWord), 3)
-            // Word came from a path without per-tap data (swipe, suggestion): fall
-            // back to exact-prefix completion.
-            else -> vocab.suggestions(prefix, usage.map, 3, bigrams.nextCounts(lastWord))
-        }
-        keyboard?.suggestions = withDeviceSuggestions(prefix, base)
+        keyboard?.suggestions = rankForStrip(pending.toString().lowercase())
     }
 
     /**
-     * Top up the strip from the device dictionary when our bundled lists come up
-     * short — the common case for scripts we ship no word list for (Russian,
-     * Greek). The lookup is async: [DeviceDictionary.refresh] kicks it off and
-     * its callback re-runs this method once results are in. Skipped entirely in a
-     * sensitive field, so a password is never sent to the system spell checker.
+     * The suggestion strip for [prefix]: on an empty prefix, the next-word
+     * predictions for the previous word; otherwise the bundled per-language
+     * completions plus (in a non-sensitive field) the device dictionary's
+     * completions for scripts we ship no list for, all blended by the core ranker
+     * so language momentum decides the order. The device lookup is async
+     * ([DeviceDictionary.refresh]) and its callback re-runs this method when
+     * results land. Skipped entirely in a sensitive field, so a password is never
+     * sent to the system spell checker (E-2/BR-26).
      */
-    private fun withDeviceSuggestions(prefix: String, base: List<String>): List<String> {
-        if (prefix.isEmpty() || field.isSensitive()) return base
-        deviceDict.refresh(prefix)
-        if (base.size >= SUGGESTIONS) return base
-        val out = LinkedHashSet(base)
-        for (w in deviceDict.suggestions()) {
-            if (out.size >= SUGGESTIONS) break
-            if (w.length > prefix.length && w.lowercase() != prefix) out.add(w)
+    private fun rankForStrip(prefix: String): List<String> {
+        if (prefix.isEmpty()) return lastWord?.let { bigrams.nextWords(it, SUGGESTIONS) } ?: emptyList()
+        val cands = ArrayList<FfiRankCandidate>()
+        for (c in vocab.candidatesByLanguage(prefix, usage.map, bigrams.nextCounts(lastWord), SUGGESTIONS + 2))
+            cands.add(FfiRankCandidate(c.word, c.lang, FfiSource.LEXICON, c.sourceRank.toUInt()))
+        if (!field.isSensitive()) {
+            deviceDict.refresh(prefix)
+            for ((lang, words) in deviceDict.candidatesByLanguage())
+                words.forEachIndexed { i, w ->
+                    if (w.lowercase() != prefix) cands.add(FfiRankCandidate(w, lang, FfiSource.DEVICE, i.toUInt()))
+                }
         }
-        return out.toList()
+        return runCatching { bridge.rank(cands, SUGGESTIONS.toUInt()).map { it.word } }.getOrDefault(emptyList())
     }
 
     /** Commit a tapped suggestion, replacing the pending word. */
@@ -378,25 +392,18 @@ class FeatherKeyImeService : InputMethodService() {
      * or a mixed-case token.
      */
     private fun correctedWord(word: String): String? {
-        val core = runCatching { bridge.correct(word, "", word) }.getOrNull()
-        if (core != null && core.applied) return core.primary
         if (word != word.lowercase()) return null // don't mangle Caps/ALLCAPS
-        if (vocab.rankOf(word) != Int.MAX_VALUE) return null // already a bundled real word
         // The device dictionary is the base for languages we bundle no list for.
-        // Trust a word it confirms; otherwise keep its top correction in reserve.
         // Skipped in a sensitive field (the word would go to the spell checker).
         val deviceOn = !field.isSensitive()
-        if (deviceOn && deviceDict.isKnown(word)) return null
-        // Prefer the noisy-channel reading of the taps when we have per-tap data.
-        if (tapDists.size == word.length) {
-            vocab.probableWords(tapDists, usage.map, bigrams.nextCounts(lastWord), 1)
-                .firstOrNull()?.takeIf { it != word }?.let { return it }
-        }
-        // Otherwise fall back to the device dictionary's top correction.
-        if (deviceOn) {
-            deviceDict.suggestions().firstOrNull { it.lowercase() != word }?.let { return it }
-        }
-        return null
+        val deviceKnown = if (deviceOn) {
+            if (deviceDict.knownLanguages(word).isNotEmpty()) listOf(word) else emptyList()
+        } else emptyList()
+        val deviceCands = ArrayList<FfiRankCandidate>()
+        if (deviceOn) for ((lang, words) in deviceDict.candidatesByLanguage())
+            words.forEachIndexed { i, w -> deviceCands.add(FfiRankCandidate(w, lang, FfiSource.DEVICE, i.toUInt())) }
+        val c = runCatching { bridge.chooseCorrection(word, deviceKnown, deviceCands) }.getOrNull() ?: return null
+        return if (c.applied && c.primary != word) c.primary else null
     }
 
     private fun backspace(ic: InputConnection) {
