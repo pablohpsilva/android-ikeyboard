@@ -260,3 +260,40 @@ profiling a specific slow scenario (many active languages, a huge learned
 vocabulary, or a slower device) shows an actual main-thread stall. This is the
 "measure between phases" principle doing its job: the data argued against the
 riskiest planned change.
+
+### Phase 3 (startup + memory) — assessed, and declined on evidence
+
+Phase 3 was scoped as async startup init + vocabulary memory dedup. On close
+inspection of the real code, each candidate hits a wall that its value does not
+justify:
+
+- **Async `bridge`/init off the main thread.** `bridge` is required
+  *synchronously* by `onCreateInputView` → `renderKeys()` → `bridge.layoutKeys()`
+  and by `handleTouch` decode. Making it async cascades null-tolerance across the
+  whole input path. And cold start is **infrequent** — the IME process is kept
+  warm by the system, StrongBox keygen is **first-run-only**, and slow startup
+  was **not** among the reported symptoms (typing lag + layout shift, both fixed
+  in Phase 1/2). High reliability risk for an unmeasured, infrequent, unreported
+  cost.
+- **Async `usage`/`bigrams` TSV load.** Their `load()` does `counts.clear()` then
+  repopulates, and `record()`/`map`/`nextWords` run on the main thread. Moving
+  the load off-thread races the HashMap and can **wipe a word learned in the
+  first moments after cold start** — a data-loss concurrency bug — without the
+  same snapshot/swap machinery declined in Phase 2b. Value is marginal anyway
+  (these TSVs are small for typical users).
+- **Vocabulary memory dedup.** The only change that frees real bytes is dropping
+  the per-language `rank: HashMap<String,Int>` for a parallel array, but every
+  rank lookup then becomes a binary search — and `lang.rank[w]` is read
+  **thousands of times per keystroke** in the bounded prefix scan (and per
+  survivor in gesture decode). It trades memory for the exact hot-path CPU we
+  optimized. The "free" dedup (a lazy `words` list) saves only reference arrays
+  (~0.4 MB/lang). Meanwhile PSS ≈103 MB (Java heap ≈10 MB) is unremarkable for an
+  IME, and the benchmark build already cut the code/native footprint (APK −64%).
+
+**Decision — Phase 3 is not worth its risk/tradeoffs; the initiative is
+complete at Phase 1+2.** The reported pains are fixed and the shippable build is
+markedly lighter and smoother. Revisit only with a concrete trigger: a measured
+cold-start regression on a warm-process-evicting device, or memory pressure from
+many simultaneously-active large-vocabulary languages — at which point the
+correct fix (thread-safe model swap, or an arena/interned shared word store) can
+be designed against that evidence rather than speculatively.
