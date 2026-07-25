@@ -67,7 +67,7 @@ impl Layout {
             "ru" | "uk" | "be" | "bg" | "sr" | "mk" => Layout::cyrillic(),
             "el" => Layout::greek(),
             "fr" => Layout::azerty(),
-            "de" => Layout::qwertz(),
+            "de" | "lb" => Layout::qwertz(),
             _ => Layout::qwerty(),
         }
     }
@@ -144,6 +144,10 @@ mod tests {
         // 'a' leads AZERTY, 'q' leads QWERTZ.
         assert_eq!(chars(&Layout::alpha_for("fr"))[0], 'a');
         assert_eq!(chars(&Layout::alpha_for("de_DE"))[0], 'q');
+        // Luxembourgish shares the German QWERTZ block (Swiss national standard).
+        assert_eq!(chars(&Layout::alpha_for("lb"))[0], 'q');
+        assert_eq!(chars(&Layout::alpha_for("lb"))[5], 'z');
+        assert_eq!(chars(&Layout::alpha_for("lb-LU"))[5], 'z');
         // Every other Latin locale, and a bare/empty tag, fall back to qwerty.
         assert_eq!(chars(&Layout::alpha_for("en"))[0], 'q');
         assert_eq!(chars(&Layout::alpha_for("pt-BR"))[0], 'q');
