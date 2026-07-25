@@ -228,4 +228,33 @@ mod tests {
         let strong = core.choose_correction("cit", &[], vec![]).expect("ok");
         assert_eq!(strong.primary, "cot"); // strong Spanish momentum overrides the bonus
     }
+
+    #[test]
+    fn single_language_choose_correction_matches_legacy_correct() {
+        let core = FeatherKeyCore::new(vec![(
+            "en".into(),
+            vec!["bat".into(), "cat".into(), "hat".into()],
+        )])
+        .expect("core");
+        let legacy = core.correct("zat", "", "zat").expect("legacy");
+        let now = core.choose_correction("zat", &[], vec![]).expect("now");
+        assert_eq!(now.primary, legacy.primary);
+        assert_eq!(now.applied, legacy.applied);
+    }
+
+    #[test]
+    fn core_fuzzy_prior_keeps_the_primary_fix_against_a_slightly_hotter_language() {
+        // "cit" is one edit from "cat" (en, primary) and "cot" (es). After ONE Spanish
+        // word, es's weight (~1.045) edges just above en's decayed head-start (~0.945) —
+        // so WITHOUT the sticky bonus "cot" would win. CORE_FUZZY_PRIOR must keep the
+        // primary fix "cat". This test fails if the const regresses to 0, locking the dial.
+        let mut core = FeatherKeyCore::new(vec![
+            ("en".into(), vec!["cat".into()]),
+            ("es".into(), vec!["cot".into()]),
+        ])
+        .expect("core");
+        core.observe_language(vec!["es".into()]); // one Spanish word: es edges just ahead
+        let got = core.choose_correction("cit", &[], vec![]).expect("ok");
+        assert_eq!(got.primary, "cat");
+    }
 }
