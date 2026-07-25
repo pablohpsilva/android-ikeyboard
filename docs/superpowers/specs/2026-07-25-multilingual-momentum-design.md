@@ -1,7 +1,7 @@
 # Multilingual Device Dictionary + Language Momentum — Design
 
 **Date:** 2026-07-25
-**Status:** Approved for planning (revised after 3 completeness audits)
+**Status:** Implemented (2026-07-25). Momentum verified on-device (en+es): after committing Spanish words, "hol" ranks "hola" first vs English-first with no Spanish context. Tuning constants shipped: DECAY=0.9, FLOOR=0.05, HEAD_START=1.0, LM_WEIGHT_LANG=1.0, SOURCE_PRIOR_LEXICON=0.2/DEVICE=0.0, CORE_FUZZY_PRIOR=0.5. Note: word-level noisy-channel tap decode (`Vocabulary.probableWords`) is no longer wired into the strip/correction (superseded by the core ranker + edit-distance autocorrect) — flagged as a follow-up decision.
 **Author:** FeatherKey (pair: Oakblu)
 
 ## Problem
