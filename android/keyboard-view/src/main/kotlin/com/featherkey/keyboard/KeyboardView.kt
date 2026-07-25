@@ -12,6 +12,7 @@ package com.featherkey.keyboard
  * is either handled in-view (shift, page switch) or reported as an intent.
  */
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Canvas
@@ -27,6 +28,7 @@ import android.util.TypedValue
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
+import android.view.animation.PathInterpolator
 import androidx.core.graphics.PathParser
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -72,8 +74,14 @@ class KeyboardView @JvmOverloads constructor(
     /** Predictive suggestions; the strip collapses entirely when this is empty. */
     var suggestions: List<String> = emptyList()
         set(value) {
+            val wasOpen = field.isNotEmpty()
             field = value
-            invalidate() // height is constant now; only the strip text repaints
+            // The reserved band eases open when suggestions first appear and eases
+            // shut when they clear (the host app reflows with it — a deliberate
+            // trade of the constant-height optimisation for reclaimed space). While
+            // suggestions merely change contents, only the text repaints.
+            val nowOpen = value.isNotEmpty()
+            if (nowOpen != wasOpen) animateStrip(open = nowOpen) else invalidate()
         }
 
     /** Shift state (next letter uppercase; highlights the shift key). */
@@ -92,11 +100,21 @@ class KeyboardView @JvmOverloads constructor(
     // FeatherKeyImeService.applyAppearance). Defaults reproduce the original look,
     // so an unset view renders exactly as before. ---
 
-    /** Multiplies the height bands (rows/strip/function/bar); gaps stay constant. */
+    /**
+     * Target height multiplier for the vertical bands (rows/strip/function/bar);
+     * gaps stay constant. Set from the "Keyboard height" setting (compact /
+     * standard / tall). The *rendered* scale is [animatedHeightScale], which eases
+     * toward this: instantly on first creation (before the view is attached, so
+     * the keyboard simply opens at the chosen size), but with a short ease when
+     * the setting is changed while a keyboard is already on screen.
+     */
     var heightScale: Float = 1f
         set(value) {
             val v = value.coerceIn(0.7f, 1.4f)
-            if (v != field) { field = v; requestLayout(); invalidate() }
+            if (v == field) return
+            field = v
+            if (isAttachedToWindow) animateHeightScale(v)
+            else { animatedHeightScale = v; requestLayout(); invalidate() }
         }
 
     /** Draw a hairline outline around each key (off = flat, iOS-style). */
@@ -165,14 +183,29 @@ class KeyboardView @JvmOverloads constructor(
     private fun dp(v: Float) =
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
 
+    // --- Height / strip animation state ---
+    // [animatedHeightScale] is the scale actually rendered; it eases toward the
+    // [heightScale] target. [stripReveal] is the reserved suggestion band's
+    // openness in 0..1 (0 = fully collapsed, 1 = fully open); it eases as
+    // suggestions appear/clear. Both drive onMeasure, so the IME window height
+    // (and the host app above it) follows them frame by frame.
+    private var animatedHeightScale = 1f
+    private var stripReveal = 0f
+    private var heightAnimator: ValueAnimator? = null
+    private var stripAnimator: ValueAnimator? = null
+    // Material "standard" ease (fast-out, slow-in) for both height transitions.
+    private val easing = PathInterpolator(0.4f, 0f, 0.2f, 1f)
+
     // --- Geometry ---
-    // The vertical bands scale with [heightScale] (the "Keyboard height" setting);
-    // horizontal spacing (margins, gaps, radius) is left fixed so the board grows
-    // in height without the keys drifting apart.
-    private val stripHeight get() = dp(42f) * heightScale
-    private val rowHeight get() = dp(52f) * heightScale
-    private val funcRowHeight get() = dp(54f) * heightScale
-    private val bottomBarHeight get() = dp(46f) * heightScale
+    // The vertical bands scale with [animatedHeightScale] (the eased "Keyboard
+    // height" setting); horizontal spacing (margins, gaps, radius) is left fixed
+    // so the board grows in height without the keys drifting apart.
+    private val stripHeight get() = dp(42f) * animatedHeightScale
+    private val rowHeight get() = dp(52f) * animatedHeightScale
+    private val funcRowHeight get() = dp(54f) * animatedHeightScale
+    private val bottomBarHeight get() = dp(46f) * animatedHeightScale
+    /** The reserved suggestion band's *current* height (full band × reveal). */
+    private val stripBand get() = stripHeight * stripReveal
     private val sideMargin get() = dp(4f)
     private val keyGap get() = dp(5f)     // horizontal gap
     private val rowGap get() = dp(6f)     // vertical gap (inset per row)
@@ -214,6 +247,26 @@ class KeyboardView @JvmOverloads constructor(
     private fun longPressTimeoutMs() = 300L
     private fun accentActive() = accentSession.active
 
+    // --- Backspace auto-repeat (press-and-hold to delete continuously) ---
+    // The first delete fires on touch-down like any key; while the finger stays
+    // down this runnable keeps firing backspaces on an accelerating cadence
+    // ([KeyRepeat]) until UP/CANCEL removes it.
+    private var backspaceDelay = KeyRepeat.START_MS
+    private val backspaceRepeat = object : Runnable {
+        override fun run() {
+            onFunctionKey?.invoke(FunctionKey.BACKSPACE)
+            backspaceDelay = KeyRepeat.next(backspaceDelay)
+            postDelayed(this, backspaceDelay)
+        }
+    }
+    private fun startBackspaceRepeat() {
+        backspaceDelay = KeyRepeat.START_MS
+        postDelayed(backspaceRepeat, KeyRepeat.INITIAL_MS)
+    }
+    private fun stopBackspaceRepeat() = removeCallbacks(backspaceRepeat)
+    /** True while a hold on the emoji page's backspace is repeating. */
+    private var emojiBackspaceHeld = false
+
     private enum class Sp { SHIFT, BACKSPACE, ENTER, SPACE, GLOBE, MIC, TO_NUMBERS, TO_SYMBOLS, TO_ALPHA, TO_EMOJI }
 
     private sealed class Cell(val rect: RectF) {
@@ -250,7 +303,7 @@ class KeyboardView @JvmOverloads constructor(
         val h = KeyboardGeometry.totalHeightPx(
             stripReserved = stripReserved,
             rowPx = rowHeight, funcPx = funcRowHeight, barPx = bottomBarHeight,
-            insetPx = bottomInset.toFloat(), stripPx = stripHeight,
+            insetPx = bottomInset.toFloat(), stripPx = stripBand,
         )
         setMeasuredDimension(w, h.toInt())
     }
@@ -278,12 +331,17 @@ class KeyboardView @JvmOverloads constructor(
 
         fun rowStart(n: Int) = sideMargin + (contentW - (n * baseKeyW + (n - 1) * keyGap)) / 2f
 
-        // Strip band is always reserved on this (non-emoji) page, so the key grid
-        // sits at a constant offset whether or not suggestions are shown. The three
-        // Suggest cells always exist (they draw nothing while suggestions is empty).
+        // The suggestion band occupies the top [stripBand] px (animated: 0 when
+        // collapsed, up to the full strip height when open), and the key grid
+        // starts just below it. The three Suggest cells always exist; when the
+        // band is collapsed they are zero-height, so they neither draw nor take
+        // taps. During the open/close ease the whole grid slides with the band —
+        // but the IME window grows/shrinks at the top by the same amount, so the
+        // keys stay put on screen and only the band above them changes.
+        val band = stripBand
         val cw = w / 3f
-        for (i in 0..2) out += Cell.Suggest(RectF(i * cw, 0f, (i + 1) * cw, stripHeight), i)
-        var top = KeyboardGeometry.contentTopPx(stripReserved = true, stripPx = stripHeight)
+        for (i in 0..2) out += Cell.Suggest(RectF(i * cw, 0f, (i + 1) * cw, band), i)
+        var top = KeyboardGeometry.contentTopPx(stripReserved = true, stripPx = band)
 
         // A char/letter row of equal-width keys, centred.
         fun charRow(labels: List<String>, decodeKeys: List<RenderKey>?) {
@@ -402,19 +460,27 @@ class KeyboardView @JvmOverloads constructor(
 
         cells = layoutCells()
 
-        // Suggestion strip.
-        if (suggestions.isNotEmpty()) {
+        // Suggestion strip. Its text and dividers fade in step with [stripReveal]
+        // so the band's contents ease in as it opens and out as it collapses,
+        // rather than popping at the ends of the height animation.
+        if (suggestions.isNotEmpty() && stripReveal > 0.01f) {
+            val band = stripBand
+            val alpha = (stripReveal.coerceIn(0f, 1f) * 255f).toInt()
             labelPaint.color = c.suggestion
+            labelPaint.alpha = alpha
             labelPaint.textSize = stripHeight * 0.42f
             for (cell in cells.filterIsInstance<Cell.Suggest>()) {
                 val word = suggestions.getOrNull(cell.index) ?: continue
                 val cy = cell.rect.centerY() - (labelPaint.ascent() + labelPaint.descent()) / 2
                 canvas.drawText(word, cell.rect.centerX(), cy, labelPaint)
             }
+            dividerPaint.alpha = alpha
             for (i in 1 until 3) if (i < suggestions.size) {
                 val x = width / 3f * i
-                canvas.drawLine(x, stripHeight * 0.28f, x, stripHeight * 0.72f, dividerPaint)
+                canvas.drawLine(x, band * 0.28f, x, band * 0.72f, dividerPaint)
             }
+            dividerPaint.alpha = 255
+            labelPaint.alpha = 255
             labelPaint.color = c.label
         }
 
@@ -615,6 +681,8 @@ class KeyboardView @JvmOverloads constructor(
                     gestureCell = null
                     pressed = hit; invalidate()
                     if (hit != null) fire(hit, event.x, event.y)
+                    // Holding backspace repeats the delete until the finger lifts.
+                    if (hit is Cell.Special && hit.kind == Sp.BACKSPACE) startBackspaceRepeat()
                 }
                 return true
             }
@@ -634,6 +702,7 @@ class KeyboardView @JvmOverloads constructor(
             }
             MotionEvent.ACTION_UP -> {
                 removeCallbacks(longPressRunnable)
+                stopBackspaceRepeat()
                 if (accentActive()) {
                     val chosen = accentSession.release()
                     if (chosen != null) onAccentKey?.invoke(chosen)
@@ -655,7 +724,8 @@ class KeyboardView @JvmOverloads constructor(
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
-                removeCallbacks(longPressRunnable); resetAccent(); resetGesture(); return true
+                removeCallbacks(longPressRunnable); stopBackspaceRepeat()
+                resetAccent(); resetGesture(); return true
             }
         }
         return super.onTouchEvent(event)
@@ -703,6 +773,50 @@ class KeyboardView @JvmOverloads constructor(
         accentSession.reset()
         accentPopup = null
         pressed = null
+    }
+
+    // ---- Height / strip animation ------------------------------------------
+
+    /** Ease the reserved suggestion band open ([open]) or shut, resizing the IME
+     *  window with it. Duration scales with the remaining distance so a reversal
+     *  mid-flight (suggestions arriving as the band is closing) stays quick and
+     *  never snaps. */
+    private fun animateStrip(open: Boolean) {
+        val target = if (open) 1f else 0f
+        if (stripReveal == target && stripAnimator?.isRunning != true) { invalidate(); return }
+        stripAnimator?.cancel()
+        stripAnimator = ValueAnimator.ofFloat(stripReveal, target).apply {
+            duration = (kotlin.math.abs(target - stripReveal) * STRIP_ANIM_MS).toLong().coerceAtLeast(1L)
+            interpolator = easing
+            addUpdateListener {
+                stripReveal = it.animatedValue as Float
+                requestLayout(); invalidate()
+            }
+            start()
+        }
+    }
+
+    /** Ease the rendered height scale toward [target] (a live compact/standard/
+     *  tall change), resizing the IME window frame by frame. */
+    private fun animateHeightScale(target: Float) {
+        if (animatedHeightScale == target) return
+        heightAnimator?.cancel()
+        heightAnimator = ValueAnimator.ofFloat(animatedHeightScale, target).apply {
+            duration = HEIGHT_ANIM_MS
+            interpolator = easing
+            addUpdateListener {
+                animatedHeightScale = it.animatedValue as Float
+                requestLayout(); invalidate()
+            }
+            start()
+        }
+    }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        // Don't let animations or the repeat timer outlive the view.
+        stripAnimator?.cancel(); heightAnimator?.cancel()
+        stopBackspaceRepeat()
     }
 
     private fun fire(cell: Cell, tx: Float, ty: Float) {
@@ -846,9 +960,16 @@ class KeyboardView @JvmOverloads constructor(
                 emojiStartScroll = emojiScrollY
                 emojiDragging = false
                 emojiDownInGrid = event.y >= L.gridTop && event.y < L.gridBottom
+                // Backspace on the emoji control bar holds-to-repeat like the main page.
+                if (L.backspace.contains(event.x, event.y)) {
+                    keyPressFeedback()
+                    onFunctionKey?.invoke(FunctionKey.BACKSPACE)
+                    startBackspaceRepeat()
+                    emojiBackspaceHeld = true
+                }
             }
             MotionEvent.ACTION_MOVE -> {
-                if (!emojiDownInGrid) return true
+                if (emojiBackspaceHeld || !emojiDownInGrid) return true
                 val dy = event.y - emojiDownY
                 if (!emojiDragging &&
                     kotlin.math.hypot(event.x - emojiDownX, dy) > emojiDragThreshold) {
@@ -861,10 +982,16 @@ class KeyboardView @JvmOverloads constructor(
                 }
             }
             MotionEvent.ACTION_UP -> {
-                if (!emojiDragging) { keyPressFeedback(); onEmojiTap(L, event.x, event.y) }
+                if (emojiBackspaceHeld) {
+                    stopBackspaceRepeat(); emojiBackspaceHeld = false
+                } else if (!emojiDragging) {
+                    keyPressFeedback(); onEmojiTap(L, event.x, event.y)
+                }
                 emojiDragging = false
             }
-            MotionEvent.ACTION_CANCEL -> emojiDragging = false
+            MotionEvent.ACTION_CANCEL -> {
+                stopBackspaceRepeat(); emojiBackspaceHeld = false; emojiDragging = false
+            }
         }
         return true
     }
@@ -916,6 +1043,12 @@ class KeyboardView @JvmOverloads constructor(
     }
 
     private companion object {
+        /** Full-travel duration for the suggestion band's open/close ease (ms);
+         *  a partial reversal is proportionally shorter. */
+        const val STRIP_ANIM_MS = 190f
+        /** Duration for a live compact/standard/tall height-scale ease (ms). */
+        const val HEIGHT_ANIM_MS = 200L
+
         val NUMBERS_R1 = "1234567890".map { it.toString() }
         val NUMBERS_R2 = listOf("-", "/", ":", ";", "(", ")", "$", "&", "@", "\"")
         val SYMBOLS_R1 = listOf("[", "]", "{", "}", "#", "%", "^", "*", "+", "=")

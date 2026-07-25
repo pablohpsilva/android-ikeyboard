@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Enter/exit slide for the IME window, set on the soft-input window at
+         onCreate so the keyboard eases up when it shows and down when it hides. -->
+    <style name="ImeWindowAnimation">
+        <item name="android:windowEnterAnimation">@anim/ime_slide_in</item>
+        <item name="android:windowExitAnimation">@anim/ime_slide_out</item>
+    </style>
+</resources>
