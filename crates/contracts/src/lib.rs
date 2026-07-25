@@ -162,6 +162,35 @@ pub trait AutoCorrect {
     fn correct(&self, token: &Token, ctx: &TypingContext) -> Correction;
 }
 
+/// Where a candidate came from — used only to weight sources against each other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Source {
+    /// Derived from a bundled per-language lexicon/freq list.
+    Lexicon,
+    /// Derived from the device spell-checker.
+    Device,
+}
+
+/// One correction/suggestion candidate, tagged by language and by its rank
+/// *within its own source and language* (0 = best). The ranker converts
+/// `source_rank` to a commensurable score, so sources with different internal
+/// scales combine cleanly.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Candidate {
+    pub word: String,
+    pub lang: String,
+    pub source: Source,
+    pub source_rank: u32,
+}
+
+/// A candidate after ranking, carrying its final blended score.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RankedCandidate {
+    pub word: String,
+    pub lang: String,
+    pub score: f64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,6 +310,19 @@ mod tests {
         // Default TypingContext / Suggestions are usable.
         assert_eq!(TypingContext::default().prefix, "");
         assert!(Suggestions::default().items.is_empty());
+    }
+
+    #[test]
+    fn candidate_is_constructible_and_comparable() {
+        let a = Candidate {
+            word: "hola".into(),
+            lang: "es".into(),
+            source: Source::Lexicon,
+            source_rank: 0,
+        };
+        let b = a.clone();
+        assert_eq!(a, b);
+        assert_eq!(a.source, Source::Lexicon);
     }
 
     #[test]
