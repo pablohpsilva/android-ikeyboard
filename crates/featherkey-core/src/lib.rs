@@ -51,6 +51,7 @@ use featherkey_contracts::Predictor;
 use featherkey_dictionary::Dictionary;
 use featherkey_input_decoder::{InputDecoder, NearestKeyDecoder};
 use featherkey_kernel::TouchPoint;
+use featherkey_language_momentum::Momentum;
 use featherkey_locale_manager::{LangId, LocaleManager};
 use featherkey_personalization::Personalization;
 use featherkey_prediction::StatisticalPredictor;
@@ -102,6 +103,10 @@ pub struct FeatherKeyCore {
     /// Active languages, each with its validated lexicon, in preference order.
     packs: Vec<(LangId, Dictionary)>,
     sensitivity: SensitivityPolicy,
+    /// Recency-weighted per-language weight tracking which active language the
+    /// user is currently writing in; seeded on construction and re-seeded on
+    /// every language switch.
+    momentum: Momentum,
 }
 
 impl FeatherKeyCore {
@@ -119,6 +124,7 @@ impl FeatherKeyCore {
     pub fn new(languages: Vec<(String, Vec<String>)>) -> Result<Self, FeatherKeyError> {
         let packs = build_packs(languages)?;
         let primary = primary_tag(&packs);
+        let tags: Vec<String> = packs.iter().map(|(id, _)| id.as_str().to_owned()).collect();
         Ok(Self {
             layout: Layout::alpha_for(&primary),
             decoder: NearestKeyDecoder::new(),
@@ -126,6 +132,7 @@ impl FeatherKeyCore {
             personalization: Personalization::new(),
             packs,
             sensitivity: SensitivityPolicy::new(),
+            momentum: Momentum::new(&primary, &tags),
         })
     }
 
@@ -141,7 +148,14 @@ impl FeatherKeyCore {
     ) -> Result<(), FeatherKeyError> {
         self.packs = build_packs(languages)?;
         // The alpha script follows the (new) primary language.
-        self.layout = Layout::alpha_for(&primary_tag(&self.packs));
+        let primary = primary_tag(&self.packs);
+        let tags: Vec<String> = self
+            .packs
+            .iter()
+            .map(|(id, _)| id.as_str().to_owned())
+            .collect();
+        self.momentum.set_languages(&primary, &tags);
+        self.layout = Layout::alpha_for(&primary);
         Ok(())
     }
 
@@ -152,6 +166,19 @@ impl FeatherKeyCore {
             .iter()
             .map(|(id, _)| id.as_str().to_owned())
             .collect()
+    }
+
+    /// Fold one committed word's recogniser languages into momentum. Caller is
+    /// responsible for consent/sensitivity gating (this is not called in a
+    /// sensitive field or with learning disabled).
+    pub fn observe_language(&mut self, recognizers: Vec<String>) {
+        self.momentum.observe(&recognizers);
+    }
+
+    /// Current momentum weight for `lang` (test/inspection seam).
+    #[must_use]
+    pub fn language_weight(&self, lang: &str) -> f64 {
+        self.momentum.weight_of(lang)
     }
 
     /// Swap the active on-screen layout page (alpha/numeric/symbol, or any
@@ -277,5 +304,25 @@ mod tests {
         ])
         .expect("valid core");
         assert_eq!(primary_tag(&core.packs), "ru");
+    }
+
+    #[test]
+    fn observing_a_language_raises_its_weight() {
+        let mut core = FeatherKeyCore::new(vec![
+            ("en".into(), vec!["hello".into()]),
+            ("es".into(), vec!["hola".into()]),
+        ])
+        .expect("core");
+        let before = core.language_weight("es");
+        core.observe_language(vec!["es".into()]);
+        assert!(core.language_weight("es") > before * 0.9); // bumped past pure decay
+    }
+
+    #[test]
+    fn switching_languages_reseeds_momentum() {
+        let mut core = FeatherKeyCore::new(vec![("en".into(), vec!["hi".into()])]).expect("core");
+        core.set_active_languages(vec![("es".into(), vec!["hola".into()])])
+            .expect("switch");
+        assert!(core.language_weight("es") >= core.language_weight("en"));
     }
 }

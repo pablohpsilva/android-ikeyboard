@@ -36,6 +36,8 @@ featherkey-autocorrect = { path = "../autocorrect" }
 featherkey-personalization = { path = "../personalization" }
 featherkey-sensitive-context = { path = "../sensitive-context" }
 featherkey-secure-store = { path = "../secure-store" }
+featherkey-language-momentum = { path = "../language-momentum" }
+featherkey-candidate-ranker = { path = "../candidate-ranker" }
 
 [lints.rust]
 unsafe_code = "deny"
