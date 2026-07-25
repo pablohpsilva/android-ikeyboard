@@ -132,6 +132,7 @@ class FeatherKeyImeService : InputMethodService() {
         view.onSuggestion = { i -> commitSuggestion(i) }
         view.onGesture = { pathPts, centers -> handleGesture(pathPts, centers) }
         view.onEmoji = { emoji -> handleEmoji(emoji) }
+        view.onAccentKey = { ch -> handleAccent(ch) }
         view.recents = emojiRecents.list()
         keyboard = view
         applyAppearance()
@@ -271,6 +272,23 @@ class FeatherKeyImeService : InputMethodService() {
         val ch = if (kb?.shifted == true) decoded.uppercase() else decoded
         pending.append(ch)
         ic.commitText(ch, 1)
+        if (kb?.shifted == true) kb.shifted = false
+        updateSuggestions()
+    }
+
+    /**
+     * A long-press accent (or its base letter) chosen from the popup. Unlike a
+     * normal tap this is an explicit pick, so it skips decode and tap-learning:
+     * it is appended to the pending word exactly (upper-cased when shifted) and
+     * committed, so it participates in the current word, autocorrect and learning
+     * just like a decoded letter would.
+     */
+    private fun handleAccent(ch: String) {
+        val ic = currentInputConnection ?: return
+        val kb = keyboard
+        val out = if (kb?.shifted == true) ch.uppercase() else ch
+        pending.append(out)
+        ic.commitText(out, 1)
         if (kb?.shifted == true) kb.shifted = false
         updateSuggestions()
     }
