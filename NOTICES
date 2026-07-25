@@ -1,0 +1,17 @@
+Third-party data notices
+=========================
+
+Luxembourgish word list (android/ime-service/src/main/assets/lexicons/lb.txt
+and .../freq/lb.txt)
+
+- Vocabulary derived from the Spellchecker.lu Luxembourgish Hunspell dictionary
+  (unmunched surface forms): https://github.com/spellchecker-lu/dictionary-lb-lu
+  © Michel Weimerskirch, Sandra Souza Morais and contributors.
+  Licensed under the European Union Public Licence v.1.1 (EUPL v1.1).
+  The derived word list is made available under the EUPL v1.1.
+
+- Frequency ordering derived from the Leipzig Corpora Collection (Wortschatz),
+  Luxembourgish corpus "ltz_wikipedia_2021_100K":
+  https://wortschatz.uni-leipzig.de/en/download/Luxembourgish
+  © Universität Leipzig / Sächsische Akademie der Wissenschaften / InfAI.
+  Licensed under Creative Commons Attribution (CC-BY 3.0).
