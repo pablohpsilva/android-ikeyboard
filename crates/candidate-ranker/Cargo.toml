@@ -1,0 +1,21 @@
+[package]
+name = "featherkey-candidate-ranker"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Merge and rank candidates from all sources using language momentum."
+
+[package.metadata.featherkey]
+layer = "domain"
+
+[lints]
+workspace = true
+
+[dependencies]
+featherkey-contracts = { path = "../contracts" }
+featherkey-language-momentum = { path = "../language-momentum" }
+
+[dev-dependencies]
+proptest = "1.11.0"
