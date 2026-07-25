@@ -202,7 +202,32 @@ green.
 - Lower startup-to-first-frame and lower resident memory (before/after recorded).
 - Full test suite + CI gate green throughout; no feature lost.
 
-## Appendix — measurement log
-- Baseline (debug, A16): janky 12.95%, 99th 125ms, PSS 103 MB, APK 18.3 MB, 7 ABIs.
-- (Phase 1 benchmark-build re-baseline: TBD)
-- (Phase 1 after 1B/1C: TBD)
+## Appendix — measurement log (Phase 1, reference A16)
+
+Jank via `tools/perf/jank.sh` (fixed 4-rep tap+swipe burst on a focused field);
+small samples (~60–95 frames) so janky% is noisy — read the frame-time
+percentiles and slow-UI count as the primary signal.
+
+| Build | janky % | p95 | p99 | slow-UI |
+|---|---|---|---|---|
+| Pre-perf, **debug** (baseline) | 30.4% | 21ms | **42ms** | 9 |
+| Perf, **debug** (3 runs) | 26–45% | 15–20ms | 29–32ms | 6–7 |
+| Perf, **benchmark / R8** (3 runs) | **~5–21%** | 12–15ms | **16–19ms** | **0–3** |
+
+- **Issue ① layout shift — FIXED (verified):** IME window `Requested h=973` is
+  identical with and without suggestions (`dumpsys window`), so the host app no
+  longer resizes on suggestion open/close.
+- **Issue ② jank:** on the shippable benchmark build, worst-case frame time
+  p99 **42ms → ~17ms** and slow-UI-thread stalls **9 → ~1**. On the debug build
+  the gain is modest — debug ART/Compose overhead dominates, and the dominant
+  per-keystroke cost is the synchronous suggestion compute, which is Phase 2.
+  `buildCells` memoization helps most during swipes and on the optimized build.
+- **Issue ③ weight:** APK **18.36 MB → 6.64 MB (−64%)** (R8 + ABI trim);
+  shipped ABIs **7 → 2** (arm64-v8a, armeabi-v7a). FFI verified intact under R8
+  (keyboard opens the Rust store via JNA at startup and types/suggests).
+- **R8 gotcha (fixed):** JNA's `Native$AWT` references desktop `java.awt.*`;
+  R8 errored on the missing classes until `-dontwarn java.awt.**` was added —
+  exactly why the optimized build must be *run*, not just built.
+- Deferred to a follow-up: Task 4 (emoji-page constant height — fixes only the
+  unreported alpha↔emoji shift); Phase 2 (async suggestion/gesture compute) is
+  where the per-keystroke stall is addressed.
