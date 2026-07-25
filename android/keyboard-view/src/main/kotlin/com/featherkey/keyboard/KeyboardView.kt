@@ -208,13 +208,11 @@ class KeyboardView @JvmOverloads constructor(
     private var trailLen = 0f
 
     // --- Long-press accent popup state ---
-    private var accentBase: Cell.Letter? = null
-    private var accentVariants: List<String> = emptyList()
-    private var accentIndex: Int = -1            // -1 = nothing highlighted (release = base letter)
+    private val accentSession = AccentSession()
     private var accentPopup: RectF? = null       // popup band in view pixels
     private val longPressRunnable = Runnable { startAccentMode() }
     private fun longPressTimeoutMs() = 300L
-    private fun accentActive() = accentBase != null
+    private fun accentActive() = accentSession.active
 
     private enum class Sp { SHIFT, BACKSPACE, ENTER, SPACE, GLOBE, MIC, TO_NUMBERS, TO_SYMBOLS, TO_ALPHA, TO_EMOJI }
 
@@ -495,7 +493,8 @@ class KeyboardView @JvmOverloads constructor(
 
     private fun drawAccentPopup(canvas: Canvas, c: Palette) {
         val rect = accentPopup ?: return
-        val n = accentVariants.size
+        val variants = accentSession.variants
+        val n = variants.size
         if (n == 0) return
         val cellW = rect.width() / n
         // Shadow + base plate.
@@ -505,14 +504,14 @@ class KeyboardView @JvmOverloads constructor(
         labelPaint.textSize = rowHeight * 0.44f
         for (i in 0 until n) {
             val cell = RectF(rect.left + i * cellW, rect.top, rect.left + (i + 1) * cellW, rect.bottom)
-            if (i == accentIndex) {
+            if (i == accentSession.index) {
                 iconFill.color = c.accent
                 canvas.drawRoundRect(cell, keyRadius, keyRadius, iconFill)
                 labelPaint.color = Color.WHITE
             } else {
                 labelPaint.color = c.label
             }
-            val text = if (shifted) accentVariants[i].uppercase() else accentVariants[i]
+            val text = if (shifted) variants[i].uppercase() else variants[i]
             val cy = cell.centerY() - (labelPaint.ascent() + labelPaint.descent()) / 2
             canvas.drawText(text, cell.centerX(), cy, labelPaint)
         }
@@ -636,7 +635,7 @@ class KeyboardView @JvmOverloads constructor(
             MotionEvent.ACTION_UP -> {
                 removeCallbacks(longPressRunnable)
                 if (accentActive()) {
-                    val chosen = accentVariants.getOrNull(accentIndex) ?: accentBase?.label
+                    val chosen = accentSession.release()
                     if (chosen != null) onAccentKey?.invoke(chosen)
                     resetAccent(); resetGesture()
                     return true
@@ -674,13 +673,10 @@ class KeyboardView @JvmOverloads constructor(
     /** Fired by the long-press timer: if the held letter has accents, open the popup. */
     private fun startAccentMode() {
         val base = gestureCell ?: return
-        val variants = Accents.variantsFor(base.label.firstOrNull() ?: return)
-        if (variants.isEmpty()) return
+        val ch = base.label.firstOrNull() ?: return
+        if (!accentSession.open(ch)) return
         gesturing = false                        // long-press wins over swipe
-        accentBase = base
-        accentVariants = variants
-        accentIndex = -1
-        accentPopup = accentPopupRect(base, variants.size)
+        accentPopup = accentPopupRect(base, accentSession.variants.size)
         pressed = base
         invalidate()
     }
@@ -699,17 +695,12 @@ class KeyboardView @JvmOverloads constructor(
 
     private fun updateAccentSelection(x: Float) {
         val rect = accentPopup ?: return
-        val n = accentVariants.size
-        val cellW = rect.width() / n
-        Accents.variantIndexAt(x, rect.left, cellW, n)?.let {
-            if (it != accentIndex) { accentIndex = it; invalidate() }
-        }
+        accentSession.moveTo(x, rect.left, rect.width() / accentSession.variants.size)
+        invalidate()
     }
 
     private fun resetAccent() {
-        accentBase = null
-        accentVariants = emptyList()
-        accentIndex = -1
+        accentSession.reset()
         accentPopup = null
         pressed = null
     }
