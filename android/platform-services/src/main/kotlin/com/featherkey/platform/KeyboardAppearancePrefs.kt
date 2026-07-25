@@ -21,9 +21,9 @@ import android.content.Context
  * proportionally while key spacing stays constant.
  */
 enum class KeyboardHeight(val tag: String, val scale: Float) {
-    COMPACT("compact", 0.88f),
-    STANDARD("standard", 1.0f),
-    TALL("tall", 1.14f);
+    COMPACT("compact", 0.76f),
+    STANDARD("standard", 0.88f),
+    TALL("tall", 1.0f);
 
     companion object {
         fun fromTag(tag: String?): KeyboardHeight =
