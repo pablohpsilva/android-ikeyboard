@@ -761,8 +761,13 @@ git commit -m "feat(core): rank_candidates applies language momentum"
 **Files:**
 - Modify: `crates/featherkey-core/src/correct.rs`
 
+**Files (this task now also touches the ranker crate):**
+- Modify: `crates/candidate-ranker/src/lib.rs` (expose a shared `score` fn — Step 0)
+- Modify: `crates/featherkey-core/src/correct.rs`
+
 **Interfaces:**
-- Consumes: `LocaleManager::fuzzy_all`, `Personalization::is_known`, `self.momentum` (via `rank_candidates`), device inputs.
+- Adds to `candidate-ranker`: `pub fn score(cand: &Candidate, momentum: &Momentum) -> f64` — the exact per-candidate blended score the strip ranker uses. `rank` is refactored to call it (identical output; A3 tests must still pass).
+- Consumes: `LocaleManager::fuzzy_all`, `Personalization::is_known`, `self.momentum`, `self.packs` (for the primary tag), `featherkey_candidate_ranker::score`.
 - Produces on `FeatherKeyCore`:
   ```rust
   pub fn choose_correction(
@@ -772,11 +777,37 @@ git commit -m "feat(core): rank_candidates applies language momentum"
       device_cands: Vec<featherkey_contracts::Candidate>,
   ) -> Result<Correction, FeatherKeyError>
   ```
-  Semantics: (1) no-clobber if `text` is a real word in any active language (`locales.detect`), known to the user, or in `device_known` → return unchanged `applied=false`; (2) else build candidates from `fuzzy_all` (Source::Lexicon, per-language rank) ∪ `device_cands`, `rank_candidates`, apply `CORE_FUZZY_PRIOR` to the closest lexicon fix; (3) commit gate: only return `applied=true` if the winner ≠ `text` and clears `COMMIT_MARGIN`.
+  Semantics: (1) **no-clobber** if `text` is real in any active language (`locales.detect`), known to the user (`personalization.is_known`), or in `device_known` → return unchanged `applied=false`. (2) build candidates from `fuzzy_all` (Source::Lexicon, per-language rank) ∪ `device_cands`. (3) **score each with `ranker::score`, and add `CORE_FUZZY_PRIOR` to the sticky fix** — the primary-language rank-0 lexicon candidate (fallback: the first lexicon candidate) — so the trusted edit-distance fix wins unless a competing candidate's momentum-weighted score overtakes it. Pick the max; `applied = winner ≠ text`; the next distinct words are `alternatives`.
 
-- [ ] **Step 1: Write the failing tests**
+  This is the actual compromise dial: `CORE_FUZZY_PRIOR` high ⇒ the sticky fix dominates (legacy behaviour); low ⇒ momentum flips it sooner. With a single active language there is one lexicon and momentum is uniform, so the sticky fix always wins ⇒ identical to legacy `Core::correct` (locked by Task C4). `COMMIT_MARGIN` is intentionally **not** introduced — the stickiness threshold is fully expressed by `CORE_FUZZY_PRIOR`, so there is no dead const.
 
-Add to `crates/featherkey-core/src/correct.rs` tests (create the module if absent, mirroring the crate's test style with `#[allow(clippy::unwrap_used, …)]`):
+- [ ] **Step 0: Expose `ranker::score` and refactor `rank` to use it**
+
+In `crates/candidate-ranker/src/lib.rs`, extract the inline scoring into a public fn and call it from `rank` (output unchanged):
+```rust
+/// The blended score the ranker assigns one candidate under `momentum`:
+/// positional score + language-momentum term + per-source prior. Public so a
+/// caller that must add its own bias (correction's sticky-fix bonus) shares the
+/// exact scoring the strip uses.
+#[must_use]
+pub fn score(cand: &Candidate, momentum: &Momentum) -> f64 {
+    positional_score(cand.source_rank)
+        + LM_WEIGHT_LANG * momentum.weight_of(&cand.lang).ln()
+        + source_prior(cand.source)
+}
+```
+In `rank`, replace the inline `let score = positional_score(...) + ...;` computation with `let score = score(cand, momentum);`. Run `cargo test -p featherkey-candidate-ranker` → the 5 unit + 1 proptest still PASS (identical math). Add one unit test:
+```rust
+#[test]
+fn score_matches_rank_ordering_for_a_single_candidate() {
+    let mom = Momentum::new("en", &["en".into(), "es".into()]);
+    let a = c("hello", "en", 0);
+    let b = c("hola", "es", 3);
+    assert!(score(&a, &mom) > score(&b, &mom)); // en primary + better rank
+}
+```
+
+- [ ] **Step 1: Write the failing tests** (in `crates/featherkey-core/src/correct.rs` tests — create the module if absent, mirroring the crate's test style with `#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]`):
 ```rust
 #[test]
 fn a_word_only_the_device_knows_is_not_clobbered() {
@@ -793,7 +824,7 @@ fn a_non_primary_typo_is_corrected_in_its_own_language() {
         ("es".into(), vec!["gato".into(), "pato".into()]),
     ]).expect("core");
     for _ in 0..5 { core.observe_language(vec!["es".into()]); } // writing Spanish
-    // "gato" is a non-word; the es-lexicon neighbour "gato" should win.
+    // "gato" (typo) → es neighbour "gato"/"pato"; momentum + es-only candidates win.
     let got = core.choose_correction("gato", &[], vec![]).expect("ok");
     assert!(got.applied);
     assert_eq!(got.primary, "gato");
@@ -809,27 +840,43 @@ fn a_real_word_in_any_active_language_is_left_alone() {
     assert!(!got.applied);
     assert_eq!(got.primary, "hola");
 }
+
+#[test]
+fn the_sticky_fix_holds_under_mild_momentum_and_flips_under_strong_momentum() {
+    // "cit" is one edit from "cat" (en) and "cot" (es). Primary is en, so the
+    // sticky fix is "cat". With no/mild momentum CORE_FUZZY_PRIOR keeps "cat";
+    // sustained Spanish eventually overtakes the bonus and flips to "cot".
+    let mut core = FeatherKeyCore::new(vec![
+        ("en".into(), vec!["cat".into()]),
+        ("es".into(), vec!["cot".into()]),
+    ]).expect("core");
+    let mild = core.choose_correction("cit", &[], vec![]).expect("ok");
+    assert_eq!(mild.primary, "cat"); // sticky primary fix survives mild momentum
+    for _ in 0..20 { core.observe_language(vec!["es".into()]); }
+    let strong = core.choose_correction("cit", &[], vec![]).expect("ok");
+    assert_eq!(strong.primary, "cot"); // strong Spanish momentum overrides the bonus
+}
 ```
 
-- [ ] **Step 2: Run → fail.** `cargo test -p featherkey-core choose_correction -- --list` then run the three; Expected: FAIL — no method.
+- [ ] **Step 2: Run → fail.** `cargo test -p featherkey-core choose_correction the_sticky_fix a_non_primary a_real_word a_word_only` (or run the module); Expected: FAIL — no method.
 
 - [ ] **Step 3: Implement**
 
-Add consts near the top of `correct.rs`:
+Add ONE const near the top of `correct.rs`:
 ```rust
-/// Extra score for the closest-spelling lexicon fix, so an unambiguous typo
-/// keeps its fix unless momentum has a genuinely competing candidate.
+/// Stickiness of the trusted edit-distance fix versus the momentum nudge. The
+/// primary-language closest fix carries this bonus, so an unambiguous typo keeps
+/// its fix unless a competing-language candidate's momentum-weighted score
+/// overtakes it. High ⇒ legacy behaviour; low ⇒ momentum flips corrections sooner.
 pub const CORE_FUZZY_PRIOR: f64 = 0.5;
-/// Winner must beat "keep as typed" by at least this to be committed.
-pub const COMMIT_MARGIN: f64 = 0.0;
 ```
-Add the method inside `impl FeatherKeyCore` in `correct.rs`:
+Add the method inside `impl FeatherKeyCore` in `correct.rs` (the module already imports `LocaleManager`, `Correction`, `FeatherKeyError`):
 ```rust
 /// Multilingual, momentum-aware correction. See the design spec §Correction.
 ///
 /// # Errors
 /// [`FeatherKeyError::Locale`]/[`NoLanguages`] if the active set cannot form a
-/// locale manager (structurally prevented, surfaced not panicked).
+/// locale manager (structurally prevented by the constructor, surfaced not panicked).
 pub fn choose_correction(
     &self,
     text: &str,
@@ -842,7 +889,7 @@ pub fn choose_correction(
 
     // (1) No-clobber: real in any active language, known to the user, or in the
     // device's known set. Empty text has nothing to correct.
-    let known_device = device_known.iter().any(|w| w == text || w.eq_ignore_ascii_case(text));
+    let known_device = device_known.iter().any(|w| w.eq_ignore_ascii_case(text));
     if text.is_empty()
         || self.personalization.is_known(text)
         || locales.detect(text).is_some()
@@ -857,7 +904,12 @@ pub fn choose_correction(
     let mut per_lang_rank: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
     for (id, w) in locales.fuzzy_all(text) {
         let r = per_lang_rank.entry(id.as_str().to_owned()).or_insert(0);
-        cands.push(Candidate { word: w, lang: id.as_str().to_owned(), source: Source::Lexicon, source_rank: *r });
+        cands.push(Candidate {
+            word: w,
+            lang: id.as_str().to_owned(),
+            source: Source::Lexicon,
+            source_rank: *r,
+        });
         *r += 1;
     }
     cands.extend(device_cands);
@@ -865,31 +917,58 @@ pub fn choose_correction(
         return Ok(Correction { primary: text.to_owned(), alternatives: Vec::new(), applied: false });
     }
 
-    // (3) Rank with momentum; CORE_FUZZY_PRIOR keeps the closest lexicon fix
-    // sticky. We approximate it by boosting rank-0 lexicon candidates before
-    // ranking: represent it as a source_rank shift is not possible, so bias by
-    // pre-sorting — instead rank, then if the typed word had a rank-0 lexicon
-    // fix, ensure momentum only overrides past the margin.
-    let ranked = self.rank_candidates(cands.clone(), cands.len());
-    let winner = &ranked[0];
-    let applied = winner.word != text; // COMMIT_MARGIN == 0 default; tighten later
-    let alternatives = ranked.iter().skip(1).take(2).map(|r| r.word.clone()).collect();
+    // (3) The sticky fix = the primary language's closest lexicon neighbour
+    // (fallback: the first lexicon candidate). It carries CORE_FUZZY_PRIOR so a
+    // trusted fix holds unless a competing candidate's momentum score overtakes it.
+    let primary = self.packs.first().map(|(id, _)| id.as_str().to_owned());
+    let sticky = cands
+        .iter()
+        .position(|c| {
+            c.source == Source::Lexicon && c.source_rank == 0 && Some(&c.lang) == primary.as_ref()
+        })
+        .or_else(|| cands.iter().position(|c| c.source == Source::Lexicon));
+
+    let mut scored: Vec<(usize, f64)> = cands
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let mut s = featherkey_candidate_ranker::score(c, &self.momentum);
+            if Some(i) == sticky {
+                s += CORE_FUZZY_PRIOR;
+            }
+            (i, s)
+        })
+        .collect();
+    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let winner = cands[scored[0].0].word.clone();
+    let applied = winner != text;
+    let alternatives: Vec<String> = if applied {
+        scored
+            .iter()
+            .skip(1)
+            .map(|&(i, _)| cands[i].word.clone())
+            .filter(|w| w != &winner)
+            .take(2)
+            .collect()
+    } else {
+        Vec::new()
+    };
     Ok(Correction {
-        primary: if applied { winner.word.clone() } else { text.to_owned() },
-        alternatives: if applied { alternatives } else { Vec::new() },
+        primary: if applied { winner } else { text.to_owned() },
+        alternatives,
         applied,
     })
 }
 ```
-*Implementation note for the executor:* `CORE_FUZZY_PRIOR`/`COMMIT_MARGIN` are wired as named consts now with `COMMIT_MARGIN = 0.0` (so the tests above pass on pure momentum ordering). Task C4 tunes them against the single-language regression BDD; do not delete the consts.
 
-- [ ] **Step 4: Run → pass.** `cargo test -p featherkey-core` (the three new tests) → PASS.
+- [ ] **Step 4: Run → pass.** `cargo test -p featherkey-core` (the four new tests + existing) → PASS. Also `cargo test -p featherkey-candidate-ranker` → still PASS (Step 0 refactor is behaviour-preserving).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/featherkey-core/src/correct.rs
-git commit -m "feat(core): choose_correction — all-language fuzz, device-known no-clobber, momentum rank"
+git add crates/candidate-ranker/src/lib.rs crates/featherkey-core/src/correct.rs
+git commit -m "feat(core): choose_correction — all-language fuzz, device-known no-clobber, sticky momentum compromise"
 ```
 
 ---
@@ -909,7 +988,7 @@ fn single_language_choose_correction_matches_legacy_correct() {
     assert_eq!(now.applied, legacy.applied);
 }
 ```
-- [ ] **Step 2: Run → fail or pass.** If it fails (ordering differs), tune `CORE_FUZZY_PRIOR` and the candidate ordering so a single language reproduces `Dictionary::fuzzy` order (lexicographic). Because `fuzzy_all` over one language == `dictionary.fuzzy`, and momentum is uniform, positional score alone decides → same order. Adjust only if a discrepancy appears.
+- [ ] **Step 2: Run → fail or pass.** With one active language `fuzzy_all` == `dictionary.fuzzy` (lexicographic order), momentum is uniform, and the sticky fix is that language's rank-0 neighbour — so the winner is the first `fuzzy` result, exactly `Core::correct`'s primary. It should pass as written. If it does not, do NOT weaken the assertion — report the discrepancy (it would indicate a real ordering bug in `choose_correction`).
 - [ ] **Step 3: Run → pass.**
 - [ ] **Step 4: Commit** `git commit -am "test(core): lock single-language correction to legacy behaviour"`
 
