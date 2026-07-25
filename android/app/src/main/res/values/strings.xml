@@ -3,6 +3,7 @@
     <string name="app_name">FeatherKey</string>
     <string name="settings_title">FeatherKey settings</string>
     <string name="subtype_en">English</string>
+    <string name="subtype_lb">Lëtzebuergesch</string>
 
     <!-- First-run consent (BR-22). Copy tightened from the design brief: the
          promise is stated before anything is asked for, and the explanation names
