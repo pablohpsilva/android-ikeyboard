@@ -173,6 +173,22 @@ impl LocaleManager {
         best.map(|(id, _)| id.clone())
     }
 
+    /// Edit-distance-1 neighbours of `word` from **every** active language,
+    /// each tagged with the language that produced it (BR-18 generalised to
+    /// correction candidates). The query word is never returned (that is
+    /// `Dictionary::fuzzy`'s contract). Order: active language order, then each
+    /// dictionary's own `fuzzy` order.
+    #[must_use]
+    pub fn fuzzy_all(&self, word: &str) -> Vec<(LangId, String)> {
+        let mut out = Vec::new();
+        for (id, dict) in self.ids.iter().zip(self.dicts.iter()) {
+            for w in dict.fuzzy(word) {
+                out.push((id.clone(), w));
+            }
+        }
+        out
+    }
+
     /// Score one language's lexicon against `word` (ADR-10).
     ///
     /// An exact membership hit adds [`CONTAINS_WEIGHT`]; prefix breadth (how many
@@ -375,5 +391,19 @@ mod tests {
             format!("{}", LocaleError::DuplicateLanguage),
             "a language may appear in the active set at most once"
         );
+    }
+
+    // --- fuzzy matching: BR-18 generalised ----
+
+    #[test]
+    fn fuzzy_all_returns_neighbours_from_every_active_language_tagged() {
+        let lm = LocaleManager::new(vec![
+            (LangId::new("en"), dict(&["cat", "cot"])),
+            (LangId::new("es"), dict(&["gato", "pato"])),
+        ])
+        .expect("valid");
+        let got = lm.fuzzy_all("gato"); // one edit from "gato" (es) and nothing in en
+        assert!(got.iter().any(|(l, w)| l.as_str() == "es" && w == "pato"));
+        assert!(got.iter().all(|(_, w)| w != "gato")); // never the query itself
     }
 }
