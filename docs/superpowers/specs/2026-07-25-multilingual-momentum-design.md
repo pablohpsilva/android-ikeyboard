@@ -1,7 +1,7 @@
 # Multilingual Device Dictionary + Language Momentum — Design
 
 **Date:** 2026-07-25
-**Status:** Approved for planning (revised after completeness audit)
+**Status:** Approved for planning (revised after 3 completeness audits)
 **Author:** FeatherKey (pair: Oakblu)
 
 ## Problem
@@ -92,6 +92,23 @@ This gives one place where momentum applies, one scoring contract, one set of te
                                               • floor + primary head-start
                             ◀── SessionPlan ─ session-planning (pure set math)
 ```
+
+### Two per-language word sources — which is authoritative
+
+There are **two** per-language dictionaries, by design, and the spec keeps them in their
+lanes:
+
+- **Core lexicons** (`assets/lexicons/<tag>.txt`, sorted sets) — the **correctness
+  authority**. No-clobber and fuzzy correction use these. Any "is this word real, and in
+  which language?" decision on the *correction* path is the core's.
+- **`Vocabulary` freq lists** (`assets/freq/<tag>.txt`, frequency-ordered) — the
+  **ranking/suggestion** source. `languagesOf`/`candidatesByLanguage` off this source are
+  used only for **strip** candidates and for the **momentum recognizer** signal, which is
+  soft (a mis-attribution only nudges a weight, never rewrites text).
+
+They should be derived from a consistent base per language; where they differ, the core
+lexicon wins on the correction path and the freq list is fine for the soft momentum
+signal. Reconciling the two source files is a build-time concern, not a runtime one.
 
 ### Component 0 — Candidate model & score normalization (Rust core)
 
@@ -187,48 +204,50 @@ and the correction:
   never demotes that language's candidates; a decisive `source_rank` still beats weak
   momentum).
 
-### Correction flow — a weighted compromise (momentum has real weight; a clean typo-fix still holds)
+### Correction flow — fuzz every active language, then momentum-rank
 
-The audit's key open question was: does the new momentum signal override the existing,
-BDD-tested core autocorrect? Neither extreme is right. "Core always wins" neuters the
-improvement; "momentum always wins" could un-fix an obvious typo. **The resolution is a
-weighted contest, not a fixed precedence:** momentum competes *among the correction
-candidates the core itself proposes*, tuned by a stickiness dial. To keep this decision
-in one tested place, the whole thing moves **into the Rust core** as a new orchestrating
-entry (see §FFI); Kotlin only supplies what the core cannot see (`deviceDict`'s
-`knownLanguages` and device suggestions) and commits the result. Order:
+**Grounding in what the core actually does today** (`crates/featherkey-core/src/correct.rs`):
 
-1. **Protect real words.** If the typed word is recognized by **any** active language —
-   `Core` knows the bundled dictionaries (`languagesOf(word)`); Kotlin passes in
-   `deviceDict.knownLanguages(word)` — return "no correction." This lets a deliberate
-   Spanish word among English survive. *An intentional refinement over today, where
-   `core.applied` could rewrite a word valid in another active language; locked by a BDD
-   scenario. In a single-language setup it is a no-op — the core already declines to
-   "correct" a real word — so existing scenarios are unaffected.*
-2. **Weighted selection over the candidate set.** Run the existing `Core::correct`. Take
-   its `primary` + `alternatives`, tag each with its language, and combine them with
-   `probableWords` (per language, when per-tap data exists) and device suggestions (per
-   language) into one candidate set. Run it through the **Ranker with momentum**, with
-   two dials:
-   - The core's `primary` carries a **`CORE_PRIMARY_PRIOR`** bonus — the "stickiness" of
-     the old, trusted typo-fix. High prior ⇒ old behaviour; lower ⇒ momentum matters
-     more. This is *the compromise knob*.
-   - Momentum (`LM_WEIGHT_LANG`) can promote a **competing candidate** over the core's
-     primary **only when that candidate is itself a legitimate correction** (one the
-     core offered as an alternative, or a real word from another source) **and** its
-     momentum-weighted score beats the core primary by a margin. So an unambiguous typo
-     with a single sensible fix keeps that fix (nothing legitimate competes); an
-     *ambiguous* fix whose alternatives span languages resolves toward the language the
-     user is actually writing in — the improvement, with real weight.
-   Crucially, the Ranker never invents a correction outside this proposed set, so it
-   cannot wreck a clean typo-fix into an unrelated word.
+- **No-clobber already spans all active languages (BR-12).** `correct.rs:20-22`: a word
+  "valid in any active language … is returned verbatim with `applied == false`." So a
+  deliberate Spanish word in the `es` lexicon is **already** protected today — this is
+  *not* a gap, and an earlier draft of this spec wrongly claimed otherwise.
+- **The real gap: fuzzy candidates come only from the *primary* lexicon.** `correct.rs:52`
+  builds the corrector with `primary.clone()`. So a non-primary-language typo is
+  "corrected" using the *primary* language's words — the actual reason multilingual
+  autocorrect is weak.
+- **Device-known words are outside no-clobber.** BR-12 covers the bundled `lexicons/*.txt`
+  only; a word that only the *device* dictionary knows (ru/el) is not protected.
+
+**The fix (chosen: core fuzzes all languages).** The corrector generates fuzzy candidates
+from **every active lexicon**, each tagged with its language, and the **Ranker** picks
+the winner using momentum. The decision lives entirely in the Rust core as one
+unit/BDD-tested entry (see §FFI); Kotlin supplies only what the core cannot see —
+`deviceDict.knownLanguages(word)` and device suggestions — and commits the result.
+
+1. **Protect real words (extended to the device).** No-clobber stays as BR-12 for the
+   bundled lexicons **plus** the passed-in `device_known` set. If the typed word is in
+   either, return "no correction" (`applied == false`). *This is the only new protection
+   — device-known words; the bundled all-language protection already exists.*
+2. **Fuzz all active lexicons, momentum-rank.** `build_corrector` fuzzes **each** active
+   pack (not just primary), yielding language-tagged candidates; merge with
+   `probableWords` (per language, per-tap) and device suggestions; run the **Ranker with
+   momentum**. Two dials:
+   - **`CORE_FUZZY_PRIOR`** — the trust in an edit-distance/spatial fix vs a
+     language-preference nudge. High ⇒ closest-spelling fix dominates; lower ⇒ momentum
+     matters more.
+   - **Momentum (`LM_WEIGHT_LANG`)** breaks near-ties toward the language the user is
+     actually writing in, so a typo equally correctable in en or es resolves to the
+     current language. Momentum reorders *legitimate* candidates; it never invents a
+     word outside the fuzzed/known set, so a clean typo-fix can't become an unrelated
+     word.
 3. **Commit gate.** Apply the winner only if it ≠ the typed word and clears the commit
    margin; else "no correction." The runner-up stays in the strip for a one-tap fix.
 
-Why existing autocorrect BDD tests still pass: they run in a single active language, so
-every candidate shares one language, momentum is uniform across them, and the
-`CORE_PRIMARY_PRIOR` bonus leaves the core's primary on top — identical output. The new
-multi-language scenarios are what exercise the momentum override.
+Why existing autocorrect BDD tests still pass: with a single active language there is one
+lexicon to fuzz (unchanged from `primary`-only) and momentum is uniform, so output is
+identical to today. The all-language fuzzing and momentum tie-breaking only change
+behaviour when ≥ 2 languages are active — exactly the new scenarios.
 
 (Existing consent + sensitivity guards and the "don't mangle Caps/ALLCAPS" rule stay,
 applied by the caller before invoking the core entry.)
@@ -244,10 +263,14 @@ Follows the existing `#[derive(uniffi::Record)]` + bridge-method pattern
 - New bridge methods:
   - `rank(candidates) -> Vec<...>` — the strip ranker.
   - `choose_correction(word, preceding, prefix, device_known: Vec<String>, device_cands: Vec<FfiCandidate>) -> FfiCorrection`
-    — the full correction decision (protect → `Core::correct` → momentum-ranked
-    fallback) executed **inside the core** so the precedence and margin live in one
-    unit-tested place. It calls the existing `Core::correct` internally, so that
-    function and its BDD tests are untouched.
+    — the full correction decision executed **inside the core**: no-clobber (BR-12
+    lexicons ∪ `device_known`) → fuzz **all** active lexicons (language-tagged) merged
+    with `device_cands` → momentum-rank → commit gate. `device_known`/`device_cands` are
+    the only things Kotlin must supply (the core cannot see the device dictionary).
+  - `build_corrector`/`NoClobberCorrector` change from primary-only to **per-language
+    fuzzing** (candidates carry their language). This is a change to the autocorrect
+    crate, covered by its own unit + BDD tests; the existing `Core::correct` entry keeps
+    its signature and single-language behaviour (one lexicon ⇒ identical output).
   - `observe_language(recognizers)`, momentum `set_languages`, and (optional)
     `session_plan(desired_tags) -> {open, close}` — the Kotlin `SessionPlan` may stay in
     Kotlin-with-JUnit instead; decided in the plan by whichever keeps the untested
@@ -264,9 +287,10 @@ Follows the existing `#[derive(uniffi::Record)]` + bridge-method pattern
     `source_rank`-ordered** candidates. Existing `suggestions`/`probableWords` are
     refactored to feed it, preserving their scoring, and their joint output is
     re-bucketed per language (Component 0).
-  - `languagesOf(word): Set<String>` — which bundled languages contain the word (backs
-    the correction "protect real words" guard and the `observe_language` recognizers).
-    `rankOf` stays for scoring.
+  - `languagesOf(word): Set<String>` — which freq-list languages contain the word, used
+    for **strip** candidate tagging and the soft **`observe_language` recognizers** only.
+    (The correction "protect real words" guard is the core's job, off the authoritative
+    `lexicons/*.txt` ∪ `device_known` — see the two-source note.) `rankOf` stays for scoring.
 - **Where the Kotlin line is drawn:** the IME's branch *selection* (empty-prefix vs
   tap-decode vs prefix; which sources to query) is **orchestration/routing** — thin, no
   scoring, left in Kotlin. Every **decision** (normalization, momentum, ranking,
@@ -315,13 +339,15 @@ Follows the existing `#[derive(uniffi::Record)]` + bridge-method pattern
   primary head-start; `set_languages` add/drop/retain); `Ranker` (momentum never
   demotes the boosted language; decisive `source_rank` beats weak momentum; dedupe
   keeps best incl. cognate → highest-momentum language; top-K); score normalization
-  (bundled vs device commensurable; source prior bounds flooding); `choose_correction`
-  (protect-real-word returns none; single-language input ⇒ core primary wins — old
-  behaviour; ambiguous cross-language fix ⇒ momentum promotes the current-language
-  candidate; `CORE_PRIMARY_PRIOR` high ⇒ core sticks, low ⇒ momentum moves it; commit
-  margin respected).
-- Property tests — momentum-monotonicity of rank; raising `CORE_PRIMARY_PRIOR` never
-  moves the winner *away* from the core primary.
+  (bundled vs device commensurable; source prior bounds flooding); per-language fuzzing
+  in `NoClobberCorrector` (each active lexicon contributes language-tagged candidates;
+  single-language input ⇒ identical to today); `choose_correction` (no-clobber covers
+  bundled ∪ `device_known`; non-primary typo is corrected in **its own** language;
+  ambiguous cross-language typo ⇒ momentum picks the current language; `CORE_FUZZY_PRIOR`
+  high ⇒ closest-spelling fix sticks, low ⇒ momentum moves it; commit margin respected).
+- Property tests — momentum-monotonicity of rank; raising `CORE_FUZZY_PRIOR` never moves
+  the winner *away* from the closest-spelling fix; single active language ⇒ output equals
+  the legacy `Core::correct`.
 - **BDD `.feature`:**
   - "Mostly-English with one deliberate Spanish word → not autocorrected; its
     suggestion is offered."
@@ -330,8 +356,11 @@ Follows the existing `#[derive(uniffi::Record)]` + bridge-method pattern
   - "Swipe in a momentum-B context → B word ranked first."
   - "Single active language → autocorrect output unchanged from today" (regression lock
     on the existing behaviour).
+  - "Non-primary-language typo → corrected in its own language, not the primary's"
+    (the core primary-only-fuzzing fix).
   - "Ambiguous typo correctable in either active language → the current-language fix is
-    chosen" (the compromise's improvement).
+    chosen" (momentum tie-break).
+  - "Word only the device knows → not autocorrected away" (device-known no-clobber).
 - Fitness / clippy / rustfmt / cargo-deny unchanged; real coverage measured with
   `--ignore-filename-regex '(^|/)workspace/'`.
 
@@ -358,11 +387,10 @@ Follows the existing `#[derive(uniffi::Record)]` + bridge-method pattern
 ## Open Questions / Risks
 
 - Constant tuning (`DECAY`, `FLOOR`, head-start, `LM_WEIGHT_LANG`, `SOURCE_PRIOR`,
-  **`CORE_PRIMARY_PRIOR`** — the correction stickiness/compromise dial — and the commit
-  margin) — sensible defaults, refined against the BDD scenarios; all pure and cheap to
-  tune. Default `CORE_PRIMARY_PRIOR` is set so a single-language setup reproduces today's
-  autocorrect exactly, and momentum only overrides on a genuinely competing
-  cross-language alternative.
+  **`CORE_FUZZY_PRIOR`** — trust in the closest-spelling fix vs the momentum nudge — and
+  the commit margin) — sensible defaults, refined against the BDD scenarios; all pure and
+  cheap to tune. Defaults are set so a single-language setup reproduces today's
+  autocorrect exactly, and momentum only decides genuinely competing cross-language fixes.
 - `SessionPlan` home — pure Kotlin+JUnit vs Rust FFI; decided in the plan by whichever
   minimizes untested surface.
 - Persisted long-run language prior — include only if clean; else v1 in-memory,
