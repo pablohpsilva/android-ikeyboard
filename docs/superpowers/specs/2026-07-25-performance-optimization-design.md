@@ -229,5 +229,34 @@ percentiles and slow-UI count as the primary signal.
   R8 errored on the missing classes until `-dontwarn java.awt.**` was added —
   exactly why the optimized build must be *run*, not just built.
 - Deferred to a follow-up: Task 4 (emoji-page constant height — fixes only the
-  unreported alpha↔emoji shift); Phase 2 (async suggestion/gesture compute) is
-  where the per-keystroke stall is addressed.
+  unreported alpha↔emoji shift).
+
+### Phase 2 (safe wins) — measured, and the async decision
+
+Phase 2 shipped two low-risk, result-preserving changes: `prefixMatches` bounded
+to a top-k selection (no full-range list/sort per short-prefix keystroke;
+proven result-identical by a unit test + a 300k-case adversarial check), and the
+device-dictionary strip re-run coalesced to one refresh per frame.
+
+| Build | janky % | p95 | p99 | slow-UI |
+|---|---|---|---|---|
+| Perf **Phase 1**, benchmark | ~5–21% | 12–15ms | 16–19ms | 0–3 |
+| Perf **Phase 2**, benchmark | ~31–38% | 13–14ms | 15–20ms | 1–3 |
+
+The two are **statistically indistinguishable** on this short burst (janky% is
+noisy at ~60–90-frame samples; p95/p99/slow-UI are flat). This is expected: the
+Phase 2 wins cut **sub-frame** CPU/allocation (less GC pressure over long
+sessions, lower battery/thermal cost), but Phase 1 already brought per-frame
+times under ~20ms, so there is no visible-jank headroom left for them to reclaim
+on the optimized build.
+
+**Decision — the off-thread async move (Phase 2b) is NOT warranted.** The
+diagnosis predicted a big per-keystroke stall from synchronous suggestion
+compute, but on the shippable benchmark build that compute is already sub-frame
+(p99 ~17ms with it on the main thread). Moving it off-thread would add real
+concurrency risk (data races on `vocab`/`usage`/`bigrams`, stale-result
+ordering) for a jank gain the measurement shows to be ~zero. Revisit only if
+profiling a specific slow scenario (many active languages, a huge learned
+vocabulary, or a slower device) shows an actual main-thread stall. This is the
+"measure between phases" principle doing its job: the data argued against the
+riskiest planned change.
