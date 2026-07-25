@@ -62,14 +62,37 @@ class Vocabulary private constructor(private val langs: List<Lang>) {
         return out
     }
 
-    /** The [k] most frequent words in one language that start with [prefix]. */
+    /** The [k] most frequent words in one language that start with [prefix].
+     *  Selects the top-k by rank during the scan — identical result to
+     *  collect-all → sortBy(rank) → take(k), but O(k) memory and no full sort. */
     private fun prefixMatches(lang: Lang, prefix: String, k: Int): List<String> {
+        if (k <= 0) return emptyList()
         val a = lang.sorted
         var lo = lowerBound(a, prefix)
-        val hits = ArrayList<String>()
-        while (lo < a.size && a[lo].startsWith(prefix)) { hits.add(a[lo]); lo++ }
-        hits.sortBy { lang.rank[it] ?: Int.MAX_VALUE }
-        return if (hits.size > k) hits.subList(0, k) else hits
+        // keptWords/keptRanks stay rank-ascending; ties keep scan (alphabetical) order,
+        // matching the old stable sortBy on an alphabetically-ordered input.
+        val keptWords = ArrayList<String>(k)
+        val keptRanks = ArrayList<Int>(k)
+        while (lo < a.size && a[lo].startsWith(prefix)) {
+            val w = a[lo]; lo++
+            val r = lang.rank[w] ?: Int.MAX_VALUE
+            if (keptWords.size < k) {
+                insertByRank(keptWords, keptRanks, w, r)
+            } else if (r < keptRanks[keptRanks.size - 1]) { // beats the current worst
+                keptWords.removeAt(keptWords.size - 1)
+                keptRanks.removeAt(keptRanks.size - 1)
+                insertByRank(keptWords, keptRanks, w, r)
+            }
+        }
+        return keptWords
+    }
+
+    /** Insert (w,r) keeping ranks ascending; on equal rank insert AFTER existing ones,
+     *  so ties preserve the caller's scan (alphabetical) order (stable-sort equivalent). */
+    private fun insertByRank(words: ArrayList<String>, ranks: ArrayList<Int>, w: String, r: Int) {
+        var i = ranks.size
+        while (i > 0 && ranks[i - 1] > r) i--
+        words.add(i, w); ranks.add(i, r)
     }
 
     /** First index whose word is >= [prefix]. */
