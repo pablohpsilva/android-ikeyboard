@@ -10,10 +10,13 @@ package com.featherkey.platform
  * on-device and offline: the spell checker reads its own bundled dictionaries,
  * never the network — consistent with FeatherKey's no-network invariant.
  *
- * For the *primary* active language it answers the two questions the input path
- * needs:
- *   - is a typed word a real word? (so autocorrect never clobbers it)
- *   - what are the corrections/completions for a partial or mistyped word?
+ * One session per active language is kept open (diffed via [SessionPlan]), so
+ * every active language gets its own answers for the two questions the input
+ * path needs:
+ *   - is a typed word a real word in language X? (so autocorrect never
+ *     clobbers it)
+ *   - what are the corrections/completions for a partial or mistyped word in
+ *     language X?
  *
  * Results arrive asynchronously; [onResult] fires on the main thread when a
  * lookup completes, letting the caller refresh the suggestion strip (mirroring
@@ -35,80 +38,84 @@ import java.util.Locale
 class DeviceDictionary(
     context: Context,
     private val onResult: () -> Unit,
-) : SpellCheckerSession.SpellCheckerSessionListener {
+) {
 
     private val tsm =
         context.getSystemService(Context.TEXT_SERVICES_MANAGER_SERVICE) as? TextServicesManager
 
-    private var session: SpellCheckerSession? = null
-    private var language: String? = null
+    /** One session per active language, keyed by the bare language code. */
+    private val sessions = LinkedHashMap<String, SpellCheckerSession>()
 
     /** The word the outstanding/most-recent lookup was fired for. */
     private var queried: String = ""
-    /** Corrections/completions for [queried], ranked best-first. */
-    @Volatile private var results: List<String> = emptyList()
-    /** [queried] iff the device confirmed it is a real word, else null. */
-    @Volatile private var confirmed: String? = null
+    /** Corrections/completions per language for [queried], ranked best-first. */
+    @Volatile private var buckets: Map<String, List<String>> = emptyMap()
+    /** Languages that confirmed [queried] as a real word. */
+    @Volatile private var knownIn: Map<String, Set<String>> = emptyMap()
 
     /**
-     * Point the dictionary at [tag]'s language (e.g. "ru", "el", "fr"). A no-op
-     * when the language is unchanged; otherwise it reopens the session and drops
-     * any cached results. A tag with no supported spell checker yields no
-     * session, so every query below simply no-ops and the caller falls back to
-     * its bundled lists.
+     * Point the dictionary at [tags]'s languages (e.g. "ru", "el", "fr"). Diffs
+     * against the currently open sessions via [SessionPlan]: unchanged
+     * languages keep their session (and cached results); removed languages are
+     * closed; added languages are opened. A tag with no supported spell
+     * checker yields no session, so every query below simply no-ops for that
+     * language and the caller falls back to its bundled lists.
      */
-    fun setPrimary(tag: String) {
-        val lang = Locale.forLanguageTag(tag).language.ifEmpty { tag }
-        if (lang == language && session != null) return
-        language = lang
-        session?.close()
-        // referToSpellCheckerLanguageSettings = false: bind the exact locale we
-        // chose, regardless of the user's spell-check language settings.
-        session = runCatching {
-            tsm?.newSpellCheckerSession(null, Locale(lang), this, false)
-        }.getOrNull()
-        queried = ""; results = emptyList(); confirmed = null
+    fun setLanguages(tags: List<String>) {
+        val plan = SessionPlan.of(sessions.keys.toSet(), tags)
+        for (lang in plan.close) { sessions.remove(lang)?.close() }
+        for (lang in plan.open) {
+            // referToSpellCheckerLanguageSettings = false: bind the exact
+            // locale we chose, regardless of the user's spell-check language
+            // settings.
+            val s = runCatching {
+                tsm?.newSpellCheckerSession(null, Locale(lang), Listener(lang), false)
+            }.getOrNull()
+            if (s != null) sessions[lang] = s
+        }
+        queried = ""; buckets = emptyMap(); knownIn = emptyMap()
     }
 
-    /** Fire an async lookup for [word], unless it matches the last one queried. */
+    /** Fire an async lookup for [word] on every open session, unless it matches
+     * the last one queried. */
     fun refresh(word: String) {
-        val s = session ?: return
         if (word.isEmpty() || word == queried) return
         queried = word
-        runCatching { s.getSentenceSuggestions(arrayOf(TextInfo(word)), MAX_PER_WORD) }
+        for (s in sessions.values) runCatching { s.getSentenceSuggestions(arrayOf(TextInfo(word)), MAX_PER_WORD) }
     }
 
-    /** Best-effort: did the device confirm [word] is a real word? */
-    fun isKnown(word: String): Boolean = word.isNotEmpty() && word == confirmed
+    /** Cached corrections/completions for the last queried word, per language. */
+    fun candidatesByLanguage(): Map<String, List<String>> = buckets
 
-    /** Cached corrections/completions for the last queried word (ranked). */
-    fun suggestions(): List<String> = results
+    /** Languages that confirmed [word] is a real word (best-effort). */
+    fun knownLanguages(word: String): Set<String> =
+        if (word.isNotEmpty()) knownIn.filterValues { it.contains(word) }.keys else emptySet()
 
-    override fun onGetSentenceSuggestions(sentences: Array<out SentenceSuggestionsInfo>?) {
-        val out = LinkedHashSet<String>()
-        var known: String? = null
-        sentences?.forEach { sentence ->
-            for (i in 0 until sentence.suggestionsCount) {
-                val info = sentence.getSuggestionsInfoAt(i)
-                if (info.suggestionsAttributes and SuggestionsInfo.RESULT_ATTR_IN_THE_DICTIONARY != 0) {
-                    known = queried
+    /** One listener instance per language: the callback itself carries no
+     * session identity, so we close over [lang] to land results in the right
+     * per-language bucket. */
+    private inner class Listener(private val lang: String) : SpellCheckerSession.SpellCheckerSessionListener {
+        override fun onGetSentenceSuggestions(sentences: Array<out SentenceSuggestionsInfo>?) {
+            val out = LinkedHashSet<String>()
+            val known = LinkedHashSet<String>()
+            sentences?.forEach { s ->
+                for (i in 0 until s.suggestionsCount) {
+                    val info = s.getSuggestionsInfoAt(i)
+                    if (info.suggestionsAttributes and SuggestionsInfo.RESULT_ATTR_IN_THE_DICTIONARY != 0) known.add(queried)
+                    for (j in 0 until info.suggestionsCount) out.add(info.getSuggestionAt(j))
                 }
-                for (j in 0 until info.suggestionsCount) out.add(info.getSuggestionAt(j))
             }
+            buckets = buckets + (lang to out.toList())
+            knownIn = knownIn + (lang to known)
+            onResult()
         }
-        results = out.toList()
-        confirmed = known
-        onResult()
+
+        // Legacy single-word callback; we use the sentence API above, so this
+        // is never invoked, but the listener interface requires it.
+        override fun onGetSuggestions(results: Array<out SuggestionsInfo>?) = Unit
     }
 
-    // Legacy single-word callback; we use the sentence API above, so this is
-    // never invoked, but the listener interface requires it.
-    override fun onGetSuggestions(results: Array<out SuggestionsInfo>?) = Unit
-
-    fun close() {
-        session?.close()
-        session = null
-    }
+    fun close() { sessions.values.forEach { it.close() }; sessions.clear() }
 
     private companion object {
         /** Corrections requested per word — a short, strip-sized list. */
