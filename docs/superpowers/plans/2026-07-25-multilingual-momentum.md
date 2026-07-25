@@ -141,13 +141,19 @@ git commit -m "feat(contracts): add Candidate/Source/RankedCandidate shared type
 
 - [ ] **Step 1: Create the crate manifest**
 
-`crates/language-momentum/Cargo.toml`:
+`crates/language-momentum/Cargo.toml` (match the existing crate convention — see `crates/autocorrect/Cargo.toml`: workspace-inherited edition/license/rust-version, `version = "0.0.0"`, and the `layer` metadata the fitness gate reads):
 ```toml
 [package]
 name = "featherkey-language-momentum"
-version = "0.1.0"
-edition = "2021"
+version = "0.0.0"
 publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Recency-weighted per-language momentum: which language the user is writing in now."
+
+[package.metadata.featherkey]
+layer = "domain"
 
 [lints]
 workspace = true
@@ -155,10 +161,10 @@ workspace = true
 [dependencies]
 
 [dev-dependencies]
-proptest = { workspace = true }
+proptest = "1.11.0"
 ```
 
-Add `"crates/language-momentum",` to the `members` array in the root `Cargo.toml`.
+Add `"crates/language-momentum",` to the `members` array in the root `Cargo.toml` (the comment there notes `members` is the source of truth — keep it alphabetically grouped with the other crates).
 
 - [ ] **Step 2: Write the failing tests**
 
@@ -205,13 +211,16 @@ mod tests {
 
     #[test]
     fn set_languages_retains_active_drops_removed_adds_new_at_floor() {
+        // New primary is "de" (a NEW language) so that "es" is retained as a
+        // NON-primary and keeps its exact observed weight — otherwise the
+        // head-start max() would raise a retained primary and mask the retain.
         let mut m = m();
         m.observe(&["es".into()]);
         let es = m.weight_of("es");
-        m.set_languages("es", &["es".into(), "fr".into()]);
-        assert_eq!(m.weight_of("es"), es);      // retained
-        assert_eq!(m.weight_of("fr"), FLOOR);   // new at floor
-        assert_eq!(m.weight_of("en"), FLOOR);   // dropped -> unknown -> floor
+        m.set_languages("de", &["es".into(), "de".into()]);
+        assert_eq!(m.weight_of("es"), es);                 // retained non-primary
+        assert_eq!(m.weight_of("de"), FLOOR + HEAD_START); // new primary at head-start
+        assert_eq!(m.weight_of("en"), FLOOR);              // dropped -> unknown -> floor
     }
 
     #[test]
@@ -295,12 +304,12 @@ impl Momentum {
 }
 ```
 
-*Note the `set_languages` head-start test expects `es` retained at its observed value; adjust `HEAD_START` application so a retained primary keeps `max(kept, FLOOR+HEAD_START)`. If the retain test conflicts with the head-start, split into two: retained non-primary keeps value; primary gets `max`. The code above does exactly that — verify against Step 2.*
+*The `set_languages` code keeps a retained non-primary at its exact value and applies `max(kept, FLOOR+HEAD_START)` only to the (possibly new) primary — matching the Step 2 test.*
 
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `cargo test -p featherkey-language-momentum`
-Expected: PASS (6 tests). If `set_languages_retains…` fails because `es` is the new primary and gets bumped to head-start, change that test's primary to a third language (`"de"`) so `es` is retained non-primary — pick whichever keeps the invariant unambiguous.
+Expected: PASS (6 tests).
 
 - [ ] **Step 6: Add a property test**
 
@@ -349,9 +358,15 @@ git commit -m "feat(momentum): pure recency-weighted per-language momentum"
 ```toml
 [package]
 name = "featherkey-candidate-ranker"
-version = "0.1.0"
-edition = "2021"
+version = "0.0.0"
 publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Merge and rank candidates from all sources using language momentum."
+
+[package.metadata.featherkey]
+layer = "domain"
 
 [lints]
 workspace = true
@@ -361,7 +376,7 @@ featherkey-contracts = { path = "../contracts" }
 featherkey-language-momentum = { path = "../language-momentum" }
 
 [dev-dependencies]
-proptest = { workspace = true }
+proptest = "1.11.0"
 ```
 Add `"crates/candidate-ranker",` to root `Cargo.toml` members.
 
@@ -552,16 +567,17 @@ Expected: FAIL — no method `fuzzy_all`.
 
 - [ ] **Step 3: Implement**
 
-Add inside `impl LocaleManager` (the struct field holding the pairs is `active: Vec<(LangId, Dictionary)>` — match the real field name; if it stores `ids` + `dicts` separately, zip them):
+Add inside `impl LocaleManager`. **Verified:** the struct stores two parallel vectors — `ids: Vec<LangId>` and `dicts: Vec<Dictionary>` (`dicts[i]` belongs to `ids[i]`) — so iterate with `zip`, exactly as the existing `detect` method does:
 ```rust
 /// Edit-distance-1 neighbours of `word` from **every** active language,
 /// each tagged with the language that produced it (BR-18 generalised to
-/// correction candidates). The query word is never returned. Order: active
-/// language order, then each dictionary's own `fuzzy` order.
+/// correction candidates). The query word is never returned (that is
+/// `Dictionary::fuzzy`'s contract). Order: active language order, then each
+/// dictionary's own `fuzzy` order.
 #[must_use]
 pub fn fuzzy_all(&self, word: &str) -> Vec<(LangId, String)> {
     let mut out = Vec::new();
-    for (id, dict) in &self.active {
+    for (id, dict) in self.ids.iter().zip(self.dicts.iter()) {
         for w in dict.fuzzy(word) {
             out.push((id.clone(), w));
         }
@@ -569,7 +585,6 @@ pub fn fuzzy_all(&self, word: &str) -> Vec<(LangId, String)> {
     out
 }
 ```
-*If the struct does not keep `(LangId, Dictionary)` pairs together, read the field names at the top of the file and adapt — the method must iterate active languages with their dictionaries in order.*
 
 - [ ] **Step 4: Run to verify pass**
 
