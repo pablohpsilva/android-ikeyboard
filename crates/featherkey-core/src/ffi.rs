@@ -133,6 +133,44 @@ impl From<crate::LayoutKey> for FfiKey {
     }
 }
 
+/// Where a shell-gathered candidate came from — mirrors [`featherkey_contracts::Source`].
+#[derive(Debug, uniffi::Enum)]
+pub enum FfiSource {
+    Lexicon,
+    Device,
+}
+
+/// One correction/suggestion candidate the shell gathered (e.g. from the device
+/// spell-checker), tagged by language and its rank within its own source.
+#[derive(Debug, uniffi::Record)]
+pub struct FfiRankCandidate {
+    pub word: String,
+    pub lang: String,
+    pub source: FfiSource,
+    pub source_rank: u32,
+}
+
+/// A candidate after ranking, in final blended-score order.
+#[derive(uniffi::Record)]
+pub struct FfiRanked {
+    pub word: String,
+    pub lang: String,
+}
+
+impl From<FfiRankCandidate> for featherkey_contracts::Candidate {
+    fn from(c: FfiRankCandidate) -> Self {
+        featherkey_contracts::Candidate {
+            word: c.word,
+            lang: c.lang,
+            source: match c.source {
+                FfiSource::Lexicon => featherkey_contracts::Source::Lexicon,
+                FfiSource::Device => featherkey_contracts::Source::Device,
+            },
+            source_rank: c.source_rank,
+        }
+    }
+}
+
 // ---- Foreign trait: the current field's sensitivity (BR-26 gate input) -----
 
 /// Implemented in Kotlin from `EditorInfo`; Rust consults it to decide whether a
@@ -289,6 +327,41 @@ impl KeyboardCore {
         core.persist(&self.store)?;
         Ok(())
     }
+
+    /// Rank shell-gathered candidates with current language momentum.
+    pub fn rank(&self, candidates: Vec<FfiRankCandidate>, k: u32) -> Vec<FfiRanked> {
+        let cands = candidates.into_iter().map(Into::into).collect();
+        self.lock()
+            .rank_candidates(cands, k as usize)
+            .into_iter()
+            .map(|r| FfiRanked {
+                word: r.word,
+                lang: r.lang,
+            })
+            .collect()
+    }
+
+    /// Multilingual momentum-aware correction (never clobbers a known word).
+    pub fn choose_correction(
+        &self,
+        text: String,
+        device_known: Vec<String>,
+        device_cands: Vec<FfiRankCandidate>,
+    ) -> Result<FfiCorrection, FfiError> {
+        let cands = device_cands.into_iter().map(Into::into).collect();
+        let c = self.lock().choose_correction(&text, &device_known, cands)?;
+        Ok(FfiCorrection {
+            primary: c.primary,
+            alternatives: c.alternatives,
+            applied: c.applied,
+        })
+    }
+
+    /// Fold a committed word's recogniser languages into momentum. The shell must
+    /// only call this when consent is on and the field is not sensitive.
+    pub fn observe_language(&self, recognizers: Vec<String>) {
+        self.lock().observe_language(recognizers);
+    }
 }
 
 impl KeyboardCore {
@@ -297,5 +370,25 @@ impl KeyboardCore {
     /// (SEDD §5.5), so we recover the guard rather than propagate poisoning.
     fn lock(&self) -> std::sync::MutexGuard<'_, FeatherKeyCore> {
         self.inner.lock().unwrap_or_else(|p| p.into_inner())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ffi_candidate_converts_to_contract_candidate() {
+        let c: featherkey_contracts::Candidate = FfiRankCandidate {
+            word: "hola".into(),
+            lang: "es".into(),
+            source: FfiSource::Device,
+            source_rank: 2,
+        }
+        .into();
+        assert_eq!(c.word, "hola");
+        assert_eq!(c.lang, "es");
+        assert_eq!(c.source, featherkey_contracts::Source::Device);
+        assert_eq!(c.source_rank, 2);
     }
 }
