@@ -147,7 +147,7 @@ mod tests {
     use proptest::prelude::*;
     proptest! {
         #[test]
-        fn spanish_momentum_never_demotes_the_spanish_candidate(bumps in 0u32..15) {
+        fn spanish_momentum_flips_at_the_first_word_and_never_reverts(bumps in 0u32..40) {
             let cands = vec![c("hello","en",0), c("hola","es",0)];
             let mut mom = Momentum::new("en", &["en".into(),"es".into()]);
             for _ in 0..bumps { mom.observe(&["es".into()]); }
@@ -155,11 +155,17 @@ mod tests {
             // Invariant every run: both candidates survive (distinct words, k=2).
             prop_assert_eq!(out.len(), 2);
             let hola_idx = out.iter().position(|r| r.word == "hola").expect("hola present");
-            // As Spanish momentum accumulates it can only move hola up, never down:
-            // with any bump hola is at least tied for first; from the head-start
-            // crossover onward it is strictly first.
-            prop_assert!(hola_idx <= 1);
-            if bumps >= 3 { prop_assert_eq!(hola_idx, 0); }
+            // Exact, non-vacuous crossover. Same source_rank and source, so order is
+            // decided purely by momentum weight. Seed: en=1.05 (FLOOR+HEAD_START),
+            // es=0.05 (FLOOR). One Spanish word already flips it — es=0.05·0.9+1=1.045
+            // beats en=1.05·0.9=0.945 — and every later word only widens the gap
+            // (es→10, en→FLOOR), so hola leads forever after. The range runs past the
+            // ~29th word where en clamps to FLOOR, proving the lead survives the clamp.
+            if bumps == 0 {
+                prop_assert_eq!(hola_idx, 1); // cold es: primary head-start keeps English first
+            } else {
+                prop_assert_eq!(hola_idx, 0); // any Spanish word puts hola first, and it stays
+            }
         }
     }
 }

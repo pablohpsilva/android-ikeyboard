@@ -22,6 +22,17 @@ package com.featherkey.platform
  * lookup completes, letting the caller refresh the suggestion strip (mirroring
  * how the bundled vocabulary refreshes the strip when its async load finishes).
  *
+ * THREADING CONTRACT: every public method here is called from the IME's main
+ * (UI) thread, and the TextServices callbacks also dispatch on the main thread.
+ * All access to [queried], [buckets], and [knownIn] is therefore serialized on
+ * one thread — the `x = x + (...)` read-modify-writes below need no lock. The
+ * `@Volatile` markers only guarantee visibility of a whole-map replacement to
+ * any reader that reaches these fields off-thread; they do not make the update
+ * atomic, and none is needed given the single-thread contract. A callback that
+ * outlives its session (in flight when the language is dropped or [close] runs)
+ * is discarded by the per-listener liveness flag, so it can never repopulate a
+ * language that is no longer active.
+ *
  * PRIVACY: the caller MUST NOT query in a password/secure field. The queried
  * word is handed to the system spell-checker service (another process), so
  * secure text must never be sent here (E-2 / BR-26).
@@ -43,8 +54,13 @@ class DeviceDictionary(
     private val tsm =
         context.getSystemService(Context.TEXT_SERVICES_MANAGER_SERVICE) as? TextServicesManager
 
+    /** A live session paired with the listener bound to it. Closing a language
+     *  deactivates its listener first, so any callback still in flight for that
+     *  session is dropped instead of writing into a now-inactive language. */
+    private class Bound(val session: SpellCheckerSession, val listener: Listener)
+
     /** One session per active language, keyed by the bare language code. */
-    private val sessions = LinkedHashMap<String, SpellCheckerSession>()
+    private val sessions = LinkedHashMap<String, Bound>()
 
     /** The word the outstanding/most-recent lookup was fired for. */
     private var queried: String = ""
@@ -63,15 +79,21 @@ class DeviceDictionary(
      */
     fun setLanguages(tags: List<String>) {
         val plan = SessionPlan.of(sessions.keys.toSet(), tags)
-        for (lang in plan.close) { sessions.remove(lang)?.close() }
+        // Genuine no-op (same active set): keep the sessions AND their cached
+        // results instead of tearing down and re-querying an unchanged language.
+        if (plan.open.isEmpty() && plan.close.isEmpty()) return
+        for (lang in plan.close) {
+            sessions.remove(lang)?.let { it.listener.active = false; it.session.close() }
+        }
         for (lang in plan.open) {
             // referToSpellCheckerLanguageSettings = false: bind the exact
             // locale we chose, regardless of the user's spell-check language
             // settings.
+            val listener = Listener(lang)
             val s = runCatching {
-                tsm?.newSpellCheckerSession(null, Locale(lang), Listener(lang), false)
+                tsm?.newSpellCheckerSession(null, Locale(lang), listener, false)
             }.getOrNull()
-            if (s != null) sessions[lang] = s
+            if (s != null) sessions[lang] = Bound(s, listener)
         }
         queried = ""; buckets = emptyMap(); knownIn = emptyMap()
     }
@@ -81,7 +103,7 @@ class DeviceDictionary(
     fun refresh(word: String) {
         if (word.isEmpty() || word == queried) return
         queried = word
-        for (s in sessions.values) runCatching { s.getSentenceSuggestions(arrayOf(TextInfo(word)), MAX_PER_WORD) }
+        for (b in sessions.values) runCatching { b.session.getSentenceSuggestions(arrayOf(TextInfo(word)), MAX_PER_WORD) }
     }
 
     /** Cached corrections/completions for the last queried word, per language. */
@@ -95,7 +117,13 @@ class DeviceDictionary(
      * session identity, so we close over [lang] to land results in the right
      * per-language bucket. */
     private inner class Listener(private val lang: String) : SpellCheckerSession.SpellCheckerSessionListener {
+        /** Cleared when this session is closed/replaced. A callback that arrives
+         *  after that (an in-flight lookup racing a language switch or [close])
+         *  is dropped, so it cannot repopulate a language no longer active. */
+        @Volatile var active = true
+
         override fun onGetSentenceSuggestions(sentences: Array<out SentenceSuggestionsInfo>?) {
+            if (!active) return
             val out = LinkedHashSet<String>()
             val known = LinkedHashSet<String>()
             sentences?.forEach { s ->
@@ -115,7 +143,10 @@ class DeviceDictionary(
         override fun onGetSuggestions(results: Array<out SuggestionsInfo>?) = Unit
     }
 
-    fun close() { sessions.values.forEach { it.close() }; sessions.clear() }
+    fun close() {
+        sessions.values.forEach { it.listener.active = false; it.session.close() }
+        sessions.clear()
+    }
 
     private companion object {
         /** Corrections requested per word — a short, strip-sized list. */

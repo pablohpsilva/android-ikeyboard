@@ -106,11 +106,16 @@ impl FeatherKeyCore {
         let winner = cands[scored[0].0].word.clone();
         let applied = winner != text;
         let alternatives: Vec<String> = if applied {
+            // Distinct words only: pre-seed the winner so it is filtered, then let
+            // the set drop any cognate already emitted for another language (the
+            // same word can be a fuzzy neighbour in several active languages).
+            let mut seen = std::collections::HashSet::new();
+            seen.insert(winner.clone());
             scored
                 .iter()
                 .skip(1)
                 .map(|&(i, _)| cands[i].word.clone())
-                .filter(|w| w != &winner)
+                .filter(|w| seen.insert(w.clone()))
                 .take(2)
                 .collect()
         } else {
@@ -256,6 +261,30 @@ mod tests {
         core.observe_language(vec!["es".into()]); // one Spanish word: es edges just ahead
         let got = core.choose_correction("cit", &[], vec![]).expect("ok");
         assert_eq!(got.primary, "cat");
+    }
+
+    #[test]
+    fn alternatives_do_not_repeat_a_cognate_across_languages() {
+        // "cit" fuzzes to "cot" in BOTH en and es (a cognate). The winner is the
+        // primary sticky fix "cat"; "cot" must appear at most once among the
+        // alternatives, not once per language — the spec requires distinct words.
+        let core = FeatherKeyCore::new(vec![
+            ("en".into(), vec!["cat".into(), "cot".into()]),
+            ("es".into(), vec!["cot".into()]),
+        ])
+        .expect("core");
+        let got = core.choose_correction("cit", &[], vec![]).expect("ok");
+        assert!(got.applied);
+        assert_eq!(got.primary, "cat");
+        let distinct: std::collections::HashSet<&String> = got.alternatives.iter().collect();
+        assert_eq!(
+            distinct.len(),
+            got.alternatives.len(),
+            "alternatives must be distinct words: {:?}",
+            got.alternatives
+        );
+        // ...and never echo the winner itself.
+        assert!(!got.alternatives.contains(&"cat".to_string()));
     }
 
     #[test]
