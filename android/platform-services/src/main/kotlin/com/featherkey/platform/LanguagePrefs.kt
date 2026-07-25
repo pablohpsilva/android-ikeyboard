@@ -26,10 +26,23 @@ class LanguagePrefs(context: Context) {
         return tags.ifEmpty { DEFAULT }
     }
 
-    /** Replace the active set (order preserved; never empty). */
+    /**
+     * Replace the active set (order preserved; never empty). The first time
+     * Luxembourgish is added, silently also activate its German/French/English
+     * companions (see [LanguageBundle]) — once, tracked by a one-shot flag, so a
+     * user who later removes a companion is not fought.
+     */
     fun setActiveTags(tags: List<String>) {
-        val clean = tags.distinct().filter { it.isNotEmpty() }.ifEmpty { DEFAULT }
-        prefs.edit().putString(KEY, clean.joinToString(",")).apply()
+        val requested = tags.distinct().filter { it.isNotEmpty() }.ifEmpty { DEFAULT }
+        val result = LanguageBundle.withCompanions(
+            current = activeTags(),
+            requested = requested,
+            alreadyApplied = prefs.getBoolean(KEY_BUNDLE_APPLIED, false),
+        )
+        prefs.edit()
+            .putString(KEY, result.tags.joinToString(","))
+            .putBoolean(KEY_BUNDLE_APPLIED, result.bundleApplied)
+            .apply()
     }
 
     /** Rotate so the next language becomes primary; returns the new order. */
@@ -44,6 +57,7 @@ class LanguagePrefs(context: Context) {
     private companion object {
         const val FILE = "featherkey_languages"
         const val KEY = "active_tags"
+        const val KEY_BUNDLE_APPLIED = "lb_bundle_applied"
         val DEFAULT = listOf("en")
     }
 }
