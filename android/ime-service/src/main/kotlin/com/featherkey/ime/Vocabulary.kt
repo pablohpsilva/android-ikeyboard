@@ -86,7 +86,13 @@ class Vocabulary private constructor(private val langs: List<Lang>) {
     fun languagesOf(word: String): Set<String> =
         langs.asSequence().filter { it.rank.containsKey(word) }.map { it.tag }.toSet()
 
-    /** Up to [k] prefix matches per language, ranked within each by frequency. */
+    /**
+     * Up to [k] prefix matches per language, ranked within each language by the
+     * same priority [suggestions] uses: context continuation first, then the
+     * user's learned usage, then bundled frequency. This keeps
+     * personalization/context ordering WITHIN a language; the core momentum
+     * ranker (fed [Candidate.sourceRank]) still decides ACROSS languages.
+     */
     fun candidatesByLanguage(
         prefix: String,
         learned: Map<String, Int>,
@@ -96,9 +102,13 @@ class Vocabulary private constructor(private val langs: List<Lang>) {
         if (prefix.isEmpty()) return emptyList()
         val out = ArrayList<Candidate>()
         for (l in langs) {
-            prefixMatches(l, prefix, k).forEachIndexed { i, w ->
-                out.add(Candidate(w, l.tag, i))
-            }
+            val matches = prefixMatches(l, prefix, k + CANDIDATE_MARGIN)
+            val ordered = matches.sortedWith(
+                compareByDescending<String> { context[it] ?: 0 }
+                    .thenByDescending { learned[it] ?: 0 }
+                    .thenBy { l.rank[it] ?: Int.MAX_VALUE }
+            )
+            ordered.take(k).forEachIndexed { i, w -> out.add(Candidate(w, l.tag, i)) }
         }
         return out
     }
@@ -202,6 +212,10 @@ class Vocabulary private constructor(private val langs: List<Lang>) {
         private const val LEARN_WEIGHT = 0.8f // weight of the user's learned words
         private const val CONTEXT_WEIGHT = 1.2f // weight of previous-word context
         private const val TAIL_PENALTY = 0.25f // mild bias against over-long completions
+        private const val CANDIDATE_MARGIN = 5 // extra frequency-ranked matches gathered
+                                                // per language before re-sorting by
+                                                // context/learned so a less-frequent but
+                                                // learned/context word can still surface
 
         /** An empty vocabulary, used until the real one finishes loading. */
         fun empty(): Vocabulary = Vocabulary(emptyList())

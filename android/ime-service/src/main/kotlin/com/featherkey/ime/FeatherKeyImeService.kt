@@ -337,13 +337,16 @@ class FeatherKeyImeService : InputMethodService() {
      * so language momentum decides the order. The device lookup is async
      * ([DeviceDictionary.refresh]) and its callback re-runs this method when
      * results land. Skipped entirely in a sensitive field, so a password is never
-     * sent to the system spell checker (E-2/BR-26).
+     * sent to the system spell checker (E-2/BR-26). If the core ranker throws or
+     * comes back empty, falls back to the bundled per-language candidates in the
+     * order gathered, so the strip still shows completions (same
+     * degrade-don't-crash pattern as [handleGesture]).
      */
     private fun rankForStrip(prefix: String): List<String> {
         if (prefix.isEmpty()) return lastWord?.let { bigrams.nextWords(it, SUGGESTIONS) } ?: emptyList()
+        val bundled = vocab.candidatesByLanguage(prefix, usage.map, bigrams.nextCounts(lastWord), SUGGESTIONS + 2)
         val cands = ArrayList<FfiRankCandidate>()
-        for (c in vocab.candidatesByLanguage(prefix, usage.map, bigrams.nextCounts(lastWord), SUGGESTIONS + 2))
-            cands.add(FfiRankCandidate(c.word, c.lang, FfiSource.LEXICON, c.sourceRank.toUInt()))
+        for (c in bundled) cands.add(FfiRankCandidate(c.word, c.lang, FfiSource.LEXICON, c.sourceRank.toUInt()))
         if (!field.isSensitive()) {
             deviceDict.refresh(prefix)
             for ((lang, words) in deviceDict.candidatesByLanguage())
@@ -351,7 +354,8 @@ class FeatherKeyImeService : InputMethodService() {
                     if (w.lowercase() != prefix) cands.add(FfiRankCandidate(w, lang, FfiSource.DEVICE, i.toUInt()))
                 }
         }
-        return runCatching { bridge.rank(cands, SUGGESTIONS.toUInt()).map { it.word } }.getOrDefault(emptyList())
+        val ranked = runCatching { bridge.rank(cands, SUGGESTIONS.toUInt()).map { it.word } }.getOrDefault(emptyList())
+        return ranked.ifEmpty { bundled.map { it.word }.distinct().take(SUGGESTIONS) }
     }
 
     /** Commit a tapped suggestion, replacing the pending word. */
@@ -385,11 +389,13 @@ class FeatherKeyImeService : InputMethodService() {
     }
 
     /**
-     * The word to commit at a boundary, or `null` to keep what was typed. Uses
-     * the core autocorrect first; if that declines and the typed string is not
-     * itself a known word, it trusts the noisy-channel reading of the taps — so a
-     * fat-fingered "rhe" commits as "the" — but never second-guesses a real word
-     * or a mixed-case token.
+     * The word to commit at a boundary, or `null` to keep what was typed.
+     * Delegates to the core's `chooseCorrection` — an all-active-language,
+     * momentum-aware edit-distance fix — passing along what the device
+     * dictionary knows so a word recognised there is treated as known too.
+     * It never clobbers a word already known in any active language, in the
+     * device dictionary, or a mixed-case token (guarded above); otherwise it
+     * picks the momentum-weighted correction the core judges most likely.
      */
     private fun correctedWord(word: String): String? {
         if (word != word.lowercase()) return null // don't mangle Caps/ALLCAPS
