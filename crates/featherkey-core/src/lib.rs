@@ -29,6 +29,8 @@
 mod correct;
 mod error;
 mod learn;
+mod packs;
+mod rank;
 
 #[cfg(feature = "uniffi")]
 mod ffi;
@@ -47,18 +49,18 @@ pub use featherkey_contracts::{
 pub use featherkey_layout_engine::Layout;
 pub use featherkey_secure_store::RedbSecureStore;
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-
 use featherkey_context::Context;
-use featherkey_contracts::{Predictor, Source};
+use featherkey_contracts::Predictor;
 use featherkey_corrections::Corrections;
 use featherkey_dictionary::Dictionary;
 use featherkey_input_decoder::{InputDecoder, NearestKeyDecoder};
 use featherkey_kernel::TouchPoint;
 use featherkey_language_momentum::Momentum;
-use featherkey_locale_manager::{LangId, LocaleManager};
+use featherkey_locale_manager::LangId;
 use featherkey_personalization::Personalization;
-use featherkey_prediction::{StatisticalPredictor, MAX_SUGGESTIONS};
+
+use crate::packs::{build_packs, primary_tag, Pack};
+use featherkey_prediction::StatisticalPredictor;
 use featherkey_sensitive_context::SensitivityPolicy;
 use featherkey_touch_model::TouchModel;
 
@@ -113,24 +115,6 @@ pub struct LayoutKey {
     pub y: f32,
     pub width: f32,
     pub height: f32,
-}
-
-/// One active language: its tag, its validated (byte-sorted) lexicon, and the
-/// bundled per-word frequency **rank** recovered from the activation order.
-///
-/// The [`Dictionary`] is a byte-sorted `fst` with no frequency of its own, so the
-/// commonness a word carried in the shipped list would be lost the moment it is
-/// sorted. [`build_packs`] therefore records each word's *input position* — the
-/// shell activates languages in frequency order, most-common first — as its
-/// `rank` (`0` = commonest) **before** sorting for the `fst`. The predictor
-/// consumes this as `dict_rank` so common words still rank ahead of rare ones
-/// (DECISION option A: carry frequency into the Rust core).
-#[derive(Debug, Clone)]
-struct Pack {
-    lang: LangId,
-    dict: Dictionary,
-    /// `word -> rank` (`0` = commonest). A word absent here sorts last.
-    rank: HashMap<String, u32>,
 }
 
 /// The composed core handle. Owns the single source of truth for learned and
@@ -325,275 +309,12 @@ impl FeatherKeyCore {
             .map(|p| (p.lang.clone(), p.dict.clone()))
             .collect()
     }
-
-    /// The whole suggestion-strip blend, core-owned (ARCH §9.1 `Suggest`,
-    /// option **b**): predictor completions + shell-gathered `device` candidates
-    /// → language-momentum ranking → dictionary fold-group variant guarantee.
-    /// Read-only — never mutates learned state. The shell just renders the words.
-    ///
-    /// Ordering within a language is context → learned → bundled rank (via the
-    /// ranked predictor); across languages it is the momentum-weighted
-    /// [`candidate_ranker`](featherkey_candidate_ranker). Finally the accent/
-    /// apostrophe variant of the typed token is guaranteed a slot so a commoner
-    /// plain twin (`hell`) cannot crowd out `he'll` — derived from the shipped
-    /// lexicons' fold index, never a hand-authored replacement table.
-    ///
-    /// # Speed (BR-46 / plan Global Constraint)
-    /// The learned `freq`/`dict_rank` snapshots handed to the predictor are
-    /// **scoped to just this query's completions**, so no whole-vocabulary map is
-    /// cloned per keystroke. (The lexicons themselves are cloned into the
-    /// predictor exactly as the legacy [`suggest`](Self::suggest) already does;
-    /// materialising them is the deferred W4 follow-up.)
-    #[must_use]
-    pub fn rank_suggestions(
-        &self,
-        preceding: &str,
-        prefix: &str,
-        device: Vec<Candidate>,
-    ) -> Vec<RankedCandidate> {
-        let context = self.context.next_counts(preceding);
-        let (freq, dict_rank) = self.scoped_learned_snapshots(prefix);
-        let lang_lexicons: Vec<(String, Dictionary)> = self
-            .packs
-            .iter()
-            .map(|p| (p.lang.as_str().to_owned(), p.dict.clone()))
-            .collect();
-        let predictor = StatisticalPredictor::new_ranked(lang_lexicons, &freq, &dict_rank, &context);
-        let mut cands = predictor.suggest_ranked(&TypingContext {
-            preceding: preceding.to_owned(),
-            prefix: prefix.to_owned(),
-        });
-        cands.extend(device);
-        // Correction adjustment: net of the "sticky-fix" promotion (a completion
-        // the user repeatedly picks for this prefix) and the "unwanted" demotion
-        // (a word the user repeatedly deletes and retypes). Applied before the
-        // top-k cut, so a promoted word is never dropped first.
-        let ranked = featherkey_candidate_ranker::rank_with_bias(
-            &cands,
-            &self.momentum,
-            MAX_SUGGESTIONS,
-            |word| self.correction_adjustment(prefix, word),
-        );
-        self.guarantee_fold_variant(prefix, ranked)
-    }
-
-    /// The net correction score adjustment for `word` completing `prefix`:
-    /// the sticky-fix promotion minus the unwanted demotion.
-    ///
-    /// * **Promotion** `CORRECTION_STICKY_WEIGHT * ln(1 + picks)` — `picks` is how
-    ///   often the user chose this completion for this prefix (`observe_strip_pick`).
-    /// * **Demotion** `CORRECTION_UNWANTED_WEIGHT * ln(1 + unwanted)` — `unwanted`
-    ///   is how often the user deleted-and-retyped this word (`observe_delete_retype`),
-    ///   counted per word (not per prefix, matching how the signal is recorded).
-    ///
-    /// Both terms are `0.0` when their count is `0`, so a word with no correction
-    /// history is ranked exactly as before. The two offset when a word is both
-    /// picked and unwanted. Demotion is deliberately the *weaker* signal (half the
-    /// weight): an explicit pick is a strong intent signal, while a delete-retype
-    /// is noisier (a user may delete for reasons unrelated to the word being wrong),
-    /// so a single delete-retype only nudges and never unseats a strong default.
-    fn correction_adjustment(&self, prefix: &str, word: &str) -> f64 {
-        let picks = self.corrections.pref_count(prefix, word);
-        let unwanted = self.corrections.unwanted_count(word);
-        let promote = if picks == 0 {
-            0.0
-        } else {
-            CORRECTION_STICKY_WEIGHT * f64::from(1 + picks).ln()
-        };
-        let demote = if unwanted == 0 {
-            0.0
-        } else {
-            CORRECTION_UNWANTED_WEIGHT * f64::from(1 + unwanted).ln()
-        };
-        promote - demote
-    }
-
-    /// The learned `freq` and bundled `dict_rank` snapshots the ranked predictor
-    /// needs — restricted to the words that `prefix` actually completes to, so a
-    /// keystroke never clones the whole learned/bundled vocabulary. An empty
-    /// prefix completes to nothing here (the predictor's empty-prefix branch uses
-    /// only `context`), so both maps are empty.
-    fn scoped_learned_snapshots(
-        &self,
-        prefix: &str,
-    ) -> (BTreeMap<String, u32>, BTreeMap<String, u32>) {
-        if prefix.is_empty() {
-            return (BTreeMap::new(), BTreeMap::new());
-        }
-        let folded = featherkey_fold::fold(prefix);
-        let mut words: BTreeSet<String> = BTreeSet::new();
-        for p in &self.packs {
-            for w in p.dict.fold_prefix(&folded) {
-                words.insert(w);
-            }
-        }
-        let mut freq = BTreeMap::new();
-        let mut dict_rank = BTreeMap::new();
-        for w in &words {
-            let f = self.personalization.frequency(w);
-            if f > 0 {
-                freq.insert(w.clone(), f);
-            }
-            if let Some(r) = self.packs.iter().filter_map(|p| p.rank.get(w).copied()).min() {
-                dict_rank.insert(w.clone(), r);
-            }
-        }
-        (freq, dict_rank)
-    }
-
-    /// Guarantee the typed token's accent/apostrophe variant a strip slot, exactly
-    /// as the Kotlin `SuggestionStrip.withGuaranteedVariant` did — moved core-side
-    /// (plan W5 Step 1). The **device**-derived variant stays a thin Kotlin
-    /// post-step; this covers the shipped-lexicon fold group only.
-    fn guarantee_fold_variant(
-        &self,
-        prefix: &str,
-        ranked: Vec<RankedCandidate>,
-    ) -> Vec<RankedCandidate> {
-        if prefix.is_empty() {
-            return dedup_cap(ranked, MAX_SUGGESTIONS);
-        }
-        let shown: HashSet<String> = ranked.iter().map(|r| r.word.to_lowercase()).collect();
-        let variant = self
-            .accent_variants(prefix)
-            .into_iter()
-            .find(|v| !shown.contains(&v.word.to_lowercase()));
-        let Some(variant) = variant else {
-            return dedup_cap(ranked, MAX_SUGGESTIONS);
-        };
-        let mut out = ranked;
-        let at = std::cmp::min(1, out.len());
-        out.insert(at, variant);
-        dedup_cap(out, MAX_SUGGESTIONS)
-    }
-
-    /// Real dictionary words in `prefix`'s **exact** accent-fold group whose
-    /// spelling differs from what was typed (`ive → I've`, `voce → você`,
-    /// `hell → he'll`, `tambem → também`), best-ranked (commonest) first. Derived
-    /// purely from the shipped lexicons via the fold index — the Rust twin of
-    /// `Vocabulary.accentVariantsOf`.
-    fn accent_variants(&self, prefix: &str) -> Vec<RankedCandidate> {
-        let folded = featherkey_fold::fold(prefix);
-        let lower_prefix = prefix.to_lowercase();
-        let mut seen: HashSet<String> = HashSet::new();
-        let mut hits: Vec<(String, String, u32)> = Vec::new();
-        for p in &self.packs {
-            for w in p.dict.fold_prefix(&folded) {
-                // fold_prefix returns prefix matches; keep only the *exact* group.
-                if featherkey_fold::fold(&w) != folded || w.to_lowercase() == lower_prefix {
-                    continue;
-                }
-                if !seen.insert(w.to_lowercase()) {
-                    continue;
-                }
-                let rank = self
-                    .packs
-                    .iter()
-                    .filter_map(|q| q.rank.get(&w).copied())
-                    .min()
-                    .unwrap_or(u32::MAX);
-                hits.push((w, p.lang.as_str().to_owned(), rank));
-            }
-        }
-        hits.sort_by_key(|(_, _, rank)| *rank); // most frequent first
-        hits.into_iter()
-            .map(|(word, lang, _)| {
-                let score = featherkey_candidate_ranker::score(
-                    &Candidate {
-                        word: word.clone(),
-                        lang: lang.clone(),
-                        source: Source::Lexicon,
-                        source_rank: 0,
-                    },
-                    &self.momentum,
-                );
-                RankedCandidate { word, lang, score }
-            })
-            .collect()
-    }
-}
-
-/// De-duplicate `words` by lowercased spelling (first occurrence wins, preserving
-/// order) and cap to `cap`. Mirrors the Kotlin `SuggestionStrip.dedupCap`.
-fn dedup_cap(words: Vec<RankedCandidate>, cap: usize) -> Vec<RankedCandidate> {
-    let mut seen: HashSet<String> = HashSet::new();
-    words
-        .into_iter()
-        .filter(|w| seen.insert(w.word.to_lowercase()))
-        .take(cap)
-        .collect()
-}
-
-/// Validate a `(tag, words)` language list into lexicon packs, recording each
-/// word's bundled frequency **rank** from the activation order. Shared by
-/// construction and language switching so both apply the identical contract.
-///
-/// `words` arrive in **frequency order** (most-common first — the shell's asset
-/// order; DECISION option A). Each word's input position becomes its `rank`
-/// (`0` = commonest) *before* the list is byte-sorted for the `fst`, so the
-/// bundled commonness survives sorting. A repeated word keeps its earliest (most
-/// frequent) position. The set is still validated as non-empty with no duplicate
-/// tag; ordering is no longer a rejection reason (the core sorts internally).
-fn build_packs(languages: Vec<(String, Vec<String>)>) -> Result<Vec<Pack>, FeatherKeyError> {
-    let mut packs = Vec::with_capacity(languages.len());
-    for (tag, words) in languages {
-        let mut rank: HashMap<String, u32> = HashMap::with_capacity(words.len());
-        for (position, word) in words.iter().enumerate() {
-            // First (most-frequent) occurrence wins; `position` never exceeds the
-            // input length, far below `u32::MAX`.
-            rank.entry(word.clone()).or_insert(position as u32);
-        }
-        // The `fst` needs non-decreasing byte order; sort a copy of the
-        // frequency-ordered input (adjacent duplicates are merged by the
-        // dictionary itself).
-        let mut sorted = words;
-        sorted.sort();
-        let dict = Dictionary::from_sorted_words(sorted)?;
-        packs.push(Pack {
-            lang: LangId::new(tag),
-            dict,
-            rank,
-        });
-    }
-    // Build a real LocaleManager purely to validate the set — it rejects an
-    // empty set (→ NoLanguages) and a duplicate tag (→ Locale). Discarded;
-    // `correct` rebuilds one on demand.
-    let locale_pairs: Vec<(LangId, Dictionary)> = packs
-        .iter()
-        .map(|p| (p.lang.clone(), p.dict.clone()))
-        .collect();
-    LocaleManager::new(locale_pairs)?;
-    Ok(packs)
-}
-
-/// The primary (first) active language tag — the one whose script drives the
-/// alpha page. Falls back to `"en"` (QWERTY) when the set is empty, which the
-/// public API never produces (`build_packs` rejects an empty set).
-fn primary_tag(packs: &[Pack]) -> String {
-    packs
-        .first()
-        .map_or_else(|| "en".to_owned(), |p| p.lang.as_str().to_owned())
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn primary_tag_falls_back_to_en_on_an_empty_set() {
-        assert_eq!(primary_tag(&[]), "en");
-    }
-
-    #[test]
-    fn primary_tag_is_the_first_pack_in_preference_order() {
-        let core = FeatherKeyCore::new(vec![
-            ("ru".to_owned(), vec!["да".to_owned()]),
-            ("en".to_owned(), vec!["cat".to_owned()]),
-        ])
-        .expect("valid core");
-        assert_eq!(primary_tag(&core.packs), "ru");
-    }
 
     #[test]
     fn observing_a_language_raises_its_weight() {
@@ -644,168 +365,6 @@ mod tests {
         assert_eq!(out[0].word, "hola");
     }
 
-    // ---- Wave 4: frequency-carry, rank_suggestions, gated hooks ---------------
-
-    fn words_of(ranked: &[RankedCandidate]) -> Vec<&str> {
-        ranked.iter().map(|r| r.word.as_str()).collect()
-    }
-
-    #[test]
-    fn build_packs_records_frequency_rank_from_input_position() {
-        // Words arrive in frequency order; rank = input position even though the
-        // fst stores them alphabetically (aardvark < cat < the).
-        let core = FeatherKeyCore::new(vec![(
-            "en".into(),
-            vec!["the".into(), "cat".into(), "aardvark".into()],
-        )])
-        .expect("core");
-        let rank = &core.packs[0].rank;
-        assert_eq!(rank.get("the"), Some(&0));
-        assert_eq!(rank.get("cat"), Some(&1));
-        assert_eq!(rank.get("aardvark"), Some(&2));
-    }
-
-    #[test]
-    fn rank_suggestions_orders_by_bundled_rank_when_nothing_learned() {
-        // No context, no learned usage: the commoner bundled word (lower rank,
-        // earlier in the frequency-ordered input) wins. Proves dict_rank flows.
-        let core = FeatherKeyCore::new(vec![(
-            "en".into(),
-            vec!["cat".into(), "car".into(), "can".into()],
-        )])
-        .expect("core");
-        let out = core.rank_suggestions("", "ca", vec![]);
-        assert_eq!(words_of(&out), ["cat", "car", "can"]);
-    }
-
-    #[test]
-    fn rank_suggestions_lets_context_beat_bundled_rank() {
-        // "car" is commoner (rank 0) than "cat" (rank 1), but the bigram context
-        // after "the" favours "cat", which must then win. Proves context flows.
-        let mut core =
-            FeatherKeyCore::new(vec![("en".into(), vec!["car".into(), "cat".into()])]).expect("core");
-        core.import_context([("the".to_string(), "cat".to_string(), 3)]);
-        let out = core.rank_suggestions("the", "ca", vec![]);
-        assert_eq!(out[0].word, "cat");
-    }
-
-    #[test]
-    fn rank_suggestions_tags_completion_with_its_pack_language() {
-        // A completion drawn from the es pack keeps its language across the blend.
-        let core = FeatherKeyCore::new(vec![
-            ("en".into(), vec!["cat".into()]),
-            ("es".into(), vec!["gato".into()]),
-        ])
-        .expect("core");
-        let out = core.rank_suggestions("", "ga", vec![]);
-        assert_eq!(out[0].word, "gato");
-        assert_eq!(out[0].lang, "es");
-    }
-
-    #[test]
-    fn rank_suggestions_surfaces_the_apostrophe_variant_of_the_typed_token() {
-        // Typing "hell" must still offer "he'll" — derived from the fold group,
-        // never a hand-authored table.
-        let core = FeatherKeyCore::new(vec![(
-            "en".into(),
-            vec!["hell".into(), "hello".into(), "he'll".into()],
-        )])
-        .expect("core");
-        let out = core.rank_suggestions("", "hell", vec![]);
-        assert!(
-            out.iter().any(|r| r.word == "he'll"),
-            "he'll not offered: {:?}",
-            words_of(&out)
-        );
-    }
-
-    #[test]
-    fn accent_variants_are_the_exact_fold_group_minus_the_typed_word() {
-        // "hell" folds to itself; its exact fold group is {hell, he'll}. The
-        // typed word is excluded and "hello" (different fold) is not a member.
-        let core = FeatherKeyCore::new(vec![(
-            "en".into(),
-            vec!["hell".into(), "hello".into(), "he'll".into()],
-        )])
-        .expect("core");
-        let variants: Vec<String> = core
-            .accent_variants("hell")
-            .into_iter()
-            .map(|r| r.word)
-            .collect();
-        assert_eq!(variants, vec!["he'll".to_string()]);
-    }
-
-    #[test]
-    fn accent_variants_rank_by_minimum_across_all_active_packs() {
-        // Regression pin (r-u-sure round 1): a variant shared across languages
-        // with crossed frequency ranks must sort by the MINIMUM rank across packs
-        // (Kotlin Vocabulary.rankOf), not the first pack's rank. Here "café" is
-        // rare in en (position 2) but commonest in es (position 0), while "cafè"
-        // is position 1 in en only. Min ranks: café=0, cafè=1 -> café first. The
-        // old first-pack-only lookup would have ranked cafè (en pos 1) ahead.
-        let core = FeatherKeyCore::new(vec![
-            ("en".into(), vec!["the".into(), "cafè".into(), "café".into()]),
-            ("es".into(), vec!["café".into(), "and".into()]),
-        ])
-        .expect("core");
-        let variants: Vec<String> = core
-            .accent_variants("cafe")
-            .into_iter()
-            .map(|r| r.word)
-            .collect();
-        assert_eq!(variants, vec!["café".to_string(), "cafè".to_string()]);
-    }
-
-    #[test]
-    fn guarantee_fold_variant_inserts_an_unshown_variant_at_slot_two() {
-        // With only the plain twin ranked, the guarantee splices the accented
-        // form into the second slot (index 1), mirroring the Kotlin behaviour.
-        let core = FeatherKeyCore::new(vec![(
-            "en".into(),
-            vec!["hell".into(), "he'll".into()],
-        )])
-        .expect("core");
-        let ranked = vec![RankedCandidate {
-            word: "hell".into(),
-            lang: "en".into(),
-            score: 0.0,
-        }];
-        let out = core.guarantee_fold_variant("hell", ranked);
-        assert_eq!(words_of(&out), ["hell", "he'll"]);
-    }
-
-    #[test]
-    fn rank_suggestions_appends_device_candidates_under_momentum() {
-        // Device candidates blend in; strong es momentum promotes the es word
-        // over an equally-ranked en one — proving language survives the blend.
-        use featherkey_contracts::{Candidate, Source};
-        let mut core = FeatherKeyCore::new(vec![
-            ("en".into(), vec!["hello".into()]),
-            ("es".into(), vec!["hola".into()]),
-        ])
-        .expect("core");
-        for _ in 0..5 {
-            core.observe_language(vec!["es".into()]);
-        }
-        let device = vec![
-            Candidate {
-                word: "hello".into(),
-                lang: "en".into(),
-                source: Source::Device,
-                source_rank: 0,
-            },
-            Candidate {
-                word: "hola".into(),
-                lang: "es".into(),
-                source: Source::Device,
-                source_rank: 0,
-            },
-        ];
-        let out = core.rank_suggestions("", "", device);
-        assert_eq!(out[0].word, "hola");
-    }
-
     #[test]
     fn learn_word_records_both_frequency_and_context_when_allowed() {
         struct Ordinary;
@@ -814,8 +373,7 @@ mod tests {
                 false
             }
         }
-        let mut core =
-            FeatherKeyCore::new(vec![("en".into(), vec!["cat".into()])]).expect("core");
+        let mut core = FeatherKeyCore::new(vec![("en".into(), vec!["cat".into()])]).expect("core");
         core.learn_word("the", "cat", &Ordinary);
         assert_eq!(core.word_frequency("cat"), 1);
         assert_eq!(core.context_next_words("the", 5), vec!["cat".to_string()]);
@@ -829,8 +387,7 @@ mod tests {
                 false
             }
         }
-        let mut core =
-            FeatherKeyCore::new(vec![("en".into(), vec!["teh".into()])]).expect("core");
+        let mut core = FeatherKeyCore::new(vec![("en".into(), vec!["teh".into()])]).expect("core");
         core.observe_strip_pick("teh", "teh", &Ordinary);
         core.observe_delete_retype("ducking", &Ordinary);
         assert_eq!(core.correction_pref_count("teh", "teh"), 1);
