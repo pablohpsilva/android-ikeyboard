@@ -89,6 +89,10 @@ class KeyboardView @JvmOverloads constructor(
     var spaceHint: String = "EN"
         set(value) { field = value; invalidate() }
 
+    /** Active-language tags (preference order, primary first) that order the
+     *  long-press accent variants for the primary accented language. */
+    var accentLangs: List<String> = emptyList()
+
     /** Recently-used emoji (most-recent-first); shown on the emoji page's recents tab. */
     var recents: List<String> = emptyList()
         set(value) { field = value; if (page == Page.EMOJI) invalidate() }
@@ -761,7 +765,7 @@ class KeyboardView @JvmOverloads constructor(
     private fun startAccentMode() {
         val base = gestureCell ?: return
         val ch = base.label.firstOrNull() ?: return
-        if (!accentSession.open(ch)) return
+        if (!accentSession.open(ch, accentLangs)) return
         gesturing = false                        // long-press wins over swipe
         accentPopup = accentPopupRect(base, accentSession.variants.size)
         pressed = base
@@ -771,8 +775,12 @@ class KeyboardView @JvmOverloads constructor(
     /** The popup band above [base]: one key-width cell per variant, centred over the
      *  key and clamped into the view; if it would clip the top, it is pinned to y=0. */
     private fun accentPopupRect(base: Cell.Letter, count: Int): RectF {
-        val cellW = base.rect.width()
-        val totalW = cellW * count
+        // One key-width per cell, but never wider than the view: a large variant
+        // set (some vowels have six) shrinks its cells to fit instead of running
+        // off-screen. Downstream geometry reads cell width as totalW/count, so the
+        // hit-test stays consistent with what is drawn.
+        val usable = (width - 2 * sideMargin).coerceAtLeast(base.rect.width())
+        val totalW = (base.rect.width() * count).coerceAtMost(usable)
         val left = (base.rect.centerX() - totalW / 2f)
             .coerceIn(sideMargin, (width - sideMargin - totalW).coerceAtLeast(sideMargin))
         val h = rowHeight

@@ -192,6 +192,7 @@ class FeatherKeyImeService : InputMethodService() {
         val view = KeyboardView(this)
         view.keys = renderKeys() // fallback QWERTY until the bridge finishes opening
         view.spaceHint = spaceHint(currentTags)
+        view.accentLangs = currentTags // orders long-press accents for the primary language
         view.onKeyTouch = { x, y -> handleTouch(x, y) }
         view.onCharKey = { ch -> handleChar(ch) }
         view.onFunctionKey = { fk -> handleFunction(fk) }
@@ -280,6 +281,7 @@ class FeatherKeyImeService : InputMethodService() {
             // (e.g. Latin → Cyrillic), so re-pull the rendered keys; renderKeys()
             // also refreshes keyCenters for the tap model via its `.also`.
             keyboard?.keys = renderKeys()
+            keyboard?.accentLangs = tags // re-order long-press accents for the new primary
         }
         keyboard?.spaceHint = spaceHint(tags)
     }
@@ -773,8 +775,18 @@ class FeatherKeyImeService : InputMethodService() {
         val undo = corrections.onBackspaceUndo()
         if (undo is CorrectionSignal.RevertAfterAutocorrect && observeGate())
             runCatching { bridge?.addToDictionary(undo.word) }
-        if (pending.isNotEmpty()) pending.deleteCharAt(pending.length - 1)
-        ic.deleteSurroundingText(1, 0)
+        if (pending.isNotEmpty()) {
+            // Mid-word: each pending char is a single BMP letter, so char-wise.
+            pending.deleteCharAt(pending.length - 1)
+            ic.deleteSurroundingText(1, 0)
+            return
+        }
+        // Nothing composing: delete a whole grapheme cluster so an emoji (surrogate
+        // pair, ZWJ/skin-tone/flag sequence) or a base+combining pair clears on one
+        // press instead of leaving an orphaned half-character.
+        val before = ic.getTextBeforeCursor(GRAPHEME_LOOKBEHIND, 0)
+        val n = GraphemeDeletion.lastClusterLength(before)
+        ic.deleteSurroundingText(if (n > 0) n else 1, 0)
     }
 
     private fun flushWord(ic: InputConnection) {
@@ -868,6 +880,10 @@ class FeatherKeyImeService : InputMethodService() {
         // (between-keys) tap is rescued, never a far, clearly-different key.
         private const val AMBIGUOUS_TAP_RATIO = 0.5f
         private const val DEVICE_REFRESH_COALESCE_MS = 16L // ~one frame; batch same-keystroke device results
+        // Chars to fetch before the cursor to find the last grapheme cluster on
+        // backspace — comfortably longer than the widest emoji cluster (a tag-flag
+        // like the England flag is 14 UTF-16 units; a 4-person ZWJ family is 11).
+        private const val GRAPHEME_LOOKBEHIND = 32
     }
 }
 

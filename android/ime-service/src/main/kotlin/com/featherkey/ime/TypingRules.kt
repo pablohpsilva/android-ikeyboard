@@ -134,6 +134,27 @@ object SuggestionStrip {
     }
 }
 
+/** Backspace must remove a whole *grapheme cluster*, not one UTF-16 code unit.
+ *  An emoji is a surrogate pair (2 units) — and skin-tone, flag, and ZWJ
+ *  sequences are longer still — so a code-unit delete left an orphaned half that
+ *  needed a second press to clear. */
+object GraphemeDeletion {
+    /** UTF-16 code-unit length of the last grapheme cluster in [before] (the text
+     *  immediately preceding the cursor), i.e. how many units one backspace should
+     *  delete. 0 for null/empty so nothing is deleted. On Android `BreakIterator`
+     *  is ICU-backed, so it segments emoji ZWJ/skin-tone/flag clusters correctly;
+     *  the host JVM segments at least surrogate pairs and combining marks. */
+    fun lastClusterLength(before: CharSequence?): Int {
+        if (before.isNullOrEmpty()) return 0
+        val s = before.toString()
+        val it = java.text.BreakIterator.getCharacterInstance()
+        it.setText(s)
+        val end = it.last() // == s.length
+        val start = it.previous() // boundary starting the final cluster
+        return if (start == java.text.BreakIterator.DONE) s.length else (end - start).coerceAtLeast(1)
+    }
+}
+
 /** Case-matching for auto-corrections/accent restorations. */
 object CaseMatch {
     /** [target] recased to match [source]'s leading case: if [source] starts with

@@ -17,9 +17,10 @@ class AccentSession {
 
     val active: Boolean get() = base != null
 
-    /** Open the popup for [base] if it has accent variants; true if opened. */
-    fun open(base: Char): Boolean {
-        val v = Accents.variantsFor(base)
+    /** Open the popup for [base] if it has accent variants, ordered for the active
+     *  [langs] (preference order, primary first); true if opened. */
+    fun open(base: Char, langs: List<String> = emptyList()): Boolean {
+        val v = Accents.variantsFor(base, langs)
         if (v.isEmpty()) return false
         this.base = base
         this.variants = v

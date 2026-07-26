@@ -12,7 +12,7 @@ class AccentSessionTest {
         val s = AccentSession()
         assertTrue(s.open('e'))
         assertTrue(s.active)
-        assertEquals(listOf("ë", "é", "è", "ê"), s.variants)
+        assertEquals(listOf("é", "è", "ê", "ë"), s.variants) // default (no language) order
         assertEquals(-1, s.index)
     }
 
@@ -31,8 +31,8 @@ class AccentSessionTest {
     @Test fun release_after_moving_commits_the_highlighted_variant() {
         val s = AccentSession()
         s.open('e')
-        s.moveTo(x = 150f, left = 100f, cellW = 40f) // (150-100)/40 = 1 -> é
-        assertEquals("é", s.release())
+        s.moveTo(x = 150f, left = 100f, cellW = 40f) // (150-100)/40 = 1 -> è (default order)
+        assertEquals("è", s.release())
     }
 
     @Test fun release_when_inactive_is_null() {

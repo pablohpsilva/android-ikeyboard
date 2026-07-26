@@ -158,4 +158,34 @@ class TypingRulesTest {
             SuggestionStrip.withGuaranteedVariant(listOf("a", "b", "c", "d"), emptyList(), 3),
         )
     }
+
+    // --- Bug: emoji needs two backspaces to delete ---------------------------
+    // A single backspace must remove one grapheme cluster, not one UTF-16 code
+    // unit; an emoji is a surrogate pair (2 units) so a code-unit delete left an
+    // orphaned half that required a second press. BreakIterator is ICU-backed on
+    // Android, so skin-tone/flag/ZWJ clusters also delete whole on-device; the
+    // host JDK under-segments those, so we only assert the surrogate-pair symptom.
+
+    @Test fun backspace_deletes_a_whole_emoji_not_half_a_surrogate_pair() {
+        assertEquals(2, GraphemeDeletion.lastClusterLength("😀"))   // 1 emoji = 2 UTF-16 units
+        assertEquals(2, GraphemeDeletion.lastClusterLength("hi😀")) // trailing emoji after text
+    }
+
+    @Test fun backspace_deletes_one_ordinary_character() {
+        assertEquals(1, GraphemeDeletion.lastClusterLength("hello")) // last cluster "o"
+        assertEquals(1, GraphemeDeletion.lastClusterLength("a"))
+    }
+
+    @Test fun backspace_deletes_a_base_plus_combining_mark_together() {
+        // Decomposed e + combining acute (U+0301) is one cluster: both units
+        // go on a single press.
+        assertEquals(2, GraphemeDeletion.lastClusterLength("e\u0301"))
+        // A precomposed accented letter (U+00E9) is a single unit.
+        assertEquals(1, GraphemeDeletion.lastClusterLength("caf\u00E9"))
+    }
+
+    @Test fun backspace_on_empty_or_null_deletes_nothing() {
+        assertEquals(0, GraphemeDeletion.lastClusterLength(""))
+        assertEquals(0, GraphemeDeletion.lastClusterLength(null))
+    }
 }
