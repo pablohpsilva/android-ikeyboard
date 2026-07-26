@@ -544,7 +544,29 @@ class FeatherKeyImeService : InputMethodService() {
                 }
         }
         val ranked = runCatching { bridge?.rank(cands, SUGGESTIONS.toUInt())?.map { it.word } ?: emptyList() }.getOrDefault(emptyList())
-        return ranked.ifEmpty { bundled.map { it.word }.distinct().take(SUGGESTIONS) }
+        val base = ranked.ifEmpty { bundled.map { it.word }.distinct() }
+        // Guarantee the accent/apostrophe variant of what was typed a slot, so a
+        // commoner plain twin (hell, its, "ive") can't crowd out he'll/it's/I've.
+        return SuggestionStrip.withGuaranteedVariant(base, accentVariants(prefix), SUGGESTIONS)
+    }
+
+    /**
+     * The accent/apostrophe variants of the typed [prefix] to guarantee in the
+     * strip: the shipped dictionaries' exact fold-group members (via
+     * [Vocabulary.accentVariantsOf]) plus any apostrophe/accent correction the
+     * device spell-checker returned for the same base letters. Both sources are
+     * derived — the fold index and the OS dictionary — never a hand-authored
+     * replacement table. Device results are skipped in a sensitive field, where
+     * the word is never sent to the spell checker (E-2/BR-26).
+     */
+    private fun accentVariants(prefix: String): List<String> {
+        val fromVocab = vocab.accentVariantsOf(prefix)
+        if (field.isSensitive()) return fromVocab
+        val f = Diacritics.fold(prefix)
+        val fromDevice = deviceDict.candidatesByLanguage().values.asSequence().flatten()
+            .filter { Diacritics.fold(it) == f && !it.equals(prefix, ignoreCase = true) }
+            .toList()
+        return (fromVocab + fromDevice).distinct()
     }
 
     /** Commit a tapped suggestion, replacing the pending word. */

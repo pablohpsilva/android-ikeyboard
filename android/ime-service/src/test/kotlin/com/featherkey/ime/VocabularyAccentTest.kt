@@ -48,6 +48,38 @@ class VocabularyAccentTest {
         assertTrue("expected I'm in $got", got.contains("I'm"))
     }
 
+    @Test fun accent_variants_surface_the_other_spellings_in_the_fold_group() {
+        // Typing the base letters "voce"/"tambem" must offer the accented word as
+        // a strip variant even though those exact letters aren't the dictionary form.
+        assertEquals(listOf("você"), vocab.accentVariantsOf("voce"))
+        assertEquals(listOf("também"), vocab.accentVariantsOf("tambem"))
+    }
+
+    @Test fun accent_variants_offer_contractions_even_when_a_plain_twin_outranks_them() {
+        // "hell" and "its" are commoner than "he'll"/"it's" and would fill every
+        // strip slot on frequency alone — the fold group still yields the variant.
+        val en = Vocabulary.forTest(
+            mapOf("en" to listOf("hello", "hell", "its", "he'll", "it's", "I've"))
+        )
+        assertEquals(listOf("he'll"), en.accentVariantsOf("hell")) // not "hell"/"hello"
+        assertEquals(listOf("it's"), en.accentVariantsOf("its"))
+        assertEquals(listOf("I've"), en.accentVariantsOf("ive"))
+    }
+
+    @Test fun accent_variants_are_empty_when_the_typed_word_is_the_only_spelling() {
+        assertTrue(vocab.accentVariantsOf("casa").isEmpty()) // no accented twin
+        assertTrue(vocab.accentVariantsOf("hello").isEmpty())
+        assertTrue(vocab.accentVariantsOf("").isEmpty())
+    }
+
+    @Test fun accent_variants_rank_the_most_frequent_variant_first() {
+        // Two words share a fold ("cafe"): the commoner one leads.
+        val fr = Vocabulary.forTest(mapOf("fr" to listOf("café", "cafés")))
+        // Typing "cafes" offers "cafés"; typing "cafe" offers "café".
+        assertEquals(listOf("café"), fr.accentVariantsOf("cafe"))
+        assertEquals(listOf("cafés"), fr.accentVariantsOf("cafes"))
+    }
+
     @Test fun has_word_prefix_probes_accent_insensitively_for_fat_finger_rescue() {
         assertTrue(vocab.hasWordPrefix("cas"))    // "casa" continues it
         assertTrue(vocab.hasWordPrefix("tamb"))   // "também" continues it (folded)

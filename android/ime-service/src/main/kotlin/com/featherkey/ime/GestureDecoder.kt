@@ -26,6 +26,28 @@ object GestureDecoder {
     private const val SAMPLES = 24
     private const val SHAPE_WEIGHT = 0.3f
 
+    /**
+     * The keys a swipe of [word] passes through: every character folded to its
+     * base key (é→e, ç→c, case dropped) and any character with no key on the
+     * layout — an apostrophe (I've, don't), a hyphen — simply skipped, because
+     * the finger never crosses a key that isn't there. [hasKey] answers whether
+     * a folded character is a real key.
+     *
+     * This is the whole reason apostrophe words are swipeable: the ideal path
+     * runs through the *typeable* letters only. The earlier decoder dropped any
+     * word the moment it hit a non-key character, so every "I've"/"don't"/"he'll"
+     * was unreachable by glide (it could only ever fall back to a plainer word).
+     * Pure and PointF-free, so it is directly unit-testable.
+     */
+    fun keyPath(word: String, hasKey: (Char) -> Boolean): List<Char> {
+        val out = ArrayList<Char>(word.length)
+        for (ch in word) {
+            val k = Diacritics.foldChar(ch)
+            if (hasKey(k)) out.add(k)
+        }
+        return out
+    }
+
     // Frequency/learning discounts applied to the shape score, so a common or
     // user-used word wins over an obscure one of a similar shape.
     private const val LEARNED_BOOST = 0.55f   // words the user has typed/swiped
@@ -51,17 +73,18 @@ object GestureDecoder {
 
         val scored = ArrayList<Pair<String, Float>>()
         val poly = ArrayList<PointF>()
-        words@ for (w in words) {
+        for (w in words) {
             if (w.length < 2) continue
-            // Fold accented letters to their base key: the keyboard has no 'é'/'ç'
-            // key, so an accented word's ideal path runs through its base letters
-            // ('e'/'c'). Without this, every accented word is skipped here and swipe
-            // can only ever produce the unaccented twin (bug: accents "all gone").
-            val firstC = centers[Diacritics.foldChar(w.first())] ?: continue
-            val lastC = centers[Diacritics.foldChar(w.last())] ?: continue
+            // The keys this word is glided through: accents folded to their base
+            // key ('é'→'e'), apostrophes/other non-key characters dropped. A word
+            // with fewer than two typeable letters can't be a gesture.
+            val keys = keyPath(w) { centers.containsKey(it) }
+            if (keys.size < 2) continue
+            val firstC = centers.getValue(keys.first())
+            val lastC = centers.getValue(keys.last())
             if (dist(start, firstC) > pruneR || dist(end, lastC) > pruneR) continue
             poly.clear()
-            for (ch in w) poly.add(centers[Diacritics.foldChar(ch)] ?: continue@words)
+            for (k in keys) poly.add(centers.getValue(k))
             val ideal = resample(poly, SAMPLES) ?: continue
             var loc = 0f
             var shape = 0f

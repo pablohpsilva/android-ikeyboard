@@ -50,6 +50,32 @@ class Vocabulary private constructor(private val langs: List<Lang>) {
         return if (best != word) best else null
     }
 
+    /**
+     * Real dictionary words in [prefix]'s *exact* accent-fold group whose
+     * spelling differs from what was typed — the accent/apostrophe/case-restored
+     * variants of the whole token (ive → I've, voce → você, hell → he'll, tambem
+     * → também). Best-ranked (most frequent) first.
+     *
+     * Derived purely from the shipped frequency lists via the fold index — never
+     * a hand-authored "typed → replacement" table. It exists so the suggestion
+     * strip can always *offer* the accented/contracted form even when a commoner
+     * plain twin (hell, its) outranks it and would otherwise fill every slot.
+     * O(log n + group size) per language.
+     */
+    fun accentVariantsOf(prefix: String): List<String> {
+        if (prefix.isEmpty()) return emptyList()
+        val f = Diacritics.fold(prefix)
+        val hits = ArrayList<String>()
+        for (l in langs) {
+            var i = lowerBound(l.folded, f)
+            while (i < l.folded.size && l.folded[i] == f) {
+                val w = l.sortedWords[i]; i++
+                if (!w.equals(prefix, ignoreCase = true)) hits.add(w)
+            }
+        }
+        return hits.distinct().sortedBy { rankOf(it) }
+    }
+
     /** Does any active language have a word that starts with [prefix] (accent-
      *  insensitive)? O(log n) per language — cheap enough for the tap path. Used
      *  to disambiguate a fat-finger tap toward the key that keeps a word alive. */

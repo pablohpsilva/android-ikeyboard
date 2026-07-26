@@ -110,4 +110,52 @@ class TypingRulesTest {
         assertEquals("Também", CaseMatch.matchLeading("Tambem", "também"))
         assertEquals("hello", CaseMatch.matchLeading("hel", "hello")) // lowercase stays
     }
+
+    // --- Bug: accented/contracted forms never show in the suggestion strip ----
+
+    @Test fun guaranteed_variant_is_inserted_after_the_top_prediction() {
+        // Typing "hell": the strip is full of commoner words; "he'll" must still
+        // be offered, right after the leading prediction, dropping the overflow.
+        val strip = SuggestionStrip.withGuaranteedVariant(
+            ranked = listOf("hello", "hell", "help"),
+            variants = listOf("he'll"),
+            cap = 3,
+        )
+        assertEquals(listOf("hello", "he'll", "hell"), strip)
+    }
+
+    @Test fun guaranteed_variant_is_a_noop_when_already_shown() {
+        val strip = SuggestionStrip.withGuaranteedVariant(
+            ranked = listOf("I've", "ivy", "ive"),
+            variants = listOf("I've"),
+            cap = 3,
+        )
+        assertEquals(listOf("I've", "ivy", "ive"), strip) // unchanged
+    }
+
+    @Test fun guaranteed_variant_matches_case_insensitively_before_inserting() {
+        // "It's" already present as "it's" — don't add a duplicate.
+        val strip = SuggestionStrip.withGuaranteedVariant(
+            ranked = listOf("its", "it's"),
+            variants = listOf("It's"),
+            cap = 3,
+        )
+        assertEquals(listOf("its", "it's"), strip)
+    }
+
+    @Test fun guaranteed_variant_handles_empty_and_short_strips() {
+        assertEquals(
+            listOf("você"),
+            SuggestionStrip.withGuaranteedVariant(emptyList(), listOf("você"), 3),
+        )
+        assertEquals(
+            listOf("voce", "você"),
+            SuggestionStrip.withGuaranteedVariant(listOf("voce"), listOf("você"), 3),
+        )
+        // No variant to add: just capped and de-duped.
+        assertEquals(
+            listOf("a", "b", "c"),
+            SuggestionStrip.withGuaranteedVariant(listOf("a", "b", "c", "d"), emptyList(), 3),
+        )
+    }
 }

@@ -104,6 +104,36 @@ object TapDisambiguator {
     }
 }
 
+/** Composing the suggestion strip so accented/contracted forms are never crowded out. */
+object SuggestionStrip {
+    /**
+     * The [ranked] strip (frequency/momentum order, capacity [cap]) with the
+     * best accent/apostrophe [variant] of the typed token guaranteed a slot.
+     *
+     * The problem this solves: an accented or contracted form (he'll, você, I've)
+     * shares its base letters with a commoner plain word (hell, voce-the-typo,
+     * "ive"), so on pure ranking the plain twin fills every slot and the variant
+     * never appears. Here the best not-already-shown [variant] is inserted just
+     * after the top prediction — so the most likely word still leads, but the
+     * accented/contracted alternative is always offered within the [cap] slots.
+     * Existing order is otherwise preserved and entries are de-duped
+     * case-insensitively. No-op when [variants] is empty or all already shown.
+     */
+    fun withGuaranteedVariant(ranked: List<String>, variants: List<String>, cap: Int): List<String> {
+        val shown = ranked.mapTo(HashSet()) { it.lowercase() }
+        val variant = variants.firstOrNull { it.lowercase() !in shown }
+            ?: return dedupCap(ranked, cap)
+        val out = ArrayList(ranked)
+        out.add(minOf(1, out.size), variant)
+        return dedupCap(out, cap)
+    }
+
+    private fun dedupCap(words: List<String>, cap: Int): List<String> {
+        val seen = HashSet<String>()
+        return words.filter { seen.add(it.lowercase()) }.take(cap)
+    }
+}
+
 /** Case-matching for auto-corrections/accent restorations. */
 object CaseMatch {
     /** [target] recased to match [source]'s leading case: if [source] starts with
