@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Reproducibly build the native FeatherKey core (libfeatherkey_core.so) for every
-# shipped Android ABI, straight from the audited Rust in ../../crates.
+# shipped Android ABI, straight from the audited Rust in ../../../core/crates.
 #
 # WHY THIS EXISTS: the .so files are BUILD ARTIFACTS, not source. They are
 # gitignored and must never be committed — a prebuilt binary in the tree cannot be
@@ -19,7 +19,7 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-core_dir="$here/../../crates/featherkey-core"
+core_dir="$here/../../../core/crates/featherkey-core"
 out_dir="$here/src/main/jniLibs"
 
 echo "Building libfeatherkey_core.so for arm64-v8a, armeabi-v7a, x86_64 -> $out_dir"

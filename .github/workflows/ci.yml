@@ -19,6 +19,10 @@ jobs:
   rust-core:
     name: Rust core — lint, test, coverage, fitness
     runs-on: ubuntu-latest
+    # The Rust workspace, fitness tools, and BDD features all live under core/.
+    defaults:
+      run:
+        working-directory: core
     steps:
       - uses: actions/checkout@v4
 
@@ -28,6 +32,8 @@ jobs:
           components: rustfmt, clippy, llvm-tools-preview
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
 
       - name: Format check
         run: cargo fmt --all -- --check
@@ -95,19 +101,22 @@ jobs:
         with:
           tool: cargo-deny,cargo-audit
       - name: cargo-deny (advisories, bans, licenses, sources)
-        # Config in deny.toml. Enforces permissive-only licenses, crates.io-only
+        # Config in core/deny.toml. Enforces permissive-only licenses, crates.io-only
         # sources, no yanked/advisory crates, no wildcard versions.
+        working-directory: core
         run: cargo deny check
       - name: cargo-audit (RustSec advisory DB)
         # Audits the committed Cargo.lock directly. --locked asserts the lock is
         # in sync with the manifests, so the advisory scan reflects exactly what
         # ships — no on-the-fly resolution that could differ from the pinned graph.
+        working-directory: core
         run: cargo audit --locked
 
       - name: No committed native binaries
         # The native core (libfeatherkey_core.so) is a build artifact reproduced
-        # from source (android/ffi-bridge/build-jni.sh); a prebuilt .so in the tree
-        # is unverifiable against its source and is barred (F-Droid posture, BR-65).
+        # from source (apps/android/ffi-bridge/build-jni.sh); a prebuilt .so in the
+        # tree is unverifiable against its source and is barred (F-Droid posture, BR-65).
+        # Runs at the repo root so it scans the whole tree.
         run: |
           if git ls-files '*.so' '*.dylib' '*.dll' | grep .; then
             echo "::error::Native binaries are committed above. They must be built from source, not checked in."
@@ -118,10 +127,10 @@ jobs:
   android-shell:
     name: Android shell — assemble & unit test
     runs-on: ubuntu-latest
-    # The Kotlin/Android modules under android/ are scaffolded but not yet
-    # wired to a Gradle build in this repo. This job is defined so the pipeline
-    # is complete; enable it once android/settings.gradle.kts resolves.
-    if: ${{ hashFiles('android/gradlew') != '' }}
+    # The Kotlin/Android app lives under apps/android/. This job runs its unit
+    # tests + lint. (It does not build the native .so; that is a separate step
+    # requiring the NDK — see apps/android/ffi-bridge/build-jni.sh.)
+    if: ${{ hashFiles('apps/android/gradlew') != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -129,5 +138,5 @@ jobs:
           distribution: temurin
           java-version: "17"
       - name: Assemble & test
-        working-directory: android
+        working-directory: apps/android
         run: ./gradlew testDebugUnitTest lint

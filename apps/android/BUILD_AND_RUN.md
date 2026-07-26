@@ -2,7 +2,7 @@
 
 > **Read this first — honesty banner.** Everything under `android/` was **authored
 > without an Android toolchain and has NOT been compiled, linted, or run.** Waves
-> 0–4 (the Rust core under `crates/`) are verified and green; this shell is a
+> 0–4 (the Rust core under `core/crates/`) are verified and green; this shell is a
 > careful, coherent scaffold you now build, fix, and verify on a real machine.
 > Expect to iterate with the compiler — especially on the UniFFI-generated
 > binding names and the touch-coordinate mapping. Where I was unsure I left a
@@ -23,7 +23,7 @@ app ─┬─ ime-service ─┬─ ffi-bridge ── (UniFFI bindings → feath
 
 The Rust→Kotlin surface is exported with **proc-macro UniFFI** on `featherkey-core`
 (ADR-18). Its code lives in `ffi-bridge/rust-overlay/` and is applied into
-`crates/featherkey-core/` on your machine (§3) — it is kept out of the verified
+`core/crates/featherkey-core/` on your machine (§3) — it is kept out of the verified
 workspace so the sandbox build stays green and offline.
 
 ## 1. Prerequisites
@@ -38,13 +38,13 @@ There is intentionally no committed `gradlew` binary. From `android/`:
 ```
 gradle wrapper --gradle-version 8.11
 ```
-(The `android-shell` CI job is gated on `android/gradlew` existing, so it stays
+(The `android-shell` CI job is gated on `apps/android/gradlew` existing, so it stays
 dormant until this is done and pushed.)
 
 ## 3. Apply the Rust UniFFI overlay
 
 Follow `ffi-bridge/rust-overlay/APPLY.md` exactly. In short:
-1. Copy `ffi.rs`, `build.rs`, `uniffi.toml` into `crates/featherkey-core/`.
+1. Copy `ffi.rs`, `build.rs`, `uniffi.toml` into `core/crates/featherkey-core/`.
 2. Add `#[cfg(feature = "uniffi")] mod ffi;` to `lib.rs`.
 3. Add the `uniffi`/`thiserror` optional deps, the `uniffi` feature, `crate-type
    = ["lib","cdylib"]`, and the `uniffi-bindgen` bin to `Cargo.toml`.
@@ -56,18 +56,18 @@ Follow `ffi-bridge/rust-overlay/APPLY.md` exactly. In short:
 
 ## 4. Build the native library + bindings
 
-From `crates/featherkey-core/` (with the overlay applied):
+From `core/crates/featherkey-core/` (with the overlay applied):
 ```
-# Build the .so for each ABI into android/ffi-bridge/src/main/jniLibs/<abi>/
+# Build the .so for each ABI into apps/android/ffi-bridge/src/main/jniLibs/<abi>/
 cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 \
-  -o ../../android/ffi-bridge/src/main/jniLibs \
+  -o ../../../apps/android/ffi-bridge/src/main/jniLibs \
   build --release --features uniffi
 
 # Generate the Kotlin bindings from the built library
 cargo run --features uniffi --bin uniffi-bindgen -- generate \
   --library target/aarch64-linux-android/release/libfeatherkey_core.so \
   --language kotlin \
-  --out-dir ../../android/ffi-bridge/src/main/kotlin
+  --out-dir ../../../apps/android/ffi-bridge/src/main/kotlin
 ```
 Then **reconcile** `ffi-bridge/.../FeatherKeyBridge.kt` against the actual
 generated symbol names (constructor, error type, foreign-trait method casing).
@@ -75,7 +75,7 @@ generated symbol names (constructor, error type, foreign-trait method casing).
 ## 5. Build, install, enable, verify
 
 ```
-cd android && ./gradlew :app:installDebug
+cd apps/android && ./gradlew :app:installDebug
 ```
 On the device/emulator: Settings → System → Languages & input → On-screen
 keyboard → enable **FeatherKey** → switch to it in any text field.

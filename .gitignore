@@ -1,22 +1,22 @@
 # Rust
-/target
+/core/target
 **/*.rs.bk
 # Cargo.lock IS committed: this workspace produces a shipped artifact (the native
 # libfeatherkey_core.so), so the exact transitive dependency graph must be pinned
 # and reproducible for the supply-chain gate (deny.toml / BR-65) to mean anything.
 
 # Android / Gradle
-android/.gradle/
-android/build/
-android/**/build/
-android/local.properties
+apps/android/.gradle/
+apps/android/build/
+apps/android/**/build/
+apps/android/local.properties
 *.iml
 .idea/
 # Native libraries are BUILD ARTIFACTS, not source: they are reproduced from the
-# Rust core by `android/ffi-bridge/build-jni.sh` (see BUILD_AND_RUN.md §4). An
+# Rust core by `apps/android/ffi-bridge/build-jni.sh` (see BUILD_AND_RUN.md §4). An
 # opaque prebuilt .so committed to the tree cannot be verified against the audited
 # source, so it must never be checked in (F-Droid reproducible-build posture).
-android/ffi-bridge/src/main/jniLibs/**/*.so
+apps/android/ffi-bridge/src/main/jniLibs/**/*.so
 
 # Python fitness tooling
 __pycache__/
@@ -26,5 +26,5 @@ __pycache__/
 .DS_Store
 
 # Kotlin compiler daemon cache
-android/.kotlin/
+apps/android/.kotlin/
 .claude/

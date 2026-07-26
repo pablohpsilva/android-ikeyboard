@@ -2,7 +2,7 @@
 
 The `libfeatherkey_core.so` files that belong in `arm64-v8a/`, `armeabi-v7a/`, and
 `x86_64/` under this directory are **build artifacts compiled from the Rust core**
-in `../../../../crates`. They are intentionally **gitignored and never committed**:
+in `../../../../../../core/crates`. They are intentionally **gitignored and never committed**:
 a prebuilt binary checked into source control cannot be verified against the source
 it claims to come from, which is the exact supply-chain risk FeatherKey's privacy /
 reproducible-build posture (F-Droid, BR-65) exists to avoid.

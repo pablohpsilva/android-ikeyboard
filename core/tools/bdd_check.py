@@ -20,7 +20,20 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 FEATURES = REPO / "features"
-BRD = REPO / "BUSINESS_REQUIREMENTS.md"
+
+
+def _find_brd() -> Path:
+    # The BRD is the product source of truth; in the monorepo it lives at the repo
+    # root (one level above core/). Accept either location so the gate is robust to
+    # where the doc sits.
+    for base in (REPO, REPO.parent):
+        candidate = base / "BUSINESS_REQUIREMENTS.md"
+        if candidate.exists():
+            return candidate
+    return REPO / "BUSINESS_REQUIREMENTS.md"
+
+
+BRD = _find_brd()
 
 BR_TAG = re.compile(r"@(BR-\d+[ab]?)")
 BR_DEF = re.compile(r"\bBR-\d+[ab]?\b")
