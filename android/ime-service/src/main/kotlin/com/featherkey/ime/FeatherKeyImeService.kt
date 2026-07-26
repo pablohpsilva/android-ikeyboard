@@ -575,8 +575,11 @@ class FeatherKeyImeService : InputMethodService() {
             if (maybeDoubleSpacePeriod(ic)) return
         }
         if (word.isNotEmpty()) {
-            val fixed = correctedWord(word) ?: word     // core edit-distance typo fix (no-clobber)
-            val out = accentUpgrade(fixed) ?: fixed      // then restore accents (tambem → também)
+            // Restore accents/apostrophes on what was typed first (tambem → também,
+            // im → I'm); only if that finds nothing do we fall back to the core's
+            // edit-distance typo fix — otherwise a contraction like "ive" would be
+            // "corrected" to a near lexicon word ("ice") before it could become "I've".
+            val out = accentUpgrade(word) ?: correctedWord(word) ?: word
             if (out != word) {
                 ic.deleteSurroundingText(word.length, 0)
                 ic.commitText(out, 1)
@@ -619,7 +622,6 @@ class FeatherKeyImeService : InputMethodService() {
      * meaning-ambiguous tokens (e/é, a/à, da/dá) exactly as the user typed them.
      */
     private fun accentUpgrade(word: String): String? {
-        if (word.length < 3) return null
         val lower = word.lowercase()
         val allLower = word == lower
         // Title-case (only the first letter upper) is what auto-caps produces at a
@@ -628,6 +630,10 @@ class FeatherKeyImeService : InputMethodService() {
         val titleCase = !allLower && word[0].isUpperCase() && word.substring(1) == word.substring(1).lowercase()
         if (!allLower && !titleCase) return null
         val canon = vocab.accentedCanonical(lower) ?: return null
+        // Skip very short words (e→é, a→à traps) — UNLESS the canonical is a
+        // contraction (im→I'm, ive→I've), which is unambiguous even at length 2.
+        val isContraction = canon.any { it == '\'' || it == '’' }
+        if (word.length < 3 && !isContraction) return null
         return CaseMatch.matchLeading(word, canon)
     }
 

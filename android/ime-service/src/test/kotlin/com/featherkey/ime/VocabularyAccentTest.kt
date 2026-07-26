@@ -34,6 +34,20 @@ class VocabularyAccentTest {
         assertTrue(got.contains("também"))
     }
 
+    @Test fun contractions_are_restored_from_base_typing_but_never_clobber_a_real_word() {
+        // "I'm"/"don't" outrank their apostrophe-less spellings; "its" (the word)
+        // outranks "it's", so a real word is never rewritten.
+        val en = Vocabulary.forTest(
+            mapOf("en" to listOf("I'm", "don't", "its", "im", "dont", "it's"))
+        )
+        assertEquals("I'm", en.accentedCanonical("im"))   // im -> I'm
+        assertEquals("don't", en.accentedCanonical("dont")) // dont -> don't
+        assertNull(en.accentedCanonical("its"))            // its stays its (no clobber)
+        // Typing "im" surfaces the apostrophe form as a completion.
+        val got = en.candidatesByLanguage("im", emptyMap(), emptyMap(), 3).map { it.word }
+        assertTrue("expected I'm in $got", got.contains("I'm"))
+    }
+
     @Test fun has_word_prefix_probes_accent_insensitively_for_fat_finger_rescue() {
         assertTrue(vocab.hasWordPrefix("cas"))    // "casa" continues it
         assertTrue(vocab.hasWordPrefix("tamb"))   // "também" continues it (folded)
