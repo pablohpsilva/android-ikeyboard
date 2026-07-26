@@ -142,3 +142,43 @@ fn gate_is_consulted_per_call() {
     assert!(!fk.knows_word("secretword"));
     assert!(fk.knows_word("publicword"));
 }
+
+/// End-to-end gating for the W6b correction-ranking wiring: a strip pick made in
+/// a sensitive field must not promote anything, because the pick was never
+/// recorded. Contrast an ordinary field, where the same picks DO promote — so the
+/// test proves it is the gate, not an inert bonus, that suppresses the change.
+#[test]
+fn sensitive_strip_pick_does_not_change_ranking() {
+    // A lexicon whose "te…" completions are tea < team by bundled rank.
+    let lex = || {
+        FeatherKeyCore::new(vec![(
+            "en".to_owned(),
+            vec!["tea".to_owned(), "team".to_owned()],
+        )])
+        .expect("valid core")
+    };
+    let top = |fk: &FeatherKeyCore| fk.rank_suggestions("", "te", Vec::new())[0].word.clone();
+
+    // Sensitive: repeated picks are dropped, so "tea" (bundled-first) still leads.
+    let mut sensitive = lex();
+    assert_eq!(top(&sensitive), "tea");
+    for _ in 0..5 {
+        sensitive.observe_strip_pick("te", "team", &Sensitive);
+    }
+    assert_eq!(
+        top(&sensitive),
+        "tea",
+        "a sensitive-field strip pick must not promote 'team'"
+    );
+
+    // Ordinary control: the identical picks DO promote "team".
+    let mut ordinary = lex();
+    for _ in 0..5 {
+        ordinary.observe_strip_pick("te", "team", &Ordinary);
+    }
+    assert_eq!(
+        top(&ordinary),
+        "team",
+        "an ordinary-field strip pick should promote 'team' (proves the gate suppresses, not a no-op)"
+    );
+}

@@ -62,6 +62,17 @@ use featherkey_prediction::{StatisticalPredictor, MAX_SUGGESTIONS};
 use featherkey_sensitive_context::SensitivityPolicy;
 use featherkey_touch_model::TouchModel;
 
+/// Weight of the correction "sticky-fix" bonus in the strip ranking. A candidate
+/// the user has repeatedly picked for the current prefix gets
+/// `CORRECTION_STICKY_WEIGHT * ln(1 + picks)` added to its rank score. At weight
+/// `1.0` the crossover is intuitive against the ranker's positional step
+/// (`positional_score(rank) = -ln(1 + rank)`): the widest adjacent gap is
+/// rank0→rank1 (`ln 2 ≈ 0.69`), which `ln(1 + picks)` ties at the 1st pick and
+/// clears by the 2nd (`ln 3 ≈ 1.10`) — so a *repeatedly* chosen lower suggestion
+/// overtakes a higher default in about two picks, while a single stray pick never
+/// dominates. The bonus grows sub-linearly, so it saturates rather than runs away.
+const CORRECTION_STICKY_WEIGHT: f64 = 1.0;
+
 /// One ranked key candidate for a touch: the committed character and the
 /// decoder's confidence in it (`0.0..=1.0`).
 #[derive(Debug, Clone, PartialEq)]
@@ -344,8 +355,30 @@ impl FeatherKeyCore {
             prefix: prefix.to_owned(),
         });
         cands.extend(device);
-        let ranked = featherkey_candidate_ranker::rank(&cands, &self.momentum, MAX_SUGGESTIONS);
+        // Correction "sticky-fix" bonus: a completion the user has repeatedly
+        // picked for this exact prefix (observe_strip_pick) is promoted, so a
+        // lower-ranked-but-preferred word overtakes the default. The bonus is
+        // added before the top-k cut, so a promoted word is never dropped first.
+        let ranked = featherkey_candidate_ranker::rank_with_bias(
+            &cands,
+            &self.momentum,
+            MAX_SUGGESTIONS,
+            |word| self.correction_bonus(prefix, word),
+        );
         self.guarantee_fold_variant(prefix, ranked)
+    }
+
+    /// The correction "sticky-fix" score bonus for `word` completing `prefix`:
+    /// `CORRECTION_STICKY_WEIGHT * ln(1 + picks)`, where `picks` is how often the
+    /// user has chosen this completion for this prefix. `0.0` when never picked,
+    /// so ranking is unchanged for words with no correction history.
+    fn correction_bonus(&self, prefix: &str, word: &str) -> f64 {
+        let picks = self.corrections.pref_count(prefix, word);
+        if picks == 0 {
+            0.0
+        } else {
+            CORRECTION_STICKY_WEIGHT * f64::from(1 + picks).ln()
+        }
     }
 
     /// The learned `freq` and bundled `dict_rank` snapshots the ranked predictor

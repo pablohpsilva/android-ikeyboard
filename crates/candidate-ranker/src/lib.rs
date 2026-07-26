@@ -36,9 +36,27 @@ pub fn score(cand: &Candidate, momentum: &Momentum) -> f64 {
 /// Rank `cands` using `momentum`, deduping by word (best score wins), top `k`.
 #[must_use]
 pub fn rank(cands: &[Candidate], momentum: &Momentum, k: usize) -> Vec<RankedCandidate> {
+    rank_with_bias(cands, momentum, k, |_| 0.0)
+}
+
+/// Rank like [`rank`], but add a caller-supplied per-word `bias` to each
+/// candidate's [`score`] before deduping, ordering, and truncation. The core
+/// uses this to apply the correction "sticky-fix" bonus: a completion the user
+/// has repeatedly picked for the current prefix is promoted (see
+/// `observe_strip_pick`). Because the bias is added before the top-`k` cut, a
+/// promoted candidate that would otherwise be dropped survives. `bias` returns
+/// `0.0` for a word with no correction history, so [`rank`] is exactly
+/// `rank_with_bias(cands, momentum, k, |_| 0.0)`.
+#[must_use]
+pub fn rank_with_bias(
+    cands: &[Candidate],
+    momentum: &Momentum,
+    k: usize,
+    bias: impl Fn(&str) -> f64,
+) -> Vec<RankedCandidate> {
     let mut best: Vec<RankedCandidate> = Vec::new();
     for cand in cands {
-        let score = score(cand, momentum);
+        let score = score(cand, momentum) + bias(&cand.word);
         match best.iter_mut().find(|r| r.word == cand.word) {
             Some(existing) if existing.score >= score => {}
             Some(existing) => {
@@ -142,6 +160,34 @@ mod tests {
         }];
         let out = rank(&cands, &mom, 1);
         assert_eq!(out[0].word, "hello");
+    }
+
+    #[test]
+    fn a_bias_promotes_a_lower_ranked_word() {
+        use super::rank_with_bias;
+        let mom = Momentum::new("en", &["en".into()]);
+        let cands = vec![c("tea", "en", 0), c("team", "en", 1)];
+        // No bias: the better source_rank ("tea") leads.
+        assert_eq!(rank(&cands, &mom, 2)[0].word, "tea");
+        // A sticky-fix bonus on "team" big enough to clear the rank0→rank1 gap
+        // (ln 2 ≈ 0.69) promotes it to the front.
+        let biased = rank_with_bias(&cands, &mom, 2, |w| if w == "team" { 1.0 } else { 0.0 });
+        assert_eq!(biased[0].word, "team");
+        assert_eq!(biased.len(), 2, "the demoted word is still present");
+    }
+
+    #[test]
+    fn a_zero_bias_is_identical_to_rank() {
+        use super::rank_with_bias;
+        let mut mom = Momentum::new("en", &["en".into(), "es".into()]);
+        for _ in 0..3 {
+            mom.observe(&["es".into()]);
+        }
+        let cands = vec![c("hello", "en", 0), c("hola", "es", 1), c("hi", "en", 2)];
+        assert_eq!(
+            rank(&cands, &mom, 3),
+            rank_with_bias(&cands, &mom, 3, |_| 0.0)
+        );
     }
 
     use proptest::prelude::*;
