@@ -7,94 +7,13 @@
 <meta name="description" content="FeatherKey is a private Android keyboard that learns how you write — entirely on your phone, in encrypted storage, with nothing uploaded. Ever.">
 <meta name="theme-color" content="#17131C">
 <link rel="icon" href="assets/featherkey-icon.png">
-
-<!-- Open Graph / social -->
 <meta property="og:type" content="website">
 <meta property="og:title" content="FeatherKey — Type freely. Your words stay yours.">
 <meta property="og:description" content="A private Android keyboard. On-device learning, encrypted storage, no network permission.">
 <meta property="og:image" content="assets/featherkey-icon.png">
-
-<!--
-  Fonts are loaded from the Google Fonts CDN to match the source design.
-  FeatherKey is a privacy product with no network calls in the app itself — for
-  the marketing site, prefer self-hosting these OFL fonts (Cormorant Garamond,
-  Schibsted Grotesk, IBM Plex Mono) as local .woff2 with @font-face so the page
-  makes no third-party requests either. See apps/web/README.md.
--->
+<link rel="stylesheet" href="styles.css">
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Schibsted+Grotesk:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
-
-:root{
-  /* FeatherKey palette — obsidian + deep claret + antique gold
-     (matches the landing design's own tokens and the design-system readme prose;
-     intentionally NOT the EuroFi gold-brand override in the shared colors.css). */
-  --ink-950:#17131C;
-  --brand:#7A1F3D;
-  --brand-hover:#8E2749;
-  --gold-500:#B8893B;
-  --gold-400:#C9A45E;
-  --gold-300:#DDBE85;
-  --text-on-dark:#F4EFE6;
-  --on-brand:#FFFDF8;
-
-  --card-bg:rgba(255,253,248,.045);
-  --card-border:rgba(184,137,59,.26);
-
-  --font-display:'Cormorant Garamond',Georgia,'Times New Roman',serif;
-  --font-sans:'Schibsted Grotesk',system-ui,-apple-system,'Segoe UI',sans-serif;
-  --font-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',Menlo,monospace;
-
-  --max:1100px;
-  --gutter:32px;
-}
-
-*{box-sizing:border-box;}
-html,body{margin:0;padding:0;background:var(--ink-950);}
-body{
-  color:var(--text-on-dark);
-  font-family:var(--font-sans);
-  font-size:17px;
-  line-height:1.6;
-  -webkit-font-smoothing:antialiased;
-  text-rendering:optimizeLegibility;
-}
-a{color:var(--gold-500);text-decoration:none;}
-a:hover{color:var(--text-on-dark);}
-img{max-width:100%;}
-em{font-style:italic;color:var(--gold-500);}
-
-.wrap{max-width:var(--max);margin:0 auto;padding-left:var(--gutter);padding-right:var(--gutter);}
-
-/* overline label */
-.overline{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--gold-500);}
-
-/* serif headings */
-.serif{font-family:var(--font-display);font-weight:600;letter-spacing:-.01em;}
-h1,h2{margin:0;}
-
-/* gold hairline divider */
-.hairline{height:1px;background:linear-gradient(to right,transparent,var(--gold-300),transparent);}
-
-/* buttons */
-.btn{
-  display:inline-flex;align-items:center;justify-content:center;
-  height:52px;padding:0 30px;border-radius:999px;font-weight:600;font-size:16px;
-  transition:transform .14s cubic-bezier(.25,1,.4,1),background .24s,border-color .24s,color .24s;
-}
-.btn-primary{background:var(--brand);color:var(--on-brand);}
-.btn-primary:hover{background:var(--brand-hover);color:var(--on-brand);transform:translateY(-1px);}
-.btn-ghost{border:1px solid rgba(184,137,59,.5);color:var(--text-on-dark);}
-.btn-ghost:hover{border-color:var(--gold-400);color:var(--text-on-dark);background:rgba(184,137,59,.08);}
-.btn-sm{height:40px;padding:0 20px;font-size:15px;}
-
-/* nav */
-.nav{display:flex;align-items:center;justify-content:space-between;gap:24px;max-width:var(--max);margin:0 auto;padding:24px var(--gutter);}
-.brand{display:flex;align-items:center;gap:12px;}
-.brand img{width:38px;height:38px;border-radius:10px;display:block;}
-.brand .name{font-family:var(--font-display);font-size:24px;font-weight:600;letter-spacing:.01em;color:var(--text-on-dark);}
-.nav-links{display:flex;align-items:center;gap:28px;font-size:15px;}
-
-/* hero */
+/* landing-page-specific layout */
 .hero{position:relative;overflow:hidden;}
 .hero .glow{position:absolute;inset:0;background:radial-gradient(60% 70% at 50% 42%,rgba(184,137,59,.22),transparent 70%);}
 .hero .inner{position:relative;max-width:var(--max);margin:0 auto;padding:96px var(--gutter) 104px;text-align:center;}
@@ -104,20 +23,17 @@ h1,h2{margin:0;}
 .cta-row{display:flex;gap:14px;justify-content:center;margin-top:40px;flex-wrap:wrap;}
 .fineprint{margin-top:28px;font-size:14px;color:rgba(244,239,230,.55);}
 
-/* generic section */
 .section{max-width:var(--max);margin:0 auto;padding:88px var(--gutter);}
 .section h2{font-family:var(--font-display);font-size:clamp(32px,5vw,42px);font-weight:600;margin:14px 0 0;line-height:1.14;}
 .section .kicker{margin:16px 0 0;color:rgba(244,239,230,.68);}
 .section .kicker.narrow{max-width:560px;}
 
-/* feature grid */
 .features{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:44px;}
 .feature{background:var(--card-bg);border:1px solid var(--card-border);border-radius:18px;padding:26px 24px 28px;transition:border-color .24s,transform .24s,box-shadow .24s;}
 .feature:hover{border-color:rgba(184,137,59,.5);transform:translateY(-2px);box-shadow:0 22px 48px -28px rgba(0,0,0,.7);}
 .feature .t{font-family:var(--font-display);font-size:19px;font-weight:700;margin-bottom:8px;}
 .feature .d{font-size:15px;color:rgba(244,239,230,.68);}
 
-/* privacy panel */
 .privacy{max-width:var(--max);margin:0 auto;padding:72px var(--gutter) 88px;}
 .privacy .panel{background:rgba(255,253,248,.04);border:1px solid var(--card-border);border-radius:24px;padding:56px;display:grid;grid-template-columns:1fr 1fr;gap:48px;align-items:center;}
 .privacy h2{font-family:var(--font-display);font-size:clamp(30px,4.4vw,40px);font-weight:600;margin:14px 0 0;line-height:1.14;}
@@ -128,30 +44,16 @@ h1,h2{margin:0;}
 .pledge .h{font-weight:600;font-size:16px;}
 .pledge .s{font-size:15px;color:rgba(244,239,230,.66);}
 
-/* language chips */
 .chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:32px;}
 .chip{padding:10px 20px;border-radius:999px;background:var(--card-bg);border:1px solid var(--card-border);font-size:15px;}
 .chip.soon{background:transparent;border:1px dashed var(--gold-400);color:rgba(244,239,230,.68);}
 
-/* get section */
 .get{max-width:var(--max);margin:0 auto;padding:16px var(--gutter) 96px;}
 .get .panel{background:var(--card-bg);border:1px solid var(--card-border);border-radius:24px;padding:64px 56px;text-align:center;}
 .get h2{font-family:var(--font-display);font-size:clamp(32px,5vw,44px);font-weight:600;margin:0;line-height:1.1;}
 .get p{margin:18px auto 0;max-width:460px;color:rgba(244,239,230,.68);}
 
-/* footer */
-footer{border-top:1px solid rgba(184,137,59,.22);color:rgba(244,239,230,.55);}
-.foot{max-width:var(--max);margin:0 auto;padding:44px var(--gutter);display:flex;justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap;font-size:15px;}
-.foot .brand img{width:30px;height:30px;border-radius:8px;}
-.foot .brand .name{font-size:20px;}
-.foot .links{display:flex;gap:26px;}
-.foot .links a{color:rgba(244,239,230,.7);}
-.foot .links a:hover{color:var(--text-on-dark);}
-
-/* ---- responsive ---- */
-@media (max-width:920px){
-  .features{grid-template-columns:repeat(2,1fr);}
-}
+@media (max-width:920px){ .features{grid-template-columns:repeat(2,1fr);} }
 @media (max-width:760px){
   .privacy .panel{grid-template-columns:1fr;gap:32px;padding:36px;}
   .get .panel{padding:44px 28px;}
@@ -159,24 +61,13 @@ footer{border-top:1px solid rgba(184,137,59,.22);color:rgba(244,239,230,.55);}
   .hero .inner{padding:72px var(--gutter) 80px;}
 }
 @media (max-width:560px){
-  :root{--gutter:20px;}
   .features{grid-template-columns:1fr;}
-  .nav-links{gap:16px;font-size:14px;}
-  /* Secondary links live in the footer too; drop them from the cramped nav and
-     keep the logo + primary CTA. */
-  .nav-links a:not(.btn){display:none;}
   .hero .lede{font-size:17px;}
-  .foot{justify-content:flex-start;}
-}
-
-@media (prefers-reduced-motion:reduce){
-  *{transition:none !important;}
 }
 </style>
 </head>
 <body>
 
-<!-- NAV -->
 <nav class="nav">
   <a class="brand" href="index.html" aria-label="FeatherKey home">
     <img src="assets/featherkey-icon.png" alt="FeatherKey">
@@ -190,7 +81,6 @@ footer{border-top:1px solid rgba(184,137,59,.22);color:rgba(244,239,230,.55);}
   </div>
 </nav>
 
-<!-- HERO -->
 <header class="hero">
   <div class="glow" aria-hidden="true"></div>
   <div class="inner">
@@ -208,7 +98,6 @@ footer{border-top:1px solid rgba(184,137,59,.22);color:rgba(244,239,230,.55);}
 
 <div class="hairline"></div>
 
-<!-- WHAT IT DOES -->
 <section class="section">
   <div class="overline">What it does</div>
   <h2 style="max-width:640px">Everything a modern keyboard should do. Nothing it shouldn't.</h2>
@@ -232,7 +121,6 @@ footer{border-top:1px solid rgba(184,137,59,.22);color:rgba(244,239,230,.55);}
   </div>
 </section>
 
-<!-- PRIVACY -->
 <div class="privacy">
   <div class="panel">
     <div>
@@ -251,7 +139,6 @@ footer{border-top:1px solid rgba(184,137,59,.22);color:rgba(244,239,230,.55);}
 
 <div class="hairline"></div>
 
-<!-- LANGUAGES -->
 <section class="section">
   <div class="overline">Languages</div>
   <h2>Eight languages today.</h2>
@@ -268,7 +155,6 @@ footer{border-top:1px solid rgba(184,137,59,.22);color:rgba(244,239,230,.55);}
   </div>
 </section>
 
-<!-- GET -->
 <section class="get" id="get">
   <div class="panel">
     <h2>Your keyboard <em>awaits</em>.</h2>
@@ -280,13 +166,12 @@ footer{border-top:1px solid rgba(184,137,59,.22);color:rgba(244,239,230,.55);}
   </div>
 </section>
 
-<!-- FOOTER -->
 <footer>
   <div class="foot">
-    <div class="brand">
+    <a class="brand" href="index.html">
       <img src="assets/featherkey-icon.png" alt="">
-      <span class="name serif">FeatherKey</span>
-    </div>
+      <span class="name">FeatherKey</span>
+    </a>
     <div class="links">
       <a href="faq.html">FAQ</a>
       <a href="privacy.html">Privacy policy</a>

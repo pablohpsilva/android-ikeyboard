@@ -1,16 +1,22 @@
 # FeatherKey — Web
 
 The FeatherKey marketing site. A static, self-contained set of pages — no build
-step, no framework, no runtime dependencies.
+step, no framework, no runtime dependencies. Shared look lives in `styles.css`
+(tokens, nav, footer, buttons, document/legal layout); each page adds only its own
+layout.
 
 ## Pages
 
 | File | Status |
 |---|---|
-| `index.html` | **Landing page — built.** |
-| `faq.html` | linked, not yet built |
-| `privacy.html` | linked, not yet built (also the Play Store "privacy policy URL" — see `../../PLAY_STORE_PUBLISHING.md`) |
-| `terms.html` | linked, not yet built |
+| `index.html` | **Landing — built.** |
+| `faq.html` | **Built** (from the Claude Design "FeatherKey FAQ" page). |
+| `privacy.html` | **Built — DRAFT.** Doubles as the Play Store "privacy policy URL" (`../../PLAY_STORE_PUBLISHING.md`). Content is accurate to the app; **fill the `[contact email]` / `[governing region]` placeholders and review before publishing.** |
+| `terms.html` | **Built — DRAFT.** Fill `[repository URL]` / `[licence]` / `[governing region]` / `[contact email]` and review. |
+
+> **Before publishing privacy/terms:** search the folder for `[` to find every
+> bracketed placeholder, and have the legal text reviewed. FAQ, privacy, and terms
+> were authored/ported here — privacy & terms have **no** design-tool source.
 
 ## Preview
 

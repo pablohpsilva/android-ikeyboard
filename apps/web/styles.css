@@ -1,0 +1,119 @@
+/* FeatherKey site — shared styles (tokens, nav, footer, buttons, document layout).
+   Palette: obsidian canvas + deep-claret CTAs + antique-gold accents.
+   Fonts from Google Fonts CDN for now — self-host as local .woff2 for production
+   (a privacy product shouldn't hit a third-party CDN). See README.md. */
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Schibsted+Grotesk:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+:root{
+  --ink-950:#17131C;
+  --brand:#7A1F3D;
+  --brand-hover:#8E2749;
+  --gold-500:#B8893B;
+  --gold-400:#C9A45E;
+  --gold-300:#DDBE85;
+  --text-on-dark:#F4EFE6;
+  --on-brand:#FFFDF8;
+
+  --card-bg:rgba(255,253,248,.045);
+  --card-border:rgba(184,137,59,.26);
+
+  --font-display:'Cormorant Garamond',Georgia,'Times New Roman',serif;
+  --font-sans:'Schibsted Grotesk',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --font-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',Menlo,monospace;
+
+  --max:1100px;
+  --gutter:32px;
+}
+
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;background:var(--ink-950);}
+body{
+  color:var(--text-on-dark);
+  font-family:var(--font-sans);
+  font-size:17px;
+  line-height:1.6;
+  min-height:100vh;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+}
+a{color:var(--gold-500);text-decoration:none;}
+a:hover{color:var(--text-on-dark);}
+img{max-width:100%;}
+em{font-style:italic;color:var(--gold-500);}
+
+.wrap{max-width:var(--max);margin:0 auto;padding-left:var(--gutter);padding-right:var(--gutter);}
+.overline{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--gold-500);}
+.serif{font-family:var(--font-display);font-weight:600;letter-spacing:-.01em;}
+h1,h2{margin:0;}
+.hairline{height:1px;background:linear-gradient(to right,transparent,var(--gold-300),transparent);}
+
+/* buttons */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;
+  height:52px;padding:0 30px;border-radius:999px;font-weight:600;font-size:16px;
+  transition:transform .14s cubic-bezier(.25,1,.4,1),background .24s,border-color .24s,color .24s;
+}
+.btn-primary{background:var(--brand);color:var(--on-brand);}
+.btn-primary:hover{background:var(--brand-hover);color:var(--on-brand);transform:translateY(-1px);}
+.btn-ghost{border:1px solid rgba(184,137,59,.5);color:var(--text-on-dark);}
+.btn-ghost:hover{border-color:var(--gold-400);color:var(--text-on-dark);background:rgba(184,137,59,.08);}
+.btn-sm{height:40px;padding:0 20px;font-size:15px;}
+
+/* nav */
+.nav{display:flex;align-items:center;justify-content:space-between;gap:24px;max-width:var(--max);margin:0 auto;padding:24px var(--gutter);}
+.brand{display:flex;align-items:center;gap:12px;color:var(--text-on-dark);}
+.brand:hover{color:var(--text-on-dark);}
+.brand img{width:38px;height:38px;border-radius:10px;display:block;}
+.brand .name{font-family:var(--font-display);font-size:24px;font-weight:600;letter-spacing:.01em;color:var(--text-on-dark);}
+.nav-links{display:flex;align-items:center;gap:28px;font-size:15px;}
+
+/* footer */
+footer{border-top:1px solid rgba(184,137,59,.22);color:rgba(244,239,230,.55);}
+.foot{max-width:var(--max);margin:0 auto;padding:44px var(--gutter);display:flex;justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap;font-size:15px;}
+.foot .brand img{width:30px;height:30px;border-radius:8px;}
+.foot .brand .name{font-size:20px;}
+.foot .links{display:flex;gap:26px;}
+.foot .links a{color:rgba(244,239,230,.7);}
+.foot .links a:hover{color:var(--text-on-dark);}
+
+/* ─── document pages (FAQ, privacy, terms) ─── */
+.doc{max-width:720px;margin:0 auto;padding:72px var(--gutter) 96px;}
+.doc h1{font-family:var(--font-display);font-size:clamp(38px,7vw,52px);font-weight:600;margin:14px 0 0;line-height:1.1;}
+.doc .lead{margin:18px 0 0;color:rgba(244,239,230,.68);}
+.doc .updated{margin:20px 0 0;font-family:var(--font-mono);font-size:12px;color:rgba(244,239,230,.5);letter-spacing:.02em;}
+
+/* FAQ cards */
+.qa-list{display:flex;flex-direction:column;gap:14px;margin-top:48px;}
+.qa{background:var(--card-bg);border:1px solid var(--card-border);border-radius:18px;padding:28px 30px;}
+.qa .q{font-family:var(--font-display);font-size:23px;font-weight:700;margin-bottom:10px;line-height:1.15;}
+.qa .a{color:rgba(244,239,230,.68);}
+
+/* legal prose */
+.prose{margin-top:44px;}
+.prose h2{font-family:var(--font-display);font-size:26px;font-weight:600;line-height:1.2;margin:44px 0 0;}
+.prose h2:first-child{margin-top:0;}
+.prose h3{font-size:17px;font-weight:700;margin:26px 0 0;color:var(--text-on-dark);}
+.prose p{margin:14px 0 0;color:rgba(244,239,230,.78);}
+.prose ul{margin:14px 0 0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:10px;}
+.prose li{position:relative;padding-left:22px;color:rgba(244,239,230,.78);}
+.prose li::before{content:"";position:absolute;left:2px;top:11px;width:6px;height:6px;border-radius:2px;background:var(--gold-500);}
+.prose strong{color:var(--text-on-dark);font-weight:600;}
+.prose a{color:var(--gold-300);}
+.prose a:hover{color:var(--text-on-dark);}
+.prose .callout{margin-top:24px;background:rgba(255,253,248,.045);border:1px solid var(--card-border);border-radius:16px;padding:22px 24px;}
+.prose .callout p{margin:0;}
+
+/* ─── responsive ─── */
+@media (max-width:760px){
+  .doc{padding:56px var(--gutter) 72px;}
+}
+@media (max-width:560px){
+  :root{--gutter:20px;}
+  .nav-links{gap:16px;font-size:14px;}
+  /* secondary links also live in the footer — drop them from the cramped nav */
+  .nav-links a:not(.btn){display:none;}
+  .foot{justify-content:flex-start;}
+}
+@media (prefers-reduced-motion:reduce){
+  *{transition:none !important;}
+}
