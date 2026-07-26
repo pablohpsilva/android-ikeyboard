@@ -12,13 +12,6 @@ class VocabularyAccentTest {
         mapOf("pt" to listOf("também", "casa", "você", "voce", "tambem"))
     )
 
-    @Test fun base_letter_prefix_surfaces_the_accented_word() {
-        // Typing "tambe" (no key for 'é') must still complete to "também".
-        val got = vocab.candidatesByLanguage("tambe", emptyMap(), emptyMap(), 3).map { it.word }
-        assertTrue("expected também in $got", got.contains("também"))
-        assertEquals("também", got.first()) // and it ranks above its unaccented twin
-    }
-
     @Test fun accented_canonical_upgrades_an_unaccented_typo() {
         assertEquals("também", vocab.accentedCanonical("tambem"))
         assertEquals("você", vocab.accentedCanonical("voce"))
@@ -27,11 +20,6 @@ class VocabularyAccentTest {
     @Test fun accented_canonical_leaves_the_already_best_form_alone() {
         assertNull(vocab.accentedCanonical("também")) // already the top spelling
         assertNull(vocab.accentedCanonical("casa"))   // no accented twin exists
-    }
-
-    @Test fun accent_insensitive_prefix_still_matches_when_typed_with_the_accent() {
-        val got = vocab.candidatesByLanguage("també", emptyMap(), emptyMap(), 3).map { it.word }
-        assertTrue(got.contains("também"))
     }
 
     @Test fun contractions_are_restored_from_base_typing_but_never_clobber_a_real_word() {
@@ -43,9 +31,6 @@ class VocabularyAccentTest {
         assertEquals("I'm", en.accentedCanonical("im"))   // im -> I'm
         assertEquals("don't", en.accentedCanonical("dont")) // dont -> don't
         assertNull(en.accentedCanonical("its"))            // its stays its (no clobber)
-        // Typing "im" surfaces the apostrophe form as a completion.
-        val got = en.candidatesByLanguage("im", emptyMap(), emptyMap(), 3).map { it.word }
-        assertTrue("expected I'm in $got", got.contains("I'm"))
     }
 
     @Test fun accent_variants_surface_the_other_spellings_in_the_fold_group() {

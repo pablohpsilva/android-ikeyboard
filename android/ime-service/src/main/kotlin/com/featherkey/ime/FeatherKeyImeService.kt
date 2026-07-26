@@ -91,12 +91,14 @@ class FeatherKeyImeService : InputMethodService() {
      * strip. Never queried in a sensitive field (E-2/BR-26).
      */
     private lateinit var deviceDict: DeviceDictionary
-    /** On-device usage learning that biases ranking toward the user's own words. */
-    private lateinit var usage: UsageModel
-    /** On-device next-word (bigram) learning for context-aware prediction. */
-    private lateinit var bigrams: ContextModel
+    /** Derives correction learning signals (revert, lower-ranked pick, delete-retype)
+     *  from the raw editing events; the core consumes the resulting observations. */
+    private val corrections = CorrectionDetector()
     /** The last committed word, lowercased — the context for the next prediction. */
     @Volatile private var lastWord: String? = null
+    /** The word last committed as a single atomic unit (swipe / picked suggestion),
+     *  so a whole-word backspace can report the rejected form as a delete-retype. */
+    private var lastAtomicWord: String? = null
     /**
      * Length of the text last committed as a single unit — a picked suggestion
      * (word + trailing space) or a swipe result — or 0 if the last edit was not
@@ -127,8 +129,6 @@ class FeatherKeyImeService : InputMethodService() {
         appearancePrefs = KeyboardAppearancePrefs(this)
         emojiRecents = EmojiRecents(this)
         currentTags = langPrefs.activeTags()
-        usage = UsageModel(this).also { it.load() }
-        bigrams = ContextModel(this).also { it.load() }
         // The device dictionary's async lookups refresh the strip on completion.
         deviceDict = DeviceDictionary(this) {
             keyboard?.removeCallbacks(refreshStrip)
@@ -311,9 +311,17 @@ class FeatherKeyImeService : InputMethodService() {
     private fun handleGesture(pathPts: List<PointF>, centers: Map<Char, PointF>) {
         val ic = currentInputConnection ?: return
         atomicSpan = 0 // a fresh gesture; re-armed below only if it commits a word
+        corrections.reset() // a gesture is intervening input: clear the autocorrect
+        // revert lookback so a later backspace can't spuriously whitelist a typo,
+        // even when this swipe decodes to nothing (early return below).
         ensureBridgeReady() // cold start: the first swipe waits for the core to open
         ensureVocabReady() // cold start: don't decode the first swipe against an empty list
-        val words = GestureDecoder.decode(pathPts, centers, vocab.words, vocab::rankOf, usage.map, limit = 4)
+        // Re-centre the keys by the core's learned per-key tap offsets and bias the
+        // decode by the user's own learned word frequencies (both owned by the core).
+        val shifted = shiftedCenters(centers)
+        val learned = runCatching { bridge?.learnedFrequencies() }.getOrNull()
+            ?.associate { it.word to it.freq.toInt() } ?: emptyMap()
+        val words = GestureDecoder.decode(pathPts, shifted, vocab.words, vocab::rankOf, learned, limit = 4)
         if (words.isEmpty()) return
         // Tag each decoded word by the languages that recognise it (fallback: the
         // primary language) and let the core ranker blend in language momentum.
@@ -338,20 +346,23 @@ class FeatherKeyImeService : InputMethodService() {
         ic.commitText(out, 1)
         pending.clear(); pending.append(out) // treat as the current word: alts replace it
         atomicSpan = out.length // a wrong swipe clears whole on the next backspace
+        lastAtomicWord = out
         keyboard?.suggestions = ranked.take(3).ifEmpty { words.take(3) }
         schedulePersist()
     }
 
     /**
-     * Learn a committed word into both the core (autocorrect protection) and the
-     * shell usage model (ranking) — gated by consent (BR-22) and field
-     * sensitivity (E-2/BR-26), so password/secure fields are never learned.
+     * Learn a committed word into the core (frequency + next-word context +
+     * autocorrect protection) — gated by consent (BR-22) and field sensitivity
+     * (E-2/BR-26), so password/secure fields are never learned.
      */
     private fun learnWord(word: String) {
         if (word.isEmpty() || field.isSensitive() || !learningEnabled) return
-        runCatching { bridge?.learnWord(word, field) }
-        usage.record(word)
-        // Record the transition from the previous word, then advance the context.
+        // The core owns frequency + next-word (bigram) learning: pass the preceding
+        // committed word so it records the transition. `preceding` must be read
+        // BEFORE lastWord is advanced below.
+        val preceding = lastWord ?: ""
+        runCatching { bridge?.learnWord(preceding, word, field) }
         val w = word.lowercase()
         // Fold the committing word's recogniser languages into core momentum. The
         // device dictionary is only consulted when the field is not sensitive
@@ -359,8 +370,30 @@ class FeatherKeyImeService : InputMethodService() {
         val recognizers = (vocab.languagesOf(w) +
             (if (!field.isSensitive()) deviceDict.knownLanguages(w) else emptySet())).toList()
         runCatching { bridge?.observeLanguage(recognizers) }
-        lastWord?.let { bigrams.record(it, w) }
         lastWord = w
+    }
+
+    /** True when learning may be recorded: consent is on and the field is not
+     *  sensitive (E-2/BR-26). Gates the correction observations, mirroring
+     *  [learnWord]; the core also gates internally, so this only avoids needless FFI. */
+    private fun observeGate(): Boolean = learningEnabled && !field.isSensitive()
+
+    /**
+     * [centers] re-centred by the core's learned per-key tap offsets (BR-7): the
+     * gesture decoder should trace ideal paths through where this user actually
+     * lands, not the nominal key centres. Falls back to the raw centres when the
+     * bridge isn't ready or no offsets have been learned. Bridges the PointF/Pair
+     * gap around the PointF-free [GestureGeometry].
+     */
+    private fun shiftedCenters(centers: Map<Char, PointF>): Map<Char, PointF> {
+        val offsets = runCatching { bridge?.tapOffsets() }.getOrNull()
+            ?.mapNotNull { o -> o.key.firstOrNull()?.let { it to (o.dx to o.dy) } }
+            ?.toMap()
+            ?: return centers
+        if (offsets.isEmpty()) return centers
+        val asPairs = centers.mapValues { it.value.x to it.value.y }
+        return GestureGeometry.shiftCenters(asPairs, offsets)
+            .mapValues { PointF(it.value.first, it.value.second) }
     }
 
     /** The space-bar language hint, e.g. "EN" or "EN PT" (primary first). */
@@ -395,6 +428,10 @@ class FeatherKeyImeService : InputMethodService() {
         observeTap(decoded, x, y)
         val kb = keyboard
         val ch = if (kb?.shifted == true) decoded.uppercase() else decoded
+        // A typed character is an intervening event: it clears the autocorrect
+        // revert lookback so a later backspace isn't misread as undoing a correction
+        // that happened words ago (CorrectionDetector's one-slot contract).
+        corrections.reset()
         pending.append(ch)
         ic.commitText(ch, 1)
         if (kb?.shifted == true) kb.shifted = false
@@ -435,6 +472,9 @@ class FeatherKeyImeService : InputMethodService() {
         atomicSpan = 0 // an explicit letter pick edits the word char-by-char
         val kb = keyboard
         val out = if (kb?.shifted == true) ch.uppercase() else ch
+        // An explicit letter pick is an intervening event, like a decoded tap: it
+        // clears the autocorrect revert lookback (CorrectionDetector's contract).
+        corrections.reset()
         pending.append(out)
         ic.commitText(out, 1)
         if (kb?.shifted == true) kb.shifted = false
@@ -488,6 +528,7 @@ class FeatherKeyImeService : InputMethodService() {
         ic.commitText(ch, 1)
         pending.clear()
         atomicSpan = 0
+        corrections.reset() // an intervening symbol/number clears the revert lookback
         keyboard?.suggestions = emptyList()
     }
 
@@ -504,6 +545,7 @@ class FeatherKeyImeService : InputMethodService() {
         pending.clear()
         atomicSpan = 0
         lastWord = null
+        corrections.reset() // an intervening emoji clears the revert lookback
         keyboard?.suggestions = emptyList()
         keyboard?.recents = emojiRecents.record(emoji)
     }
@@ -526,47 +568,54 @@ class FeatherKeyImeService : InputMethodService() {
      * so language momentum decides the order. The device lookup is async
      * ([DeviceDictionary.refresh]) and its callback re-runs this method when
      * results land. Skipped entirely in a sensitive field, so a password is never
-     * sent to the system spell checker (E-2/BR-26). If the core ranker throws or
-     * comes back empty, falls back to the bundled per-language candidates in the
-     * order gathered, so the strip still shows completions (same
-     * degrade-don't-crash pattern as [handleGesture]).
+     * sent to the system spell checker (E-2/BR-26). The core is the sole ranking
+     * source now (W5): if it throws or returns empty the strip degrades to empty
+     * rather than to a bundled per-language list, so [ensureBridgeReady] is called
+     * first to close the cold-start window before the core has opened.
      */
     private fun rankForStrip(prefix: String): List<String> {
-        if (prefix.isEmpty()) return lastWord?.let { bigrams.nextWords(it, SUGGESTIONS) } ?: emptyList()
-        val bundled = vocab.candidatesByLanguage(prefix, usage.map, bigrams.nextCounts(lastWord), SUGGESTIONS + 2)
-        val cands = ArrayList<FfiRankCandidate>()
-        for (c in bundled) cands.add(FfiRankCandidate(c.word, c.lang, FfiSource.LEXICON, c.sourceRank.toUInt()))
-        if (!field.isSensitive()) {
+        ensureBridgeReady() // cold start: don't rank against a not-yet-open core (empty strip)
+        val preceding = lastWord ?: ""
+        // Device-dictionary completions (scripts we ship no list for) are gathered
+        // in the shell — the only source the core can't see — and blended by the
+        // core ranker. Skipped on an empty prefix (next-word prediction) and in a
+        // sensitive field, where the word is never sent to the spell checker (E-2).
+        val deviceCands = ArrayList<FfiRankCandidate>()
+        if (prefix.isNotEmpty() && !field.isSensitive()) {
             deviceDict.refresh(prefix)
             for ((lang, words) in deviceDict.candidatesByLanguage())
                 words.forEachIndexed { i, w ->
-                    if (w.lowercase() != prefix) cands.add(FfiRankCandidate(w, lang, FfiSource.DEVICE, i.toUInt()))
+                    if (w.lowercase() != prefix) deviceCands.add(FfiRankCandidate(w, lang, FfiSource.DEVICE, i.toUInt()))
                 }
         }
-        val ranked = runCatching { bridge?.rank(cands, SUGGESTIONS.toUInt())?.map { it.word } ?: emptyList() }.getOrDefault(emptyList())
-        val base = ranked.ifEmpty { bundled.map { it.word }.distinct() }
-        // Guarantee the accent/apostrophe variant of what was typed a slot, so a
-        // commoner plain twin (hell, its, "ive") can't crowd out he'll/it's/I've.
-        return SuggestionStrip.withGuaranteedVariant(base, accentVariants(prefix), SUGGESTIONS)
+        // ONE core call handles both cases: non-empty prefix -> completions + device
+        // + momentum + the dictionary fold-group variant guarantee; empty prefix ->
+        // next-word predictions from the bigram context of `preceding`.
+        val ranked = runCatching {
+            bridge?.rankSuggestions(preceding, prefix, deviceCands)?.map { it.word } ?: emptyList()
+        }.getOrDefault(emptyList())
+        if (prefix.isEmpty()) return ranked // next-word predictions: no typed variant to guarantee
+        // The core already guarantees the DICTIONARY fold-group variant; keep only the
+        // DEVICE-derived variant as a thin post-step so a device-only accented/
+        // apostrophe form still gets a slot over a commoner plain twin.
+        return SuggestionStrip.withGuaranteedVariant(ranked, accentVariants(prefix), SUGGESTIONS)
     }
 
     /**
-     * The accent/apostrophe variants of the typed [prefix] to guarantee in the
-     * strip: the shipped dictionaries' exact fold-group members (via
-     * [Vocabulary.accentVariantsOf]) plus any apostrophe/accent correction the
-     * device spell-checker returned for the same base letters. Both sources are
-     * derived — the fold index and the OS dictionary — never a hand-authored
-     * replacement table. Device results are skipped in a sensitive field, where
+     * The DEVICE-dictionary accent/apostrophe variants of the typed [prefix] to
+     * guarantee a strip slot — apostrophe/accent corrections the OS spell-checker
+     * returned for the same base letters. The shipped-dictionary fold-group variant
+     * is now guaranteed by the core, so it is no longer added here. Derived from the
+     * OS dictionary, never a hand-authored table. Empty in a sensitive field, where
      * the word is never sent to the spell checker (E-2/BR-26).
      */
     private fun accentVariants(prefix: String): List<String> {
-        val fromVocab = vocab.accentVariantsOf(prefix)
-        if (field.isSensitive()) return fromVocab
+        if (field.isSensitive()) return emptyList()
         val f = Diacritics.fold(prefix)
-        val fromDevice = deviceDict.candidatesByLanguage().values.asSequence().flatten()
+        return deviceDict.candidatesByLanguage().values.asSequence().flatten()
             .filter { Diacritics.fold(it) == f && !it.equals(prefix, ignoreCase = true) }
+            .distinct()
             .toList()
-        return (fromVocab + fromDevice).distinct()
     }
 
     /** Commit a tapped suggestion, replacing the pending word. */
@@ -580,9 +629,15 @@ class FeatherKeyImeService : InputMethodService() {
         val out = CaseMatch.matchLeading(cur, word)
         if (cur.isNotEmpty()) ic.deleteSurroundingText(cur.length, 0)
         ic.commitText("$out ", 1)
+        // A non-top pick is a signal the ranking was off for this prefix; feed it to
+        // the core (gated exactly like learning) before advancing the context.
+        val pick = corrections.onSuggestionPicked(cur.lowercase(), index, out)
+        if (pick is CorrectionSignal.LowerRankedPick && observeGate())
+            runCatching { bridge?.observeStripPick(pick.prefix, pick.picked, field) }
         learnWord(out)
         pending.clear()
         atomicSpan = out.length + 1 // word + its space clears whole on next backspace
+        lastAtomicWord = out
         updateSuggestions() // now show next-word predictions for this word
         applyAutoCaps()
         schedulePersist()
@@ -592,6 +647,11 @@ class FeatherKeyImeService : InputMethodService() {
      *  space — or, on a bare second space, end the sentence with ". ". */
     private fun boundary(ic: InputConnection) {
         val word = pending.toString()
+        // A word boundary is an intervening event: clear the autocorrect revert
+        // lookback up front so an uncorrected commit (or a double-space period) can't
+        // leave a stale slot that a later backspace would misread as a revert. When
+        // this very boundary IS an autocorrect, onAutocorrect below re-arms it.
+        corrections.reset()
         if (word.isEmpty()) {
             // No word in progress: a space right after "<word> " becomes ". ".
             if (maybeDoubleSpacePeriod(ic)) return
@@ -605,6 +665,9 @@ class FeatherKeyImeService : InputMethodService() {
             if (out != word) {
                 ic.deleteSurroundingText(word.length, 0)
                 ic.commitText(out, 1)
+                // Arm the one-slot revert lookback: an immediate backspace after this
+                // means the user rejected the correction (keep their original word).
+                corrections.onAutocorrect(word, out)
             }
             learnWord(out)
         }
@@ -687,12 +750,24 @@ class FeatherKeyImeService : InputMethodService() {
         // A word committed as one unit (swipe or picked suggestion) clears whole on
         // the first backspace after it; the arming is one-shot.
         if (atomicSpan > 0) {
+            val rejected = lastAtomicWord
             ic.deleteSurroundingText(atomicSpan, 0)
             atomicSpan = 0
             pending.clear()
             lastWord = null // the deleted word is gone: no next-word context
+            lastAtomicWord = null
+            // Deleting a just-committed word whole is a low-weight negative signal.
+            if (rejected != null && observeGate()) {
+                val sig = corrections.onDeleteRetype(rejected)
+                runCatching { bridge?.observeDeleteRetype(sig.oldWord, field) }
+            }
             return
         }
+        // A backspace immediately after an autocorrect reverts it: the user wants
+        // their original word kept, so protect it from being re-corrected.
+        val undo = corrections.onBackspaceUndo()
+        if (undo is CorrectionSignal.RevertAfterAutocorrect && observeGate())
+            runCatching { bridge?.addToDictionary(undo.word) }
         if (pending.isNotEmpty()) pending.deleteCharAt(pending.length - 1)
         ic.deleteSurroundingText(1, 0)
     }
@@ -702,6 +777,7 @@ class FeatherKeyImeService : InputMethodService() {
         pending.clear()
         atomicSpan = 0
         lastWord = null // Enter ends the line: start the next with no context
+        corrections.reset() // a newline is an intervening event: drop the revert lookback
     }
 
     /**
@@ -767,16 +843,12 @@ class FeatherKeyImeService : InputMethodService() {
         persistJob = ioScope.launch {
             if (!immediate) delay(PERSIST_DEBOUNCE_MS)
             runCatching { bridge?.persist() }
-            usage.persist()
-            bigrams.persist()
         }
     }
 
     override fun onDestroy() {
         recognizer?.destroy()
         deviceDict.close()
-        usage.persist()
-        bigrams.persist()
         ioScope.cancel()
         runCatching { bridge?.persist() }
         runCatching { bridge?.close() }
@@ -796,9 +868,11 @@ class FeatherKeyImeService : InputMethodService() {
 
 /**
  * Loads the active languages' lexicons from `assets/lexicons/<tag>.txt` (one word
- * per line, pre-sorted by byte order — the core rejects an unsorted list) for the
- * core's correction/autocorrect. Suggestion and swipe ranking use the
- * frequency-ordered lists via [Vocabulary].
+ * per line) for the core's correction/autocorrect. The words are passed in asset
+ * (frequency) order and NOT re-sorted here: the core records that input position as
+ * each word's bundled rank (frequency-carry, option A) before it byte-sorts them
+ * internally, so a commoner word outranks a rarer one across languages. Suggestion
+ * and swipe ranking also use the frequency-ordered lists via [Vocabulary].
  */
 object Lexicons {
     fun load(context: Context, tags: List<String>): List<Language> =

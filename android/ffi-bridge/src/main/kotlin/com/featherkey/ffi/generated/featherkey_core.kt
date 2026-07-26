@@ -772,6 +772,18 @@ internal open class UniffiVTableCallbackInterfaceSensitiveField(
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -808,11 +820,19 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_featherkey_core_fn_method_keyboardcore_decode(`ptr`: Pointer,`x`: Float,`y`: Float,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_featherkey_core_fn_method_keyboardcore_import_context(`ptr`: Pointer,`transitions`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun uniffi_featherkey_core_fn_method_keyboardcore_layout_keys(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_featherkey_core_fn_method_keyboardcore_learn_word(`ptr`: Pointer,`word`: RustBuffer.ByValue,`field`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_featherkey_core_fn_method_keyboardcore_learn_word(`ptr`: Pointer,`preceding`: RustBuffer.ByValue,`word`: RustBuffer.ByValue,`field`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_featherkey_core_fn_method_keyboardcore_learned_frequencies(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_featherkey_core_fn_method_keyboardcore_observe_delete_retype(`ptr`: Pointer,`word`: RustBuffer.ByValue,`field`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_featherkey_core_fn_method_keyboardcore_observe_language(`ptr`: Pointer,`recognizers`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_featherkey_core_fn_method_keyboardcore_observe_strip_pick(`ptr`: Pointer,`prefix`: RustBuffer.ByValue,`picked`: RustBuffer.ByValue,`field`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_featherkey_core_fn_method_keyboardcore_observe_tap(`ptr`: Pointer,`key`: RustBuffer.ByValue,`dx`: Float,`dy`: Float,`field`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
@@ -820,9 +840,13 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_featherkey_core_fn_method_keyboardcore_rank(`ptr`: Pointer,`candidates`: RustBuffer.ByValue,`k`: Int,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_featherkey_core_fn_method_keyboardcore_rank_suggestions(`ptr`: Pointer,`preceding`: RustBuffer.ByValue,`prefix`: RustBuffer.ByValue,`device`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_featherkey_core_fn_method_keyboardcore_set_active_languages(`ptr`: Pointer,`languages`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_featherkey_core_fn_method_keyboardcore_suggest(`ptr`: Pointer,`preceding`: RustBuffer.ByValue,`prefix`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_featherkey_core_fn_method_keyboardcore_tap_offsets(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_featherkey_core_fn_method_keyboardcore_use_alpha_layout(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
@@ -960,11 +984,19 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_decode(
     ): Short
+    fun uniffi_featherkey_core_checksum_method_keyboardcore_import_context(
+    ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_layout_keys(
     ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_learn_word(
     ): Short
+    fun uniffi_featherkey_core_checksum_method_keyboardcore_learned_frequencies(
+    ): Short
+    fun uniffi_featherkey_core_checksum_method_keyboardcore_observe_delete_retype(
+    ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_observe_language(
+    ): Short
+    fun uniffi_featherkey_core_checksum_method_keyboardcore_observe_strip_pick(
     ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_observe_tap(
     ): Short
@@ -972,9 +1004,13 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_rank(
     ): Short
+    fun uniffi_featherkey_core_checksum_method_keyboardcore_rank_suggestions(
+    ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_set_active_languages(
     ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_suggest(
+    ): Short
+    fun uniffi_featherkey_core_checksum_method_keyboardcore_tap_offsets(
     ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_use_alpha_layout(
     ): Short
@@ -1018,13 +1054,25 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_decode() != 22687.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_import_context() != 7081.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_layout_keys() != 3125.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_learn_word() != 25093.toShort()) {
+    if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_learn_word() != 9386.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_learned_frequencies() != 45129.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_observe_delete_retype() != 62189.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_observe_language() != 19234.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_observe_strip_pick() != 52327.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_observe_tap() != 53684.toShort()) {
@@ -1036,10 +1084,16 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_rank() != 44508.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_rank_suggestions() != 41327.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_set_active_languages() != 10043.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_suggest() != 38328.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_tap_offsets() != 57693.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_use_alpha_layout() != 43245.toShort()) {
@@ -1444,21 +1498,44 @@ public interface KeyboardCoreInterface {
     fun `decode`(`x`: kotlin.Float, `y`: kotlin.Float): FfiDecode
     
     /**
+     * Migrate legacy `(prev, next, count)` bigram transitions into the encrypted
+     * next-word model (set-semantics; idempotent). A deliberate one-time import.
+     */
+    fun `importContext`(`transitions`: List<FfiTransition>)
+    
+    /**
      * The keys of the active layout, in logical coordinates, for the shell to
      * render. Fetch again after any page switch below.
      */
     fun `layoutKeys`(): List<FfiKey>
     
     /**
-     * Learn `word` — unless `field` is sensitive (E-2 / BR-26).
+     * Learn `word` typed after `preceding` — updating both the learned
+     * vocabulary and the next-word model — unless `field` is sensitive
+     * (E-2 / BR-26), in which case both are left untouched.
      */
-    fun `learnWord`(`word`: kotlin.String, `field`: SensitiveField)
+    fun `learnWord`(`preceding`: kotlin.String, `word`: kotlin.String, `field`: SensitiveField)
+    
+    /**
+     * Every learned word paired with its observed frequency (for swipe ranking).
+     */
+    fun `learnedFrequencies`(): List<FfiWordFreq>
+    
+    /**
+     * Record a delete-and-retype demotion for `word` — unless `field` is sensitive.
+     */
+    fun `observeDeleteRetype`(`word`: kotlin.String, `field`: SensitiveField)
     
     /**
      * Fold a committed word's recogniser languages into momentum. The shell must
      * only call this when consent is on and the field is not sensitive.
      */
     fun `observeLanguage`(`recognizers`: List<kotlin.String>)
+    
+    /**
+     * Record a strip pick (`prefix -> picked`) — unless `field` is sensitive.
+     */
+    fun `observeStripPick`(`prefix`: kotlin.String, `picked`: kotlin.String, `field`: SensitiveField)
     
     /**
      * Fold a tap offset for `key` — unless `field` is sensitive (E-2 / BR-26).
@@ -1477,6 +1554,13 @@ public interface KeyboardCoreInterface {
     fun `rank`(`candidates`: List<FfiRankCandidate>, `k`: kotlin.UInt): List<FfiRanked>
     
     /**
+     * The whole suggestion-strip blend, core-owned: predictor completions +
+     * `device` candidates → momentum ranking → dictionary fold-group variant
+     * guarantee. The shell renders the returned words in order.
+     */
+    fun `rankSuggestions`(`preceding`: kotlin.String, `prefix`: kotlin.String, `device`: List<FfiRankCandidate>): List<FfiRanked>
+    
+    /**
      * Replace the active language set atomically.
      */
     fun `setActiveLanguages`(`languages`: List<LanguagePack>)
@@ -1485,6 +1569,11 @@ public interface KeyboardCoreInterface {
      * Ranked completions for `prefix` in `preceding` context.
      */
     fun `suggest`(`preceding`: kotlin.String, `prefix`: kotlin.String): List<FfiSuggestion>
+    
+    /**
+     * Every observed key's learned tap-offset bias (for gesture re-centring).
+     */
+    fun `tapOffsets`(): List<FfiTapOffset>
     
     /**
      * Switch to the QWERTY letter page (the default).
@@ -1669,6 +1758,21 @@ open class KeyboardCore: Disposable, AutoCloseable, KeyboardCoreInterface {
 
     
     /**
+     * Migrate legacy `(prev, next, count)` bigram transitions into the encrypted
+     * next-word model (set-semantics; idempotent). A deliberate one-time import.
+     */override fun `importContext`(`transitions`: List<FfiTransition>)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_featherkey_core_fn_method_keyboardcore_import_context(
+        it, FfiConverterSequenceTypeFfiTransition.lower(`transitions`),_status)
+}
+    }
+    
+    
+
+    
+    /**
      * The keys of the active layout, in logical coordinates, for the shell to
      * render. Fetch again after any page switch below.
      */override fun `layoutKeys`(): List<FfiKey> {
@@ -1685,12 +1789,43 @@ open class KeyboardCore: Disposable, AutoCloseable, KeyboardCoreInterface {
 
     
     /**
-     * Learn `word` — unless `field` is sensitive (E-2 / BR-26).
-     */override fun `learnWord`(`word`: kotlin.String, `field`: SensitiveField)
+     * Learn `word` typed after `preceding` — updating both the learned
+     * vocabulary and the next-word model — unless `field` is sensitive
+     * (E-2 / BR-26), in which case both are left untouched.
+     */override fun `learnWord`(`preceding`: kotlin.String, `word`: kotlin.String, `field`: SensitiveField)
         = 
     callWithPointer {
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_featherkey_core_fn_method_keyboardcore_learn_word(
+        it, FfiConverterString.lower(`preceding`),FfiConverterString.lower(`word`),FfiConverterTypeSensitiveField.lower(`field`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Every learned word paired with its observed frequency (for swipe ranking).
+     */override fun `learnedFrequencies`(): List<FfiWordFreq> {
+            return FfiConverterSequenceTypeFfiWordFreq.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_featherkey_core_fn_method_keyboardcore_learned_frequencies(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Record a delete-and-retype demotion for `word` — unless `field` is sensitive.
+     */override fun `observeDeleteRetype`(`word`: kotlin.String, `field`: SensitiveField)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_featherkey_core_fn_method_keyboardcore_observe_delete_retype(
         it, FfiConverterString.lower(`word`),FfiConverterTypeSensitiveField.lower(`field`),_status)
 }
     }
@@ -1707,6 +1842,20 @@ open class KeyboardCore: Disposable, AutoCloseable, KeyboardCoreInterface {
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_featherkey_core_fn_method_keyboardcore_observe_language(
         it, FfiConverterSequenceString.lower(`recognizers`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Record a strip pick (`prefix -> picked`) — unless `field` is sensitive.
+     */override fun `observeStripPick`(`prefix`: kotlin.String, `picked`: kotlin.String, `field`: SensitiveField)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_featherkey_core_fn_method_keyboardcore_observe_strip_pick(
+        it, FfiConverterString.lower(`prefix`),FfiConverterString.lower(`picked`),FfiConverterTypeSensitiveField.lower(`field`),_status)
 }
     }
     
@@ -1760,6 +1909,23 @@ open class KeyboardCore: Disposable, AutoCloseable, KeyboardCoreInterface {
 
     
     /**
+     * The whole suggestion-strip blend, core-owned: predictor completions +
+     * `device` candidates → momentum ranking → dictionary fold-group variant
+     * guarantee. The shell renders the returned words in order.
+     */override fun `rankSuggestions`(`preceding`: kotlin.String, `prefix`: kotlin.String, `device`: List<FfiRankCandidate>): List<FfiRanked> {
+            return FfiConverterSequenceTypeFfiRanked.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_featherkey_core_fn_method_keyboardcore_rank_suggestions(
+        it, FfiConverterString.lower(`preceding`),FfiConverterString.lower(`prefix`),FfiConverterSequenceTypeFfiRankCandidate.lower(`device`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Replace the active language set atomically.
      */
     @Throws(FfiException::class)override fun `setActiveLanguages`(`languages`: List<LanguagePack>)
@@ -1782,6 +1948,21 @@ open class KeyboardCore: Disposable, AutoCloseable, KeyboardCoreInterface {
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_featherkey_core_fn_method_keyboardcore_suggest(
         it, FfiConverterString.lower(`preceding`),FfiConverterString.lower(`prefix`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Every observed key's learned tap-offset bias (for gesture re-centring).
+     */override fun `tapOffsets`(): List<FfiTapOffset> {
+            return FfiConverterSequenceTypeFfiTapOffset.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_featherkey_core_fn_method_keyboardcore_tap_offsets(
+        it, _status)
 }
     }
     )
@@ -2467,6 +2648,122 @@ public object FfiConverterTypeFfiSuggestion: FfiConverterRustBuffer<FfiSuggestio
 
 
 /**
+ * One key's learned tap-offset bias, for the shell to re-centre gesture key
+ * positions before swipe decoding.
+ */
+data class FfiTapOffset (
+    var `key`: kotlin.String, 
+    var `dx`: kotlin.Float, 
+    var `dy`: kotlin.Float
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiTapOffset: FfiConverterRustBuffer<FfiTapOffset> {
+    override fun read(buf: ByteBuffer): FfiTapOffset {
+        return FfiTapOffset(
+            FfiConverterString.read(buf),
+            FfiConverterFloat.read(buf),
+            FfiConverterFloat.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiTapOffset) = (
+            FfiConverterString.allocationSize(value.`key`) +
+            FfiConverterFloat.allocationSize(value.`dx`) +
+            FfiConverterFloat.allocationSize(value.`dy`)
+    )
+
+    override fun write(value: FfiTapOffset, buf: ByteBuffer) {
+            FfiConverterString.write(value.`key`, buf)
+            FfiConverterFloat.write(value.`dx`, buf)
+            FfiConverterFloat.write(value.`dy`, buf)
+    }
+}
+
+
+
+/**
+ * One `prev -> next` bigram transition with its count, for migrating the legacy
+ * Kotlin `context.tsv` into the encrypted core.
+ */
+data class FfiTransition (
+    var `prev`: kotlin.String, 
+    var `next`: kotlin.String, 
+    var `count`: kotlin.UInt
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiTransition: FfiConverterRustBuffer<FfiTransition> {
+    override fun read(buf: ByteBuffer): FfiTransition {
+        return FfiTransition(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterUInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiTransition) = (
+            FfiConverterString.allocationSize(value.`prev`) +
+            FfiConverterString.allocationSize(value.`next`) +
+            FfiConverterUInt.allocationSize(value.`count`)
+    )
+
+    override fun write(value: FfiTransition, buf: ByteBuffer) {
+            FfiConverterString.write(value.`prev`, buf)
+            FfiConverterString.write(value.`next`, buf)
+            FfiConverterUInt.write(value.`count`, buf)
+    }
+}
+
+
+
+/**
+ * One learned word and its observed frequency, handed to the shell's swipe
+ * decoder so gesture paths can be ranked by the user's own usage.
+ */
+data class FfiWordFreq (
+    var `word`: kotlin.String, 
+    var `freq`: kotlin.UInt
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiWordFreq: FfiConverterRustBuffer<FfiWordFreq> {
+    override fun read(buf: ByteBuffer): FfiWordFreq {
+        return FfiWordFreq(
+            FfiConverterString.read(buf),
+            FfiConverterUInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiWordFreq) = (
+            FfiConverterString.allocationSize(value.`word`) +
+            FfiConverterUInt.allocationSize(value.`freq`)
+    )
+
+    override fun write(value: FfiWordFreq, buf: ByteBuffer) {
+            FfiConverterString.write(value.`word`, buf)
+            FfiConverterUInt.write(value.`freq`, buf)
+    }
+}
+
+
+
+/**
  * One active language and its sorted lexicon, as handed across the FFI.
  */
 data class LanguagePack (
@@ -2893,6 +3190,90 @@ public object FfiConverterSequenceTypeFfiSuggestion: FfiConverterRustBuffer<List
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeFfiSuggestion.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeFfiTapOffset: FfiConverterRustBuffer<List<FfiTapOffset>> {
+    override fun read(buf: ByteBuffer): List<FfiTapOffset> {
+        val len = buf.getInt()
+        return List<FfiTapOffset>(len) {
+            FfiConverterTypeFfiTapOffset.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<FfiTapOffset>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeFfiTapOffset.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<FfiTapOffset>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeFfiTapOffset.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeFfiTransition: FfiConverterRustBuffer<List<FfiTransition>> {
+    override fun read(buf: ByteBuffer): List<FfiTransition> {
+        val len = buf.getInt()
+        return List<FfiTransition>(len) {
+            FfiConverterTypeFfiTransition.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<FfiTransition>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeFfiTransition.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<FfiTransition>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeFfiTransition.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeFfiWordFreq: FfiConverterRustBuffer<List<FfiWordFreq>> {
+    override fun read(buf: ByteBuffer): List<FfiWordFreq> {
+        val len = buf.getInt()
+        return List<FfiWordFreq>(len) {
+            FfiConverterTypeFfiWordFreq.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<FfiWordFreq>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeFfiWordFreq.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<FfiWordFreq>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeFfiWordFreq.write(it, buf)
         }
     }
 }

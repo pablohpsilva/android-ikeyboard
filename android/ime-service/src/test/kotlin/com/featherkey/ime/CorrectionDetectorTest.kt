@@ -86,4 +86,19 @@ class CorrectionDetectorTest {
         d.onDeleteRetype(old = "the")
         assertNull(d.onBackspaceUndo())
     }
+
+    @Test fun reset_clears_a_pending_autocorrect() {
+        val d = CorrectionDetector()
+        d.onAutocorrect(from = "teh", to = "the")
+        // The service calls reset() on any intervening event (a typed character, an
+        // uncorrected word commit, a newline) so a later backspace is not a revert.
+        d.reset()
+        assertNull(d.onBackspaceUndo())
+    }
+
+    @Test fun reset_is_idempotent_with_no_pending_autocorrect() {
+        val d = CorrectionDetector()
+        d.reset()
+        assertNull(d.onBackspaceUndo())
+    }
 }

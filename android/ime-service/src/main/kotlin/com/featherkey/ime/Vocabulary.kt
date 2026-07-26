@@ -2,11 +2,11 @@ package com.featherkey.ime
 
 /*
  * The active languages' vocabulary, loaded from frequency-ordered word lists
- * (assets/freq/<tag>.txt, most-common first). It powers both:
- *  - tap suggestions: prefix completions ranked by the user's learned usage,
- *    then word frequency, fairly interleaved across languages so every active
- *    language is represented (not just whichever has the shortest words);
- *  - swipe decoding: the candidate word set plus a per-word frequency rank.
+ * (assets/freq/<tag>.txt, most-common first). Since the core now owns strip
+ * ranking, this powers:
+ *  - swipe decoding: the candidate word set plus a per-word frequency rank;
+ *  - accent/apostrophe helpers: the fold-group canonical + variants used by the
+ *    boundary auto-accent and the fat-finger prefix-alive check.
  *
  * All local: the lists ship in the APK; nothing is fetched.
  */
@@ -100,68 +100,6 @@ class Vocabulary private constructor(private val langs: List<Lang>) {
     fun languagesOf(word: String): Set<String> =
         langs.asSequence().filter { it.rank.containsKey(word) }.map { it.tag }.toSet()
 
-    /**
-     * Up to [k] prefix matches per language, ranked within each language by the
-     * same priority: context continuation first, then the
-     * user's learned usage, then bundled frequency. This keeps
-     * personalization/context ordering WITHIN a language; the core momentum
-     * ranker (fed [Candidate.sourceRank]) still decides ACROSS languages.
-     */
-    fun candidatesByLanguage(
-        prefix: String,
-        learned: Map<String, Int>,
-        context: Map<String, Int>,
-        k: Int,
-    ): List<Candidate> {
-        if (prefix.isEmpty()) return emptyList()
-        val foldedPrefix = Diacritics.fold(prefix)
-        val out = ArrayList<Candidate>()
-        for (l in langs) {
-            val matches = prefixMatches(l, foldedPrefix, k + CANDIDATE_MARGIN)
-            val ordered = matches.sortedWith(
-                compareByDescending<String> { context[it] ?: 0 }
-                    .thenByDescending { learned[it] ?: 0 }
-                    .thenBy { l.rank[it] ?: Int.MAX_VALUE }
-            )
-            ordered.take(k).forEachIndexed { i, w -> out.add(Candidate(w, l.tag, i)) }
-        }
-        return out
-    }
-
-    /** The [k] most frequent words in one language whose accent-folded form
-     *  starts with [foldedPrefix]. Selects the top-k by rank during the scan —
-     *  identical result to collect-all → sortBy(rank) → take(k), but O(k) memory
-     *  and no full sort. Returns the original (accented) spellings. */
-    private fun prefixMatches(lang: Lang, foldedPrefix: String, k: Int): List<String> {
-        if (k <= 0) return emptyList()
-        val folded = lang.folded
-        var lo = lowerBound(folded, foldedPrefix)
-        // keptWords/keptRanks stay rank-ascending; ties keep scan (alphabetical) order,
-        // matching the old stable sortBy on an alphabetically-ordered input.
-        val keptWords = ArrayList<String>(k)
-        val keptRanks = ArrayList<Int>(k)
-        while (lo < folded.size && folded[lo].startsWith(foldedPrefix)) {
-            val w = lang.sortedWords[lo]; lo++
-            val r = lang.rank[w] ?: Int.MAX_VALUE
-            if (keptWords.size < k) {
-                insertByRank(keptWords, keptRanks, w, r)
-            } else if (r < keptRanks[keptRanks.size - 1]) { // beats the current worst
-                keptWords.removeAt(keptWords.size - 1)
-                keptRanks.removeAt(keptRanks.size - 1)
-                insertByRank(keptWords, keptRanks, w, r)
-            }
-        }
-        return keptWords
-    }
-
-    /** Insert (w,r) keeping ranks ascending; on equal rank insert AFTER existing ones,
-     *  so ties preserve the caller's scan (alphabetical) order (stable-sort equivalent). */
-    private fun insertByRank(words: ArrayList<String>, ranks: ArrayList<Int>, w: String, r: Int) {
-        var i = ranks.size
-        while (i > 0 && ranks[i - 1] > r) i--
-        words.add(i, w); ranks.add(i, r)
-    }
-
     /** First index whose word is >= [prefix]. */
     private fun lowerBound(a: Array<String>, prefix: String): Int {
         var lo = 0; var hi = a.size
@@ -173,11 +111,6 @@ class Vocabulary private constructor(private val langs: List<Lang>) {
     }
 
     companion object {
-        private const val CANDIDATE_MARGIN = 5 // extra frequency-ranked matches gathered
-                                                // per language before re-sorting by
-                                                // context/learned so a less-frequent but
-                                                // learned/context word can still surface
-
         /** An empty vocabulary, used until the real one finishes loading. */
         fun empty(): Vocabulary = Vocabulary(emptyList())
 

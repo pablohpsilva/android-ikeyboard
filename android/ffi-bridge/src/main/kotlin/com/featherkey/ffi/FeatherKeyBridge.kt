@@ -18,6 +18,9 @@ import com.featherkey.ffi.generated.FfiRankCandidate
 import com.featherkey.ffi.generated.FfiRanked
 import com.featherkey.ffi.generated.FfiSource
 import com.featherkey.ffi.generated.FfiSuggestion
+import com.featherkey.ffi.generated.FfiTapOffset
+import com.featherkey.ffi.generated.FfiTransition
+import com.featherkey.ffi.generated.FfiWordFreq
 import com.featherkey.ffi.generated.KeyboardCore
 import com.featherkey.ffi.generated.LanguagePack
 import com.featherkey.ffi.generated.SensitiveField
@@ -84,9 +87,37 @@ class FeatherKeyBridge private constructor(private val core: KeyboardCore) : Aut
      */
     fun observeLanguage(recognizers: List<String>) = core.observeLanguage(recognizers)
 
-    /** Learn a committed word unless the field is sensitive (E-2 / BR-26). */
-    fun learnWord(word: String, field: FieldSensitivity) =
-        core.learnWord(word, field.asForeign())
+    /** Learn a committed word unless the field is sensitive (E-2 / BR-26). The
+     *  core records it against [preceding] (the previous committed word) so the
+     *  bigram/context model lives entirely in the core. */
+    fun learnWord(preceding: String, word: String, field: FieldSensitivity) =
+        core.learnWord(preceding, word, field.asForeign())
+
+    /**
+     * Rank the suggestion strip in one core call. With a non-empty [prefix] the
+     * core returns predictor completions + [device] candidates blended by
+     * language momentum with the dictionary accent fold-group variant guaranteed;
+     * with an empty [prefix] it returns the next-word predictions for [preceding].
+     */
+    fun rankSuggestions(preceding: String, prefix: String, device: List<FfiRankCandidate>): List<FfiRanked> =
+        core.rankSuggestions(preceding, prefix, device)
+
+    /** The user's learned word frequencies, for biasing swipe decoding. */
+    fun learnedFrequencies(): List<FfiWordFreq> = core.learnedFrequencies()
+
+    /** The learned per-key tap offsets, to re-centre gesture key positions. */
+    fun tapOffsets(): List<FfiTapOffset> = core.tapOffsets()
+
+    /** Note a lower-ranked strip pick (gated by field sensitivity in the core). */
+    fun observeStripPick(prefix: String, picked: String, field: FieldSensitivity) =
+        core.observeStripPick(prefix, picked, field.asForeign())
+
+    /** Note a delete-then-retype of [word] (gated by field sensitivity in the core). */
+    fun observeDeleteRetype(word: String, field: FieldSensitivity) =
+        core.observeDeleteRetype(word, field.asForeign())
+
+    /** Import legacy bigram transitions into the core's context model (migration). */
+    fun importContext(transitions: List<FfiTransition>) = core.importContext(transitions)
 
     /** Fold a tap offset unless the field is sensitive (E-2 / BR-26). */
     fun observeTap(key: String, dx: Float, dy: Float, field: FieldSensitivity) =

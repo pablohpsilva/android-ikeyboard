@@ -44,6 +44,16 @@ class CorrectionDetector {
         pendingAutocorrect = from
     }
 
+    /** Clear the one-slot lookback. The service calls this on any input event that
+     *  is not the autocorrect itself or the immediate backspace after it — a typed
+     *  character, an uncorrected word commit, a newline — so the revert signal fires
+     *  ONLY when the backspace immediately follows the autocorrect (the contract in
+     *  this class's docstring). Without it a backspace many words later would be
+     *  misread as a revert. Idempotent. */
+    fun reset() {
+        pendingAutocorrect = null
+    }
+
     /** A backspace that undoes the last edit. Emits
      *  [CorrectionSignal.RevertAfterAutocorrect] iff it immediately follows an
      *  autocorrect; the signal is one-shot (the slot is cleared). */
@@ -63,7 +73,7 @@ class CorrectionDetector {
 
     /** The user deleted a committed word and retyped; [old] is the rejected form.
      *  Clears any pending autocorrect (this is a distinct event). */
-    fun onDeleteRetype(old: String): CorrectionSignal {
+    fun onDeleteRetype(old: String): CorrectionSignal.DeleteRetype {
         pendingAutocorrect = null
         return CorrectionSignal.DeleteRetype(old)
     }
