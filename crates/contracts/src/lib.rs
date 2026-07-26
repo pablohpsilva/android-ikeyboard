@@ -35,6 +35,9 @@ pub enum Namespace {
     PersonalLm,
     /// Clipboard history (sole writer: `clipboard-core`).
     Clipboard,
+    /// Per-user correction signals — strip-pick prefs + unwanted words (sole
+    /// writer: `corrections`).
+    Corrections,
 }
 
 impl Namespace {
@@ -46,6 +49,7 @@ impl Namespace {
             Namespace::UserDict => "user_dict",
             Namespace::PersonalLm => "personal_lm",
             Namespace::Clipboard => "clipboard",
+            Namespace::Corrections => "corrections",
         }
     }
 }
@@ -202,11 +206,12 @@ mod tests {
             Namespace::UserDict,
             Namespace::PersonalLm,
             Namespace::Clipboard,
+            Namespace::Corrections,
         ];
         let keys: Vec<&str> = all.iter().map(|n| n.as_str()).collect();
         assert_eq!(
             keys,
-            ["touch_model", "user_dict", "personal_lm", "clipboard"]
+            ["touch_model", "user_dict", "personal_lm", "clipboard", "corrections"]
         );
         // Distinct table names — no two namespaces collide in storage.
         for (i, a) in keys.iter().enumerate() {

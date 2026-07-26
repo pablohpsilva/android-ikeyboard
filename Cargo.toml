@@ -33,6 +33,9 @@ members = [
     "crates/prediction",
     "crates/autocorrect",
     "crates/featherkey-core",
+    "crates/fold",
+    "crates/context",
+    "crates/corrections",
 ]
 
 [workspace.package]

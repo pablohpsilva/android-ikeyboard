@@ -1,0 +1,20 @@
+[package]
+name = "featherkey-context"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "On-device next-word (bigram) model, persisted encrypted under PersonalLm via the SecureStore port."
+
+[package.metadata.featherkey]
+layer = "domain"
+
+[dependencies]
+featherkey-contracts = { path = "../contracts" }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+proptest = "1.11.0"

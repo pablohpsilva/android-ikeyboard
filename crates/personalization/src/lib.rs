@@ -93,6 +93,15 @@ impl Personalization {
         self.frequencies.get(word).copied().unwrap_or(0)
     }
 
+    /// The whole learned frequency map, read-only, for consumers that must
+    /// *enumerate* it rather than probe a single word: the predictor's ranking
+    /// snapshot and the shell's swipe-bias export. Ordered (`BTreeMap`), so any
+    /// derived iteration is deterministic.
+    #[must_use]
+    pub fn frequencies(&self) -> &BTreeMap<String, u32> {
+        &self.frequencies
+    }
+
     /// `true` if `word` is part of the user's vocabulary — either it has been
     /// observed at least once, or it is on the whitelist.
     #[must_use]
@@ -222,6 +231,18 @@ mod tests {
         let mut p = Personalization::new();
         p.whitelist("");
         assert!(!p.is_known(""));
+    }
+
+    #[test]
+    fn frequencies_exposes_the_learned_map() {
+        let mut p = Personalization::new();
+        p.observe("cat");
+        p.observe("cat");
+        p.observe("dog");
+        let f = p.frequencies();
+        assert_eq!(f.get("cat"), Some(&2));
+        assert_eq!(f.get("dog"), Some(&1));
+        assert_eq!(f.get("bird"), None);
     }
 
     #[test]

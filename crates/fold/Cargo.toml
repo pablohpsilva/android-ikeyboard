@@ -1,0 +1,20 @@
+[package]
+name = "featherkey-fold"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Match-folding (lowercase, strip diacritics + apostrophes): the Rust twin of the Kotlin Diacritics object."
+
+[package.metadata.featherkey]
+layer = "domain"
+
+[dependencies]
+unicode-normalization = "0.1"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+proptest = "1.11.0"

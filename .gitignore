@@ -27,3 +27,4 @@ __pycache__/
 
 # Kotlin compiler daemon cache
 android/.kotlin/
+.claude/

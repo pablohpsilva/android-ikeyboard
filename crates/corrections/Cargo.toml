@@ -1,0 +1,20 @@
+[package]
+name = "featherkey-corrections"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "On-device correction-signal model (strip-pick prefs + unwanted words), persisted encrypted under Corrections."
+
+[package.metadata.featherkey]
+layer = "domain"
+
+[dependencies]
+featherkey-contracts = { path = "../contracts" }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+proptest = "1.11.0"
