@@ -121,18 +121,19 @@ impl Context {
     /// Bulk-load pre-computed `(prev, next, count)` transitions for migration
     /// (e.g. importing the Kotlin `context.tsv`).
     ///
-    /// Counts are folded in with saturation, so duplicate `(prev, next)` pairs in
-    /// the input accumulate without overflowing. Transitions whose tokens contain
-    /// a codec separator are skipped so the persisted blob can never be
-    /// corrupted.
+    /// Counts are **set** (last-write-wins), not accumulated: a re-imported
+    /// `(prev, next)` overwrites its prior count rather than adding to it. This
+    /// gives the W6a migration idempotency — re-running it (a partial-failure
+    /// retry, or input with duplicate `(prev, next)` rows) converges to the same
+    /// model instead of inflating counts. Mirrors [`codec::decode`]'s insert.
+    /// Transitions whose tokens contain a codec separator are skipped so the
+    /// persisted blob can never be corrupted.
     pub fn import<I: IntoIterator<Item = (String, String, u32)>>(&mut self, transitions: I) {
         for (prev, next, count) in transitions {
             if !is_storable(&prev) || !is_storable(&next) {
                 continue;
             }
-            let inner = self.frequencies.entry(prev).or_default();
-            let entry = inner.entry(next).or_insert(0);
-            *entry = entry.saturating_add(count);
+            self.frequencies.entry(prev).or_default().insert(next, count);
         }
     }
 
@@ -213,15 +214,36 @@ mod tests {
     }
 
     #[test]
-    fn import_accumulates_and_skips_unstorable() {
+    fn import_sets_counts_and_skips_unstorable() {
         let mut c = Context::new();
         c.import([
             ("hi".to_string(), "there".to_string(), 3),
-            ("hi".to_string(), "there".to_string(), 2), // duplicate accumulates
+            ("hi".to_string(), "there".to_string(), 2), // duplicate: last write wins
             ("bad\tprev".to_string(), "ok".to_string(), 9), // unstorable, skipped
         ]);
-        assert_eq!(c.next_counts("hi").get("there"), Some(&5));
+        // Set-semantics (not accumulate): a re-imported (prev, next) overwrites,
+        // so a W6a migration re-run converges instead of inflating counts.
+        assert_eq!(c.next_counts("hi").get("there"), Some(&2));
         assert!(c.next_counts("bad\tprev").is_empty());
+    }
+
+    #[test]
+    fn import_is_idempotent_when_re_run() {
+        // Re-running the same migration input must converge (crash-safe retry),
+        // which requires set-semantics, not accumulation.
+        let rows = || {
+            [
+                ("the".to_string(), "cat".to_string(), 7),
+                ("go".to_string(), "north".to_string(), 4),
+            ]
+        };
+        let mut once = Context::new();
+        once.import(rows());
+        let mut twice = Context::new();
+        twice.import(rows());
+        twice.import(rows());
+        assert_eq!(once, twice);
+        assert_eq!(twice.next_counts("the").get("cat"), Some(&7));
     }
 
     #[test]
