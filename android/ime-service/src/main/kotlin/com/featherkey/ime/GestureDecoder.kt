@@ -53,11 +53,15 @@ object GestureDecoder {
         val poly = ArrayList<PointF>()
         words@ for (w in words) {
             if (w.length < 2) continue
-            val firstC = centers[w.first()] ?: continue
-            val lastC = centers[w.last()] ?: continue
+            // Fold accented letters to their base key: the keyboard has no 'é'/'ç'
+            // key, so an accented word's ideal path runs through its base letters
+            // ('e'/'c'). Without this, every accented word is skipped here and swipe
+            // can only ever produce the unaccented twin (bug: accents "all gone").
+            val firstC = centers[Diacritics.foldChar(w.first())] ?: continue
+            val lastC = centers[Diacritics.foldChar(w.last())] ?: continue
             if (dist(start, firstC) > pruneR || dist(end, lastC) > pruneR) continue
             poly.clear()
-            for (ch in w) poly.add(centers[ch] ?: continue@words)
+            for (ch in w) poly.add(centers[Diacritics.foldChar(ch)] ?: continue@words)
             val ideal = resample(poly, SAMPLES) ?: continue
             var loc = 0f
             var shape = 0f

@@ -71,18 +71,15 @@ class KeyboardView @JvmOverloads constructor(
     var keys: List<RenderKey> = emptyList()
         set(value) { field = value; keysVersion++; requestLayout(); invalidate() }
 
-    /** Predictive suggestions; the strip collapses entirely when this is empty. */
+    /**
+     * Predictive suggestions shown in the reserved strip. The strip band is a
+     * constant height while a standard page is shown (see [stripBand]): its
+     * contents come and go as words are typed, but the band itself never resizes,
+     * so the keys never shift under the finger mid-word. Changing the list only
+     * repaints the strip text.
+     */
     var suggestions: List<String> = emptyList()
-        set(value) {
-            val wasOpen = field.isNotEmpty()
-            field = value
-            // The reserved band eases open when suggestions first appear and eases
-            // shut when they clear (the host app reflows with it — a deliberate
-            // trade of the constant-height optimisation for reclaimed space). While
-            // suggestions merely change contents, only the text repaints.
-            val nowOpen = value.isNotEmpty()
-            if (nowOpen != wasOpen) animateStrip(open = nowOpen) else invalidate()
-        }
+        set(value) { field = value; invalidate() }
 
     /** Shift state (next letter uppercase; highlights the shift key). */
     var shifted: Boolean = false
@@ -183,17 +180,15 @@ class KeyboardView @JvmOverloads constructor(
     private fun dp(v: Float) =
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
 
-    // --- Height / strip animation state ---
+    // --- Height animation state ---
     // [animatedHeightScale] is the scale actually rendered; it eases toward the
-    // [heightScale] target. [stripReveal] is the reserved suggestion band's
-    // openness in 0..1 (0 = fully collapsed, 1 = fully open); it eases as
-    // suggestions appear/clear. Both drive onMeasure, so the IME window height
-    // (and the host app above it) follows them frame by frame.
+    // [heightScale] target (a live compact/standard/tall change). It drives
+    // onMeasure, so the IME window height follows it frame by frame. The
+    // suggestion band, by contrast, is a constant height (see [stripBand]) — it
+    // is never animated, so typing never resizes the window.
     private var animatedHeightScale = 1f
-    private var stripReveal = 0f
     private var heightAnimator: ValueAnimator? = null
-    private var stripAnimator: ValueAnimator? = null
-    // Material "standard" ease (fast-out, slow-in) for both height transitions.
+    // Material "standard" ease (fast-out, slow-in) for the height-scale change.
     private val easing = PathInterpolator(0.4f, 0f, 0.2f, 1f)
 
     // --- Geometry ---
@@ -204,8 +199,9 @@ class KeyboardView @JvmOverloads constructor(
     private val rowHeight get() = dp(52f) * animatedHeightScale
     private val funcRowHeight get() = dp(54f) * animatedHeightScale
     private val bottomBarHeight get() = dp(46f) * animatedHeightScale
-    /** The reserved suggestion band's *current* height (full band × reveal). */
-    private val stripBand get() = stripHeight * stripReveal
+    /** The reserved suggestion band's height — constant while a standard page is
+     *  shown, so the keys stay put as suggestions come and go (they only repaint). */
+    private val stripBand get() = stripHeight
     private val sideMargin get() = dp(4f)
     private val keyGap get() = dp(5f)     // horizontal gap
     private val rowGap get() = dp(6f)     // vertical gap (inset per row)
@@ -331,13 +327,9 @@ class KeyboardView @JvmOverloads constructor(
 
         fun rowStart(n: Int) = sideMargin + (contentW - (n * baseKeyW + (n - 1) * keyGap)) / 2f
 
-        // The suggestion band occupies the top [stripBand] px (animated: 0 when
-        // collapsed, up to the full strip height when open), and the key grid
-        // starts just below it. The three Suggest cells always exist; when the
-        // band is collapsed they are zero-height, so they neither draw nor take
-        // taps. During the open/close ease the whole grid slides with the band —
-        // but the IME window grows/shrinks at the top by the same amount, so the
-        // keys stay put on screen and only the band above them changes.
+        // The suggestion band occupies the top [stripBand] px (a constant height)
+        // and the key grid starts just below it. The three Suggest cells span the
+        // band; they take taps only where a suggestion is actually drawn.
         val band = stripBand
         val cw = w / 3f
         for (i in 0..2) out += Cell.Suggest(RectF(i * cw, 0f, (i + 1) * cw, band), i)
@@ -460,27 +452,22 @@ class KeyboardView @JvmOverloads constructor(
 
         cells = layoutCells()
 
-        // Suggestion strip. Its text and dividers fade in step with [stripReveal]
-        // so the band's contents ease in as it opens and out as it collapses,
-        // rather than popping at the ends of the height animation.
-        if (suggestions.isNotEmpty() && stripReveal > 0.01f) {
+        // Suggestion strip. The band is a constant height; only its contents (the
+        // words and the dividers between them) come and go, so nothing here resizes
+        // the view.
+        if (suggestions.isNotEmpty()) {
             val band = stripBand
-            val alpha = (stripReveal.coerceIn(0f, 1f) * 255f).toInt()
             labelPaint.color = c.suggestion
-            labelPaint.alpha = alpha
             labelPaint.textSize = stripHeight * 0.42f
             for (cell in cells.filterIsInstance<Cell.Suggest>()) {
                 val word = suggestions.getOrNull(cell.index) ?: continue
                 val cy = cell.rect.centerY() - (labelPaint.ascent() + labelPaint.descent()) / 2
                 canvas.drawText(word, cell.rect.centerX(), cy, labelPaint)
             }
-            dividerPaint.alpha = alpha
             for (i in 1 until 3) if (i < suggestions.size) {
                 val x = width / 3f * i
                 canvas.drawLine(x, band * 0.28f, x, band * 0.72f, dividerPaint)
             }
-            dividerPaint.alpha = 255
-            labelPaint.alpha = 255
             labelPaint.color = c.label
         }
 
@@ -642,7 +629,9 @@ class KeyboardView @JvmOverloads constructor(
     }
 
     private fun drawReturn(canvas: Canvas, r: RectF, c: Palette) {
-        iconPaint.color = c.iconMuted; iconPaint.strokeWidth = dp(1.7f)
+        // Same colour as the other key icons (backspace/shift/globe) — the return
+        // key is not de-emphasised.
+        iconPaint.color = c.icon; iconPaint.strokeWidth = dp(1.7f)
         drawIcon(canvas, ICON_RETURN, r, ICON_FRAC, iconPaint)
     }
 
@@ -664,7 +653,14 @@ class KeyboardView @JvmOverloads constructor(
         if (page == Page.EMOJI) return onEmojiTouch(event)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                // A finger between keys lands in the small gap between two rects and
+                // used to hit nothing — the tap vanished ("I typed but got nothing").
+                // Fall back to the nearest cell so no in-area tap is ever dropped;
+                // for letters, decode + the per-user tap model then resolve which
+                // key was meant. The threshold keeps a tap on the empty strip (a
+                // whole row away) from snapping to a letter.
                 val hit = cells.firstOrNull { it.rect.contains(event.x, event.y) }
+                    ?: nearestCell(event.x, event.y)
                 if (hit != null) keyPressFeedback()
                 // A letter press may become a swipe: defer its commit to UP and
                 // start tracking a path. Everything else fires immediately.
@@ -733,6 +729,27 @@ class KeyboardView @JvmOverloads constructor(
 
     private fun gestureStartThreshold() = dp(26f)
 
+    /** The cell nearest to (x,y) if it is within a key's reach — used to rescue a
+     *  tap that fell in an inter-key gap. Returns null when the point is far from
+     *  every cell (e.g. deep in the empty suggestion strip), so such taps stay
+     *  no-ops rather than typing a stray letter. */
+    private fun nearestCell(x: Float, y: Float): Cell? {
+        var best: Cell? = null
+        var bestD = Float.MAX_VALUE
+        for (c in cells) {
+            val d = distanceToRect(c.rect, x, y)
+            if (d < bestD) { bestD = d; best = c }
+        }
+        return if (bestD <= rowHeight * 0.6f) best else null
+    }
+
+    /** Euclidean distance from a point to a rectangle (0 when inside). */
+    private fun distanceToRect(r: RectF, x: Float, y: Float): Float {
+        val dx = when { x < r.left -> r.left - x; x > r.right -> x - r.right; else -> 0f }
+        val dy = when { y < r.top -> r.top - y; y > r.bottom -> y - r.bottom; else -> 0f }
+        return kotlin.math.hypot(dx, dy)
+    }
+
     private fun resetGesture() {
         gestureCell = null; gesturing = false; trailLen = 0f
         trail.clear()
@@ -775,26 +792,7 @@ class KeyboardView @JvmOverloads constructor(
         pressed = null
     }
 
-    // ---- Height / strip animation ------------------------------------------
-
-    /** Ease the reserved suggestion band open ([open]) or shut, resizing the IME
-     *  window with it. Duration scales with the remaining distance so a reversal
-     *  mid-flight (suggestions arriving as the band is closing) stays quick and
-     *  never snaps. */
-    private fun animateStrip(open: Boolean) {
-        val target = if (open) 1f else 0f
-        if (stripReveal == target && stripAnimator?.isRunning != true) { invalidate(); return }
-        stripAnimator?.cancel()
-        stripAnimator = ValueAnimator.ofFloat(stripReveal, target).apply {
-            duration = (kotlin.math.abs(target - stripReveal) * STRIP_ANIM_MS).toLong().coerceAtLeast(1L)
-            interpolator = easing
-            addUpdateListener {
-                stripReveal = it.animatedValue as Float
-                requestLayout(); invalidate()
-            }
-            start()
-        }
-    }
+    // ---- Height animation ---------------------------------------------------
 
     /** Ease the rendered height scale toward [target] (a live compact/standard/
      *  tall change), resizing the IME window frame by frame. */
@@ -814,8 +812,8 @@ class KeyboardView @JvmOverloads constructor(
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        // Don't let animations or the repeat timer outlive the view.
-        stripAnimator?.cancel(); heightAnimator?.cancel()
+        // Don't let the height animation or the repeat timer outlive the view.
+        heightAnimator?.cancel()
         stopBackspaceRepeat()
     }
 
@@ -1043,9 +1041,6 @@ class KeyboardView @JvmOverloads constructor(
     }
 
     private companion object {
-        /** Full-travel duration for the suggestion band's open/close ease (ms);
-         *  a partial reversal is proportionally shorter. */
-        const val STRIP_ANIM_MS = 190f
         /** Duration for a live compact/standard/tall height-scale ease (ms). */
         const val HEIGHT_ANIM_MS = 200L
 

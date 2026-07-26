@@ -54,10 +54,16 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 class FeatherKeyImeService : InputMethodService() {
 
-    private lateinit var bridge: FeatherKeyBridge
+    /** The native bridge. Opened off the main thread ([bridgeJob]) so the heavy
+     *  keystore + lexicon + FST work never blocks the keyboard from appearing;
+     *  null until that completes. Input-path callers gate on [ensureBridgeReady]. */
+    @Volatile private var bridge: FeatherKeyBridge? = null
+    /** The in-flight [bridge] open, joined by [ensureBridgeReady] on first use. */
+    private var bridgeJob: Job? = null
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private var field: FieldSensitivity = FieldSensitivity { false }
@@ -91,6 +97,20 @@ class FeatherKeyImeService : InputMethodService() {
     private lateinit var bigrams: ContextModel
     /** The last committed word, lowercased — the context for the next prediction. */
     @Volatile private var lastWord: String? = null
+    /**
+     * Length of the text last committed as a single unit — a picked suggestion
+     * (word + trailing space) or a swipe result — or 0 if the last edit was not
+     * such a unit. While non-zero, the next single backspace deletes that whole
+     * span instead of one character, so a wrong swipe or suggestion clears in one
+     * tap. Any other edit (typing, space, emoji, a new field) disarms it.
+     */
+    private var atomicSpan: Int = 0
+    /** The active field's inputType — drives [getCursorCapsMode] auto-capitalization. */
+    private var editorInputType: Int = 0
+    /** The active field's raw imeOptions — Enter routing (see [EnterKey]). */
+    private var editorImeOptions: Int = 0
+    /** The active field's requested IME action (Send/Search/Next/…), masked out. */
+    private var editorAction: Int = EditorInfo.IME_ACTION_UNSPECIFIED
     /** Logical-space centre of each letter key, for computing tap offsets to learn. */
     @Volatile private var keyCenters: Map<Char, PointF> = emptyMap()
     /** The learning-consent toggle (BR-22); learning is off until opted in. */
@@ -119,17 +139,53 @@ class FeatherKeyImeService : InputMethodService() {
         ConsentStore(applicationContext).learningEnabled
             .onEach { learningEnabled = it }
             .launchIn(ioScope)
-        val key = KeystoreKeyProvider(this).provisionDataKey()
-        val dbPath = File(filesDir, "featherkey.redb").absolutePath
-        bridge = FeatherKeyBridge.open(dbPath, key, Lexicons.load(this, currentTags))
-        key.fill(0) // wipe the shell's copy; the native side holds it zeroizing
+        // Open the native bridge off the main thread. Provisioning the keystore
+        // key, parsing the lexicon word lists and building the core's FSTs together
+        // cost ~1s+ on older devices; doing them here (in onCreate, on the main
+        // thread) would block the keyboard from appearing that whole time. Instead
+        // the keyboard shows immediately with the view's fallback QWERTY, letter
+        // taps still decode (the tap model is geometry-only), and the first call
+        // that truly needs the core waits for this via [ensureBridgeReady]. The
+        // real layout swaps in when the open completes.
+        bridgeJob = ioScope.launch {
+            // Degrade-don't-crash (BR-29/30/31): a keystore, lexicon-parse or
+            // store-open fault here must NOT crash the IME. An uncaught throw in
+            // this coroutine kills the service — the keyboard then shows only the
+            // suggestion strip and never reopens (a locked/corrupt redb after the
+            // process is killed mid-write can make open() throw on every start). On
+            // failure the bridge stays null: the view still renders its fallback
+            // QWERTY and every bridge call site is null-safe, so typing survives.
+            runCatching {
+                val key = KeystoreKeyProvider(this@FeatherKeyImeService).provisionDataKey()
+                try {
+                    val dbPath = File(filesDir, "featherkey.redb").absolutePath
+                    bridge = FeatherKeyBridge.open(dbPath, key, Lexicons.load(applicationContext, currentTags))
+                } finally {
+                    key.fill(0) // wipe the shell's copy whether or not open succeeded
+                }
+            }
+            withContext(Dispatchers.Main) { keyboard?.let { it.keys = renderKeys() } }
+        }
         // Ease the whole keyboard up when it shows and down when it hides.
         window?.window?.setWindowAnimations(R.style.ImeWindowAnimation)
     }
 
+    /**
+     * Block until the native bridge has finished opening, if it hasn't already.
+     * The open runs off the main thread ([bridgeJob]); the input path can't decode
+     * or rank without it, so the first keystroke/gesture joins the in-flight open
+     * (reusing its work, never reloading). Only ever blocks once, and only for the
+     * open's remaining time — which has been running since onCreate, so much of it
+     * overlaps the user reaching for the first key. Mirrors [ensureVocabReady].
+     */
+    private fun ensureBridgeReady() {
+        if (bridge != null) return
+        runCatching { runBlocking { bridgeJob?.join() } }
+    }
+
     override fun onCreateInputView(): View {
         val view = KeyboardView(this)
-        view.keys = renderKeys()
+        view.keys = renderKeys() // fallback QWERTY until the bridge finishes opening
         view.spaceHint = spaceHint(currentTags)
         view.onKeyTouch = { x, y -> handleTouch(x, y) }
         view.onCharKey = { ch -> handleChar(ch) }
@@ -164,19 +220,54 @@ class FeatherKeyImeService : InputMethodService() {
         val sensitive = EditorInfoSensitivity.isSensitive(info)
         field = FieldSensitivity { sensitive } // captured once per field (E-2)
         pending.clear()
+        atomicSpan = 0
         lastWord = null // a new field starts with no preceding-word context
+        editorInputType = info?.inputType ?: 0
+        editorImeOptions = info?.imeOptions ?: 0
+        editorAction = editorImeOptions and EditorInfo.IME_MASK_ACTION
         keyboard?.suggestions = emptyList()
         keyboard?.resetPage()
         // Pick up any language or appearance changes made in settings since the
         // last field (both are read synchronously and take effect from here on).
         applyLanguages(langPrefs.activeTags())
         applyAppearance()
+        applyAutoCaps() // start a sentence/name field already shifted
+    }
+
+    /** Once the input view is actually up, arm auto-caps for the field. onStartInput
+     *  can run before the view exists (keyboard == null there), so the first field's
+     *  capitalization must be set here or it is lost. */
+    override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
+        super.onStartInputView(info, restarting)
+        applyAutoCaps()
+    }
+
+    /**
+     * Auto-capitalization (precise but flexible). Arms the shift as a one-shot when
+     * the caret sits where a capital belongs. It first honours the field's own
+     * request via [InputConnection.getCursorCapsMode] (CAP_SENTENCES / CAP_WORDS /
+     * CAP_CHARACTERS); for ordinary text editors that set no such flag — some note
+     * apps among them — it falls back to detecting a sentence start ourselves
+     * (start of field, after a newline, or after ". "/"! "/"? "), so capitalization
+     * "just works". Never fires in password/email/URL/number fields, where a
+     * capital would be wrong. One-shot: the next letter is upper-cased and shift
+     * clears, and tapping shift first always wins, so a deliberate lowercase is
+     * never fought. Called at every context change so caps track the caret.
+     */
+    private fun applyAutoCaps() {
+        val kb = keyboard ?: return
+        val ic = currentInputConnection ?: return
+        kb.shifted = AutoCaps.shouldCapitalize(
+            editorInputType,
+            ic.getCursorCapsMode(editorInputType),
+            ic.getTextBeforeCursor(2, 0),
+        )
     }
 
     /** Push [tags] to the core (if changed) and reflect them on the space bar. */
     private fun applyLanguages(tags: List<String>) {
         if (tags != currentTags) {
-            runCatching { bridge.setActiveLanguages(Lexicons.load(this, tags)) }
+            runCatching { bridge?.setActiveLanguages(Lexicons.load(this, tags)) }
             currentTags = tags
             deviceDict.setLanguages(tags)
             loadVocab(tags)
@@ -219,6 +310,8 @@ class FeatherKeyImeService : InputMethodService() {
     /** A swipe over the letters: decode to a word, commit it, offer alternatives. */
     private fun handleGesture(pathPts: List<PointF>, centers: Map<Char, PointF>) {
         val ic = currentInputConnection ?: return
+        atomicSpan = 0 // a fresh gesture; re-armed below only if it commits a word
+        ensureBridgeReady() // cold start: the first swipe waits for the core to open
         ensureVocabReady() // cold start: don't decode the first swipe against an empty list
         val words = GestureDecoder.decode(pathPts, centers, vocab.words, vocab::rankOf, usage.map, limit = 4)
         if (words.isEmpty()) return
@@ -230,7 +323,7 @@ class FeatherKeyImeService : InputMethodService() {
             val langs = vocab.languagesOf(w).ifEmpty { setOf(fallback) }
             for (lang in langs) cands.add(FfiRankCandidate(w, lang, FfiSource.LEXICON, i.toUInt()))
         }
-        val ranked = runCatching { bridge.rank(cands, SUGGESTIONS.toUInt()).map { it.word } }
+        val ranked = runCatching { bridge?.rank(cands, SUGGESTIONS.toUInt())?.map { it.word } ?: emptyList() }
             .getOrDefault(emptyList())
         val best = ranked.firstOrNull() ?: words.firstOrNull() ?: return
         if (pending.isNotEmpty()) { // finalise a half-typed word with a space
@@ -238,8 +331,13 @@ class FeatherKeyImeService : InputMethodService() {
             ic.commitText(" ", 1)
             pending.clear()
         }
-        ic.commitText(best, 1)
-        pending.clear(); pending.append(best) // treat as the current word: alts replace it
+        // Honor auto-caps for swipe too: a sentence-initial glide capitalizes its
+        // word just as typing would (the shift is armed by applyAutoCaps).
+        val out = if (keyboard?.shifted == true) CaseMatch.matchLeading("A", best) else best
+        keyboard?.shifted = false
+        ic.commitText(out, 1)
+        pending.clear(); pending.append(out) // treat as the current word: alts replace it
+        atomicSpan = out.length // a wrong swipe clears whole on the next backspace
         keyboard?.suggestions = ranked.take(3).ifEmpty { words.take(3) }
         schedulePersist()
     }
@@ -251,7 +349,7 @@ class FeatherKeyImeService : InputMethodService() {
      */
     private fun learnWord(word: String) {
         if (word.isEmpty() || field.isSensitive() || !learningEnabled) return
-        runCatching { bridge.learnWord(word, field) }
+        runCatching { bridge?.learnWord(word, field) }
         usage.record(word)
         // Record the transition from the previous word, then advance the context.
         val w = word.lowercase()
@@ -260,7 +358,7 @@ class FeatherKeyImeService : InputMethodService() {
         // (E-2/BR-26); this whole method is already gated on consent + sensitivity.
         val recognizers = (vocab.languagesOf(w) +
             (if (!field.isSensitive()) deviceDict.knownLanguages(w) else emptySet())).toList()
-        runCatching { bridge.observeLanguage(recognizers) }
+        runCatching { bridge?.observeLanguage(recognizers) }
         lastWord?.let { bigrams.record(it, w) }
         lastWord = w
     }
@@ -272,6 +370,7 @@ class FeatherKeyImeService : InputMethodService() {
     override fun onFinishInput() {
         super.onFinishInput()
         pending.clear()
+        atomicSpan = 0
         keyboard?.suggestions = emptyList()
         keyboard?.removeCallbacks(refreshStrip)
         schedulePersist(immediate = true)
@@ -279,7 +378,7 @@ class FeatherKeyImeService : InputMethodService() {
 
     private fun renderKeys(): List<RenderKey> =
         runCatching {
-            bridge.layoutKeys().map { RenderKey(it.label, it.x, it.y, it.width, it.height) }
+            bridge?.layoutKeys()?.map { RenderKey(it.label, it.x, it.y, it.width, it.height) } ?: emptyList()
         }.getOrDefault(emptyList())
             .also { keys ->
                 keyCenters = keys.filter { it.label.length == 1 }
@@ -289,8 +388,10 @@ class FeatherKeyImeService : InputMethodService() {
     /** A letter touch, already mapped to the Rust layout's logical space. */
     private fun handleTouch(x: Float, y: Float) {
         val ic = currentInputConnection ?: return
-        val result = runCatching { bridge.decode(x, y) }.getOrNull() ?: return
-        val decoded = result.best ?: return
+        atomicSpan = 0 // typing edits the word char-by-char, so backspace is char-wise
+        ensureBridgeReady() // cold start: the first tap waits for the core to open
+        val result = runCatching { bridge?.decode(x, y) }.getOrNull() ?: return
+        val decoded = chooseKey(result) ?: return
         observeTap(decoded, x, y)
         val kb = keyboard
         val ch = if (kb?.shifted == true) decoded.uppercase() else decoded
@@ -298,6 +399,28 @@ class FeatherKeyImeService : InputMethodService() {
         ic.commitText(ch, 1)
         if (kb?.shifted == true) kb.shifted = false
         updateSuggestions()
+    }
+
+    /**
+     * Pick which key a touch meant. Starts from the decoder's geometric best (the
+     * per-user tap model already folded in), but when a word is in progress and
+     * that best would kill the word — no dictionary word continues "prefix+best" —
+     * it looks at the decoder's other near-confidence candidates and, if one keeps
+     * a real word alive, prefers it. This is the lightweight fat-finger / low-vision
+     * rescue: a tap landing between two keys resolves to the letter that spells a
+     * word, not the fractionally-closer one that spells nothing. Purely additive —
+     * with no pending word, an unambiguous tap, or no live alternative, it returns
+     * the geometric best unchanged.
+     */
+    private fun chooseKey(result: com.featherkey.ffi.generated.FfiDecode): String? {
+        val best = result.best ?: result.candidates.firstOrNull()?.key ?: return null
+        return TapDisambiguator.choose(
+            best = best,
+            candidates = result.candidates.map { it.key to it.confidence },
+            prefix = pending.toString(),
+            ratio = AMBIGUOUS_TAP_RATIO,
+            isLivePrefix = vocab::hasWordPrefix,
+        )
     }
 
     /**
@@ -309,6 +432,7 @@ class FeatherKeyImeService : InputMethodService() {
      */
     private fun handleAccent(ch: String) {
         val ic = currentInputConnection ?: return
+        atomicSpan = 0 // an explicit letter pick edits the word char-by-char
         val kb = keyboard
         val out = if (kb?.shifted == true) ch.uppercase() else ch
         pending.append(out)
@@ -329,18 +453,29 @@ class FeatherKeyImeService : InputMethodService() {
         if (field.isSensitive() || !learningEnabled) return
         val ch = decoded.firstOrNull()?.lowercaseChar() ?: return
         val center = keyCenters[ch] ?: return
-        runCatching { bridge.observeTap(ch.toString(), x - center.x, y - center.y, field) }
+        runCatching { bridge?.observeTap(ch.toString(), x - center.x, y - center.y, field) }
     }
 
     private fun handleFunction(fk: FunctionKey) {
         val ic = currentInputConnection ?: return
         when (fk) {
             FunctionKey.SPACE -> boundary(ic)
-            FunctionKey.BACKSPACE -> { backspace(ic); updateSuggestions() }
+            FunctionKey.BACKSPACE -> { backspace(ic); updateSuggestions(); applyAutoCaps() }
             FunctionKey.ENTER -> {
                 flushWord(ic)
-                sendDefaultEditorAction(true)
+                // A multi-line field (Notes, message bodies) always wants a real
+                // newline; a single-line field with a requested action (Search/
+                // Send/Next/…) wants that action. Otherwise fall back to a newline
+                // so Enter is never a dead key (the bug: sendDefaultEditorAction did
+                // nothing for multi-line / no-action fields).
+                // A real requested action (Search/Send/Go/Next/Done) fires that
+                // action; a multi-line or no-action field (note bodies) gets a
+                // literal newline — so Enter is never a dead key (the bug:
+                // sendDefaultEditorAction did nothing for a no-action field).
+                if (EnterKey.insertsNewline(editorInputType, editorImeOptions)) ic.commitText("\n", 1)
+                else ic.performEditorAction(editorAction)
                 keyboard?.suggestions = emptyList()
+                applyAutoCaps()
             }
             FunctionKey.GLOBE -> openKeyboardPreferences()
             FunctionKey.MIC -> startVoiceInput()
@@ -352,6 +487,7 @@ class FeatherKeyImeService : InputMethodService() {
         val ic = currentInputConnection ?: return
         ic.commitText(ch, 1)
         pending.clear()
+        atomicSpan = 0
         keyboard?.suggestions = emptyList()
     }
 
@@ -366,6 +502,7 @@ class FeatherKeyImeService : InputMethodService() {
         val ic = currentInputConnection ?: return
         ic.commitText(emoji, 1)
         pending.clear()
+        atomicSpan = 0
         lastWord = null
         keyboard?.suggestions = emptyList()
         keyboard?.recents = emojiRecents.record(emoji)
@@ -406,7 +543,7 @@ class FeatherKeyImeService : InputMethodService() {
                     if (w.lowercase() != prefix) cands.add(FfiRankCandidate(w, lang, FfiSource.DEVICE, i.toUInt()))
                 }
         }
-        val ranked = runCatching { bridge.rank(cands, SUGGESTIONS.toUInt()).map { it.word } }.getOrDefault(emptyList())
+        val ranked = runCatching { bridge?.rank(cands, SUGGESTIONS.toUInt())?.map { it.word } ?: emptyList() }.getOrDefault(emptyList())
         return ranked.ifEmpty { bundled.map { it.word }.distinct().take(SUGGESTIONS) }
     }
 
@@ -415,29 +552,83 @@ class FeatherKeyImeService : InputMethodService() {
         val ic = currentInputConnection ?: return
         val word = keyboard?.suggestions?.getOrNull(index) ?: return
         val cur = pending.toString()
+        // Keep the case the word was heading toward: if the pending word was
+        // capitalized (sentence start / auto-caps), the picked suggestion is too,
+        // so tapping a completion for "Hel" gives "Hello", not "hello".
+        val out = CaseMatch.matchLeading(cur, word)
         if (cur.isNotEmpty()) ic.deleteSurroundingText(cur.length, 0)
-        ic.commitText("$word ", 1)
-        learnWord(word)
+        ic.commitText("$out ", 1)
+        learnWord(out)
         pending.clear()
+        atomicSpan = out.length + 1 // word + its space clears whole on next backspace
         updateSuggestions() // now show next-word predictions for this word
+        applyAutoCaps()
         schedulePersist()
     }
 
-    /** Word boundary: correct the pending word, learn it (gated), then space. */
+    /** Word boundary: correct + accent the pending word, learn it (gated), then
+     *  space — or, on a bare second space, end the sentence with ". ". */
     private fun boundary(ic: InputConnection) {
         val word = pending.toString()
+        if (word.isEmpty()) {
+            // No word in progress: a space right after "<word> " becomes ". ".
+            if (maybeDoubleSpacePeriod(ic)) return
+        }
         if (word.isNotEmpty()) {
-            val corrected = correctedWord(word)
-            if (corrected != null && corrected != word) {
+            val fixed = correctedWord(word) ?: word     // core edit-distance typo fix (no-clobber)
+            val out = accentUpgrade(fixed) ?: fixed      // then restore accents (tambem → também)
+            if (out != word) {
                 ic.deleteSurroundingText(word.length, 0)
-                ic.commitText(corrected, 1)
+                ic.commitText(out, 1)
             }
-            learnWord(corrected ?: word)
+            learnWord(out)
         }
         ic.commitText(" ", 1)
         pending.clear()
+        atomicSpan = 0 // after a manual space, backspace deletes char-by-char again
         updateSuggestions() // next-word predictions for the word just committed
+        applyAutoCaps() // CAP_WORDS fields (names) re-capitalize after each space
         schedulePersist()
+    }
+
+    /**
+     * Double-space → ". ": if the cursor sits just after "<letter-or-digit><space>",
+     * replace that lone trailing space with a period and space, so a second tap of
+     * the space bar ends the sentence (the universal Gboard/iOS convention). Reads
+     * the actual text before the cursor rather than tracking state, so it fires only
+     * when there really is a word-then-space to punctuate (never after "..", "  ",
+     * or at the start of a field). Returns true when it fired — the caller must then
+     * NOT also commit its own space.
+     */
+    private fun maybeDoubleSpacePeriod(ic: InputConnection): Boolean {
+        if (!PunctuationRules.doubleSpaceMakesPeriod(ic.getTextBeforeCursor(2, 0))) return false
+        ic.deleteSurroundingText(1, 0) // drop the lone trailing space
+        ic.commitText(". ", 1)
+        atomicSpan = 0
+        lastWord = null // "." ends the sentence: no next-word context carries across it
+        keyboard?.suggestions = emptyList()
+        applyAutoCaps() // capitalize the first letter of the new sentence
+        return true
+    }
+
+    /**
+     * The canonical accented spelling to auto-apply for a fully-typed word at a
+     * boundary (the user opted into auto-accent on space), or null to leave it as
+     * typed. Only lowercase words of length ≥ 3 are upgraded: this restores the
+     * common cases (tambem → também, voce → você) while leaving very short,
+     * meaning-ambiguous tokens (e/é, a/à, da/dá) exactly as the user typed them.
+     */
+    private fun accentUpgrade(word: String): String? {
+        if (word.length < 3) return null
+        val lower = word.lowercase()
+        val allLower = word == lower
+        // Title-case (only the first letter upper) is what auto-caps produces at a
+        // sentence start — still eligible, re-capitalized after lookup so "Tambem"
+        // → "Também". ALLCAPS or interior caps are left exactly as deliberately typed.
+        val titleCase = !allLower && word[0].isUpperCase() && word.substring(1) == word.substring(1).lowercase()
+        if (!allLower && !titleCase) return null
+        val canon = vocab.accentedCanonical(lower) ?: return null
+        return CaseMatch.matchLeading(word, canon)
     }
 
     /**
@@ -460,11 +651,20 @@ class FeatherKeyImeService : InputMethodService() {
         val deviceCands = ArrayList<FfiRankCandidate>()
         if (deviceOn) for ((lang, words) in deviceDict.candidatesByLanguage())
             words.forEachIndexed { i, w -> deviceCands.add(FfiRankCandidate(w, lang, FfiSource.DEVICE, i.toUInt())) }
-        val c = runCatching { bridge.chooseCorrection(word, deviceKnown, deviceCands) }.getOrNull() ?: return null
+        val c = runCatching { bridge?.chooseCorrection(word, deviceKnown, deviceCands) }.getOrNull() ?: return null
         return if (c.applied && c.primary != word) c.primary else null
     }
 
     private fun backspace(ic: InputConnection) {
+        // A word committed as one unit (swipe or picked suggestion) clears whole on
+        // the first backspace after it; the arming is one-shot.
+        if (atomicSpan > 0) {
+            ic.deleteSurroundingText(atomicSpan, 0)
+            atomicSpan = 0
+            pending.clear()
+            lastWord = null // the deleted word is gone: no next-word context
+            return
+        }
         if (pending.isNotEmpty()) pending.deleteCharAt(pending.length - 1)
         ic.deleteSurroundingText(1, 0)
     }
@@ -472,6 +672,7 @@ class FeatherKeyImeService : InputMethodService() {
     private fun flushWord(ic: InputConnection) {
         learnWord(pending.toString())
         pending.clear()
+        atomicSpan = 0
         lastWord = null // Enter ends the line: start the next with no context
     }
 
@@ -537,7 +738,7 @@ class FeatherKeyImeService : InputMethodService() {
         persistJob?.cancel()
         persistJob = ioScope.launch {
             if (!immediate) delay(PERSIST_DEBOUNCE_MS)
-            runCatching { bridge.persist() }
+            runCatching { bridge?.persist() }
             usage.persist()
             bigrams.persist()
         }
@@ -549,14 +750,18 @@ class FeatherKeyImeService : InputMethodService() {
         usage.persist()
         bigrams.persist()
         ioScope.cancel()
-        runCatching { bridge.persist() }
-        runCatching { bridge.close() }
+        runCatching { bridge?.persist() }
+        runCatching { bridge?.close() }
         super.onDestroy()
     }
 
     private companion object {
         const val PERSIST_DEBOUNCE_MS = 3_000L
         const val SUGGESTIONS = 3 // strip capacity
+        // A rival key must carry at least this share of the best key's confidence
+        // to override it on word-continuation grounds — so only a genuinely close
+        // (between-keys) tap is rescued, never a far, clearly-different key.
+        private const val AMBIGUOUS_TAP_RATIO = 0.5f
         private const val DEVICE_REFRESH_COALESCE_MS = 16L // ~one frame; batch same-keystroke device results
     }
 }
