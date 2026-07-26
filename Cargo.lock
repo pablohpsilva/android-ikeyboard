@@ -502,8 +502,10 @@ dependencies = [
 name = "featherkey-prediction"
 version = "0.0.0"
 dependencies = [
+ "featherkey-context",
  "featherkey-contracts",
  "featherkey-dictionary",
+ "featherkey-fold",
 ]
 
 [[package]]

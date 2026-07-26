@@ -13,6 +13,8 @@ layer = "domain"
 [dependencies]
 featherkey-contracts = { path = "../contracts" }
 featherkey-dictionary = { path = "../dictionary" }
+featherkey-fold = { path = "../fold" }
+featherkey-context = { path = "../context" }
 
 [lints]
 workspace = true
