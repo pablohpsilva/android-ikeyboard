@@ -182,3 +182,40 @@ fn sensitive_strip_pick_does_not_change_ranking() {
         "an ordinary-field strip pick should promote 'team' (proves the gate suppresses, not a no-op)"
     );
 }
+
+/// The unwanted (delete-retype) demotion is gated the same way: repeatedly
+/// deleting a word in a sensitive field records nothing, so ranking is unchanged;
+/// the identical deletes in an ordinary field DO demote it.
+#[test]
+fn sensitive_delete_retype_does_not_change_ranking() {
+    let lex = || {
+        FeatherKeyCore::new(vec![(
+            "en".to_owned(),
+            vec!["tea".to_owned(), "team".to_owned()],
+        )])
+        .expect("valid core")
+    };
+    let top = |fk: &FeatherKeyCore| fk.rank_suggestions("", "te", Vec::new())[0].word.clone();
+
+    // Sensitive: deletes are dropped, so "tea" (bundled-first) still leads.
+    let mut sensitive = lex();
+    for _ in 0..5 {
+        sensitive.observe_delete_retype("tea", &Sensitive);
+    }
+    assert_eq!(
+        top(&sensitive),
+        "tea",
+        "a sensitive-field delete-retype must not demote 'tea'"
+    );
+
+    // Ordinary control: the identical deletes DO demote "tea" below "team".
+    let mut ordinary = lex();
+    for _ in 0..5 {
+        ordinary.observe_delete_retype("tea", &Ordinary);
+    }
+    assert_eq!(
+        top(&ordinary),
+        "team",
+        "an ordinary-field delete-retype should demote 'tea' (proves the gate suppresses, not a no-op)"
+    );
+}

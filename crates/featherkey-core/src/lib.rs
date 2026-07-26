@@ -73,6 +73,15 @@ use featherkey_touch_model::TouchModel;
 /// dominates. The bonus grows sub-linearly, so it saturates rather than runs away.
 const CORRECTION_STICKY_WEIGHT: f64 = 1.0;
 
+/// Weight of the correction "unwanted" demotion — a word the user repeatedly
+/// deletes and retypes (`observe_delete_retype`) is pushed *down* by
+/// `CORRECTION_UNWANTED_WEIGHT * ln(1 + unwanted)`. Half the promotion weight on
+/// purpose: a delete-retype is a weaker, noisier negative signal than an explicit
+/// pick, so a single one is only a ~0.35 nudge (well under the `ln 2 ≈ 0.69`
+/// rank0→rank1 step) and cannot bury a strong default; it takes ~4 delete-retypes
+/// to move a word down one rank position. Like the promotion it saturates.
+const CORRECTION_UNWANTED_WEIGHT: f64 = 0.5;
+
 /// One ranked key candidate for a touch: the committed character and the
 /// decoder's confidence in it (`0.0..=1.0`).
 #[derive(Debug, Clone, PartialEq)]
@@ -355,30 +364,48 @@ impl FeatherKeyCore {
             prefix: prefix.to_owned(),
         });
         cands.extend(device);
-        // Correction "sticky-fix" bonus: a completion the user has repeatedly
-        // picked for this exact prefix (observe_strip_pick) is promoted, so a
-        // lower-ranked-but-preferred word overtakes the default. The bonus is
-        // added before the top-k cut, so a promoted word is never dropped first.
+        // Correction adjustment: net of the "sticky-fix" promotion (a completion
+        // the user repeatedly picks for this prefix) and the "unwanted" demotion
+        // (a word the user repeatedly deletes and retypes). Applied before the
+        // top-k cut, so a promoted word is never dropped first.
         let ranked = featherkey_candidate_ranker::rank_with_bias(
             &cands,
             &self.momentum,
             MAX_SUGGESTIONS,
-            |word| self.correction_bonus(prefix, word),
+            |word| self.correction_adjustment(prefix, word),
         );
         self.guarantee_fold_variant(prefix, ranked)
     }
 
-    /// The correction "sticky-fix" score bonus for `word` completing `prefix`:
-    /// `CORRECTION_STICKY_WEIGHT * ln(1 + picks)`, where `picks` is how often the
-    /// user has chosen this completion for this prefix. `0.0` when never picked,
-    /// so ranking is unchanged for words with no correction history.
-    fn correction_bonus(&self, prefix: &str, word: &str) -> f64 {
+    /// The net correction score adjustment for `word` completing `prefix`:
+    /// the sticky-fix promotion minus the unwanted demotion.
+    ///
+    /// * **Promotion** `CORRECTION_STICKY_WEIGHT * ln(1 + picks)` — `picks` is how
+    ///   often the user chose this completion for this prefix (`observe_strip_pick`).
+    /// * **Demotion** `CORRECTION_UNWANTED_WEIGHT * ln(1 + unwanted)` — `unwanted`
+    ///   is how often the user deleted-and-retyped this word (`observe_delete_retype`),
+    ///   counted per word (not per prefix, matching how the signal is recorded).
+    ///
+    /// Both terms are `0.0` when their count is `0`, so a word with no correction
+    /// history is ranked exactly as before. The two offset when a word is both
+    /// picked and unwanted. Demotion is deliberately the *weaker* signal (half the
+    /// weight): an explicit pick is a strong intent signal, while a delete-retype
+    /// is noisier (a user may delete for reasons unrelated to the word being wrong),
+    /// so a single delete-retype only nudges and never unseats a strong default.
+    fn correction_adjustment(&self, prefix: &str, word: &str) -> f64 {
         let picks = self.corrections.pref_count(prefix, word);
-        if picks == 0 {
+        let unwanted = self.corrections.unwanted_count(word);
+        let promote = if picks == 0 {
             0.0
         } else {
             CORRECTION_STICKY_WEIGHT * f64::from(1 + picks).ln()
-        }
+        };
+        let demote = if unwanted == 0 {
+            0.0
+        } else {
+            CORRECTION_UNWANTED_WEIGHT * f64::from(1 + unwanted).ln()
+        };
+        promote - demote
     }
 
     /// The learned `freq` and bundled `dict_rank` snapshots the ranked predictor

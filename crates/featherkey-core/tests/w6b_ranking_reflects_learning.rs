@@ -122,6 +122,44 @@ fn a_repeated_strip_pick_promotes_the_chosen_completion() {
 }
 
 #[test]
+fn a_repeated_delete_retype_demotes_a_word() {
+    let mut fk = core();
+    // Baseline: "tea" leads.
+    assert_eq!(fk.rank_suggestions("", "te", no_device())[0].word, "tea");
+
+    // The user repeatedly deletes and retypes "tea" — a signal it was the wrong
+    // default. This records ONLY an unwanted signal; it does not touch frequency.
+    for _ in 0..5 {
+        fk.observe_delete_retype("tea", &Ordinary);
+    }
+    assert_eq!(
+        fk.word_frequency("tea"),
+        0,
+        "a delete-retype must NOT be counted as a typed-word frequency"
+    );
+
+    // "tea" is pushed below the next default ("team").
+    let out = words(&fk.rank_suggestions("", "te", no_device()));
+    assert_eq!(
+        out[0], "team",
+        "a repeatedly deleted-and-retyped word is demoted, got {out:?}"
+    );
+}
+
+#[test]
+fn a_single_delete_retype_does_not_bury_a_strong_default() {
+    let mut fk = core();
+    // One delete-retype is a weak signal (~0.35, under the ln2≈0.69 rank step),
+    // so the bundled-first word still leads — demotion is conservative by design.
+    fk.observe_delete_retype("tea", &Ordinary);
+    let out = words(&fk.rank_suggestions("", "te", no_device()));
+    assert_eq!(
+        out[0], "tea",
+        "a single delete-retype must not unseat a strong default, got {out:?}"
+    );
+}
+
+#[test]
 fn a_strip_pick_only_promotes_for_the_prefix_it_was_made_under() {
     let mut fk = core();
     // Repeatedly pick "team" — but recorded under a DIFFERENT prefix ("tea").
