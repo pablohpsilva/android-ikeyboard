@@ -119,6 +119,9 @@ class FeatherKeyBridge private constructor(private val core: KeyboardCore) : Aut
     /** Import legacy bigram transitions into the core's context model (migration). */
     fun importContext(transitions: List<FfiTransition>) = core.importContext(transitions)
 
+    /** Import legacy learned word frequencies into the core's personalization model (migration). */
+    fun importFrequencies(frequencies: List<FfiWordFreq>) = core.importFrequencies(frequencies)
+
     /** Fold a tap offset unless the field is sensitive (E-2 / BR-26). */
     fun observeTap(key: String, dx: Float, dy: Float, field: FieldSensitivity) =
         core.observeTap(key, dx, dy, field.asForeign())

@@ -784,6 +784,8 @@ internal open class UniffiVTableCallbackInterfaceSensitiveField(
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -821,6 +823,8 @@ internal interface UniffiLib : Library {
     fun uniffi_featherkey_core_fn_method_keyboardcore_decode(`ptr`: Pointer,`x`: Float,`y`: Float,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_featherkey_core_fn_method_keyboardcore_import_context(`ptr`: Pointer,`transitions`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_featherkey_core_fn_method_keyboardcore_import_frequencies(`ptr`: Pointer,`frequencies`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_featherkey_core_fn_method_keyboardcore_layout_keys(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -986,6 +990,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_import_context(
     ): Short
+    fun uniffi_featherkey_core_checksum_method_keyboardcore_import_frequencies(
+    ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_layout_keys(
     ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_learn_word(
@@ -1055,6 +1061,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_import_context() != 7081.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_import_frequencies() != 35800.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_layout_keys() != 3125.toShort()) {
@@ -1504,6 +1513,13 @@ public interface KeyboardCoreInterface {
     fun `importContext`(`transitions`: List<FfiTransition>)
     
     /**
+     * Migrate legacy `(word, count)` learned frequencies into the encrypted
+     * personalization model (set-semantics; idempotent). A deliberate one-time
+     * import, paired with [`import_context`](Self::import_context).
+     */
+    fun `importFrequencies`(`frequencies`: List<FfiWordFreq>)
+    
+    /**
      * The keys of the active layout, in logical coordinates, for the shell to
      * render. Fetch again after any page switch below.
      */
@@ -1766,6 +1782,22 @@ open class KeyboardCore: Disposable, AutoCloseable, KeyboardCoreInterface {
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_featherkey_core_fn_method_keyboardcore_import_context(
         it, FfiConverterSequenceTypeFfiTransition.lower(`transitions`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Migrate legacy `(word, count)` learned frequencies into the encrypted
+     * personalization model (set-semantics; idempotent). A deliberate one-time
+     * import, paired with [`import_context`](Self::import_context).
+     */override fun `importFrequencies`(`frequencies`: List<FfiWordFreq>)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_featherkey_core_fn_method_keyboardcore_import_frequencies(
+        it, FfiConverterSequenceTypeFfiWordFreq.lower(`frequencies`),_status)
 }
     }
     

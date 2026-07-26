@@ -177,6 +177,27 @@ fn persist_and_restore_round_trip_through_secure_store() {
     assert_eq!(restored.correction_unwanted_count("ducking"), 1);
 }
 
+// ---- Migration: legacy plaintext usage.tsv / context.tsv (W6a) ------------
+
+#[test]
+fn import_frequencies_and_context_migrate_with_set_semantics() {
+    let mut fk = core();
+    // Legacy usage.tsv: word -> count. Legacy context.tsv: prev -> next -> count.
+    fk.import_frequencies([("hello".to_owned(), 4), ("world".to_owned(), 2)]);
+    fk.import_context([("the".to_owned(), "cat".to_owned(), 3)]);
+
+    assert_eq!(fk.word_frequency("hello"), 4);
+    assert_eq!(fk.word_frequency("world"), 2);
+    assert_eq!(fk.context_next_words("the", 5), vec!["cat".to_string()]);
+
+    // Set-semantics: re-running the same import (crash mid-migration, files still
+    // present) is idempotent — counts are replaced, not accumulated.
+    fk.import_frequencies([("hello".to_owned(), 4), ("world".to_owned(), 2)]);
+    fk.import_context([("the".to_owned(), "cat".to_owned(), 3)]);
+    assert_eq!(fk.word_frequency("hello"), 4);
+    assert_eq!(fk.context_next_words("the", 5), vec!["cat".to_string()]);
+}
+
 /// A store that always fails, to cover the `Store` error surface without needing
 /// a corrupt on-disk database.
 struct FailingStore;

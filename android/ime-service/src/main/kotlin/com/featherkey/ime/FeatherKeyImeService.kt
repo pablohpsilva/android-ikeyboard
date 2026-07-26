@@ -164,6 +164,11 @@ class FeatherKeyImeService : InputMethodService() {
                     key.fill(0) // wipe the shell's copy whether or not open succeeded
                 }
             }
+            // One-time migration of legacy plaintext learning (usage.tsv/context.tsv)
+            // into the now-open encrypted core, then secure-delete the cleartext.
+            // Off the main thread, after open; failure leaves the files for a retry
+            // on the next launch (set-semantics makes that idempotent). BR-13/BR-62.
+            bridge?.let { b -> runCatching { LegacyMigration.migrate(filesDir, b) } }
             withContext(Dispatchers.Main) { keyboard?.let { it.keys = renderKeys() } }
         }
         // Ease the whole keyboard up when it shows and down when it hides.

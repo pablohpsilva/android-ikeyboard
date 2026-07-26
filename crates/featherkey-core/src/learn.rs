@@ -72,6 +72,15 @@ impl FeatherKeyCore {
         self.context.import(transitions);
     }
 
+    /// Bulk-load pre-computed `(word, count)` learned frequencies into the
+    /// personalization model (migrating the legacy Kotlin `usage.tsv`).
+    /// Set-semantics, so re-running a migration is idempotent. Not gated: same
+    /// rationale as [`import_context`] — a deliberate one-time import of the
+    /// user's own prior data.
+    pub fn import_frequencies<I: IntoIterator<Item = (String, u32)>>(&mut self, frequencies: I) {
+        self.personalization.import(frequencies);
+    }
+
     /// Every learned word paired with its observed frequency, for the shell's
     /// swipe/gesture decoder (which ranks gesture paths by learned usage).
     #[must_use]

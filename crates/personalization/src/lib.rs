@@ -102,6 +102,20 @@ impl Personalization {
         &self.frequencies
     }
 
+    /// Bulk-set learned frequencies from a prior export (migrating the legacy
+    /// Kotlin `usage.tsv`). **Set-semantics**: each count *replaces* any existing
+    /// value rather than adding to it, so re-running the same import is idempotent
+    /// — the crash-safety guarantee the one-time migration relies on. Unstorable
+    /// words (control chars) and non-positive counts are skipped, preserving the
+    /// frequency-map invariant (counts are `>= 1`).
+    pub fn import<I: IntoIterator<Item = (String, u32)>>(&mut self, frequencies: I) {
+        for (word, count) in frequencies {
+            if count > 0 && is_storable(&word) {
+                self.frequencies.insert(word, count);
+            }
+        }
+    }
+
     /// `true` if `word` is part of the user's vocabulary — either it has been
     /// observed at least once, or it is on the whitelist.
     #[must_use]
@@ -243,6 +257,35 @@ mod tests {
         assert_eq!(f.get("cat"), Some(&2));
         assert_eq!(f.get("dog"), Some(&1));
         assert_eq!(f.get("bird"), None);
+    }
+
+    #[test]
+    fn import_sets_counts_and_is_idempotent() {
+        let mut p = Personalization::new();
+        p.observe("cat"); // pre-existing count of 1
+        p.import([("cat".to_owned(), 5), ("dog".to_owned(), 3)]);
+        // set-semantics: "cat" is replaced (5), not incremented to 6.
+        assert_eq!(p.frequency("cat"), 5);
+        assert_eq!(p.frequency("dog"), 3);
+        // re-running the same import changes nothing (crash-safe migration).
+        p.import([("cat".to_owned(), 5), ("dog".to_owned(), 3)]);
+        assert_eq!(p.frequency("cat"), 5);
+        assert_eq!(p.frequency("dog"), 3);
+    }
+
+    #[test]
+    fn import_skips_unstorable_words_and_zero_counts() {
+        let mut p = Personalization::new();
+        p.import([
+            ("ok".to_owned(), 4),
+            ("zero".to_owned(), 0),        // non-positive → skipped
+            ("ta\tb".to_owned(), 2),       // contains tab → skipped
+            ("".to_owned(), 7),            // empty → skipped
+        ]);
+        assert_eq!(p.frequency("ok"), 4);
+        assert_eq!(p.frequency("zero"), 0);
+        assert_eq!(p.frequency("ta\tb"), 0);
+        assert!(!p.is_known(""));
     }
 
     #[test]

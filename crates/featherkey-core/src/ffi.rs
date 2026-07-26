@@ -363,6 +363,14 @@ impl KeyboardCore {
             .import_context(transitions.into_iter().map(|t| (t.prev, t.next, t.count)));
     }
 
+    /// Migrate legacy `(word, count)` learned frequencies into the encrypted
+    /// personalization model (set-semantics; idempotent). A deliberate one-time
+    /// import, paired with [`import_context`](Self::import_context).
+    pub fn import_frequencies(&self, frequencies: Vec<FfiWordFreq>) {
+        self.lock()
+            .import_frequencies(frequencies.into_iter().map(|f| (f.word, f.freq)));
+    }
+
     /// Fold a tap offset for `key` — unless `field` is sensitive (E-2 / BR-26).
     pub fn observe_tap(
         &self,
