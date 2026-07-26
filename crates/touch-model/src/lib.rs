@@ -32,8 +32,15 @@ use featherkey_kernel::KeyId;
 mod codec;
 
 /// Storage key for the model's single blob under [`Namespace::TouchModel`].
-/// Versioned so a future encoding change is detected rather than mis-parsed.
-const BLOB_KEY: &[u8] = b"v1";
+/// Versioned so an encoding change is detected rather than mis-parsed. `v2`
+/// carries the per-key covariance co-moments in addition to the mean.
+const BLOB_KEY: &[u8] = b"v2";
+
+/// The legacy `v1` storage key (mean + count only, no covariance). Kept so a
+/// model written before covariance landed still loads: on [`load`] we read `v2`
+/// if present, otherwise fall back to `v1` and load mean-only (covariance zero).
+/// [`persist`] only ever writes `v2`.
+const BLOB_KEY_V1: &[u8] = b"v1";
 
 /// Why an observation was rejected. Errors are values, never panics on the hot
 /// path (SEDD §5.5 rule 3): a bad sample is dropped and reported, it never
@@ -60,16 +67,25 @@ impl std::fmt::Display for TouchModelError {
 
 impl std::error::Error for TouchModelError {}
 
-/// The running mean of the `(dx, dy)` offsets seen for a single key.
+/// The running mean of the `(dx, dy)` offsets seen for a single key, together
+/// with the Welford co-moments needed to derive their 2x2 covariance.
 ///
 /// Kept private: callers observe and read through [`TouchModel`], never a bare
 /// per-key accumulator. `count` is `u64` and saturates, so even an unbounded
 /// stream of taps can never overflow or panic (BR-46).
+///
+/// `m2xx`/`m2yy`/`m2xy` are the running sums of squared/cross deviations from
+/// the mean (Welford's `M2`). Population covariance is `M2 / count`; they are
+/// zero for a fresh key and stay zero through the first observation (a single
+/// point has no spread), matching a legacy `v1` blob that carried no spread.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 struct Mean {
     dx: f32,
     dy: f32,
     count: u64,
+    m2xx: f32,
+    m2yy: f32,
+    m2xy: f32,
 }
 
 impl Mean {
@@ -94,9 +110,25 @@ impl Mean {
         if !ndx.is_finite() || !ndy.is_finite() {
             return false;
         }
+        // Welford's online covariance co-moment update: fold the sample using the
+        // *pre-update* mean for the first deviation and the *post-update* mean for
+        // the second (the standard numerically-stable form). On the first
+        // observation `dx - ndx == 0`, so the co-moments stay zero — a single
+        // point has no spread. Guard the candidates for finiteness exactly like
+        // the mean: a rejected fold leaves every accumulator untouched, so no
+        // single sample can poison the stored covariance.
+        let nm2xx = self.m2xx + (dx - self.dx) * (dx - ndx);
+        let nm2yy = self.m2yy + (dy - self.dy) * (dy - ndy);
+        let nm2xy = self.m2xy + (dx - self.dx) * (dy - ndy);
+        if !nm2xx.is_finite() || !nm2yy.is_finite() || !nm2xy.is_finite() {
+            return false;
+        }
         self.dx = ndx;
         self.dy = ndy;
         self.count = count;
+        self.m2xx = nm2xx;
+        self.m2yy = nm2yy;
+        self.m2xy = nm2xy;
         true
     }
 }
@@ -173,6 +205,27 @@ impl TouchModel {
         self.means.get(&key).map_or(0, |m| m.count)
     }
 
+    /// The learned 2x2 **population covariance** of `key`'s tap offsets:
+    /// `[[var(dx), cov(dx,dy)], [cov(dx,dy), var(dy)]]`, computed as the Welford
+    /// co-moments divided by the observation count.
+    ///
+    /// Returns `[[0,0],[0,0]]` for any key with fewer than two observations (an
+    /// unseen key, or one tapped only once): a single point has no measurable
+    /// spread, and this is exactly the zero-spread state a legacy `v1` blob loads
+    /// as. The matrix is symmetric by construction. The decoder can use this to
+    /// weight the learned offset by how consistently the user hits the key.
+    #[must_use]
+    pub fn covariance(&self, key: KeyId) -> [[f32; 2]; 2] {
+        match self.means.get(&key) {
+            Some(m) if m.count >= 2 => {
+                let n = m.count as f32;
+                let cxy = m.m2xy / n;
+                [[m.m2xx / n, cxy], [cxy, m.m2yy / n]]
+            }
+            _ => [[0.0, 0.0], [0.0, 0.0]],
+        }
+    }
+
     /// Encrypt-and-store the whole model — every key's learned mean offset and
     /// its observation count — as one atomic blob under [`Namespace::TouchModel`]
     /// through the injected store. A single [`put`](SecureStore::put) means a
@@ -195,9 +248,15 @@ impl TouchModel {
     /// [`StoreError::Backend`] if the stored blob is corrupt (not valid UTF-8 or
     /// not in the expected encoding).
     pub fn load(store: &impl SecureStore) -> Result<Self, StoreError> {
-        let means = match store.get(Namespace::TouchModel, BLOB_KEY)? {
-            Some(bytes) => codec::decode(&bytes)?,
-            None => HashMap::new(),
+        // Prefer the current `v2` blob. Fall back to a legacy `v1` blob (mean
+        // only) so a model learned before covariance landed still loads, with
+        // every key's covariance reading as zero until it is re-observed.
+        let means = if let Some(bytes) = store.get(Namespace::TouchModel, BLOB_KEY)? {
+            codec::decode(&bytes)?
+        } else if let Some(bytes) = store.get(Namespace::TouchModel, BLOB_KEY_V1)? {
+            codec::decode_v1(&bytes)?
+        } else {
+            HashMap::new()
         };
         Ok(Self { means })
     }
@@ -259,9 +318,61 @@ mod persistence_tests {
         let loaded = TouchModel::load(&store).unwrap();
         assert!(loaded.is_unbiased());
     }
+
+    #[test]
+    fn learned_covariance_survives_persist_then_load() {
+        let store = MemStore::default();
+        let mut m = TouchModel::unbiased();
+        for (dx, dy) in [(2.0, 0.0), (-2.0, 0.0), (0.0, 2.0), (0.0, -2.0)] {
+            m.observe(KeyId('a'), dx, dy).unwrap();
+        }
+        m.persist(&store).unwrap();
+
+        let loaded = TouchModel::load(&store).unwrap();
+        assert_eq!(loaded.covariance(KeyId('a')), m.covariance(KeyId('a')));
+        assert_eq!(loaded.offset(KeyId('a')), m.offset(KeyId('a')));
+        assert_eq!(loaded.observations(KeyId('a')), 4);
+    }
+
+    #[test]
+    fn a_legacy_v1_blob_loads_mean_only_with_zero_covariance() {
+        let store = MemStore::default();
+        // A blob written by the old (mean-only) codec, stored under the legacy
+        // `b"v1"` key: `<ch>\t<dx>\t<dy>\t<count>` with no co-moment fields.
+        store
+            .put(Namespace::TouchModel, b"v1", b"t\t3\t-1\t10\ny\t-2\t0.5\t1")
+            .unwrap();
+        let loaded = TouchModel::load(&store).unwrap();
+
+        // Means and counts survive exactly...
+        assert_eq!(loaded.offset(KeyId('t')), (3.0, -1.0));
+        assert_eq!(loaded.observations(KeyId('t')), 10);
+        assert_eq!(loaded.offset(KeyId('y')), (-2.0, 0.5));
+        assert_eq!(loaded.observations(KeyId('y')), 1);
+        // ...but a v1 blob carried no spread, so covariance reads as zero.
+        assert_eq!(loaded.covariance(KeyId('t')), [[0.0, 0.0], [0.0, 0.0]]);
+        assert_eq!(loaded.covariance(KeyId('y')), [[0.0, 0.0], [0.0, 0.0]]);
+    }
+
+    #[test]
+    fn a_v2_blob_is_preferred_over_a_stale_v1_blob() {
+        let store = MemStore::default();
+        // A stale legacy blob co-exists with the current one; the current wins.
+        store
+            .put(Namespace::TouchModel, b"v1", b"t\t99\t99\t99")
+            .unwrap();
+        let mut m = TouchModel::unbiased();
+        m.observe(KeyId('t'), 3.0, -1.0).unwrap();
+        m.persist(&store).unwrap();
+
+        let loaded = TouchModel::load(&store).unwrap();
+        assert_eq!(loaded.offset(KeyId('t')), (3.0, -1.0));
+        assert_eq!(loaded.observations(KeyId('t')), 1);
+    }
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
 
@@ -406,5 +517,59 @@ mod tests {
     fn error_displays_a_human_message() {
         let msg = format!("{}", TouchModelError::NonFiniteOffset);
         assert_eq!(msg, "touch offset was not finite");
+    }
+
+    #[test]
+    fn covariance_is_zero_until_two_observations() {
+        let mut m = TouchModel::unbiased();
+        assert_eq!(m.covariance(KeyId('a')), [[0.0, 0.0], [0.0, 0.0]]);
+        m.observe(KeyId('a'), 1.0, 1.0).unwrap();
+        assert_eq!(m.covariance(KeyId('a')), [[0.0, 0.0], [0.0, 0.0]]);
+    }
+
+    #[test]
+    fn covariance_tracks_spread() {
+        let mut m = TouchModel::unbiased();
+        for (dx, dy) in [(2.0, 0.0), (-2.0, 0.0), (0.0, 2.0), (0.0, -2.0)] {
+            m.observe(KeyId('a'), dx, dy).unwrap();
+        }
+        let cov = m.covariance(KeyId('a'));
+        assert!(cov[0][0] > 0.0 && cov[1][1] > 0.0);
+        assert!(cov[0][1].abs() < 1e-4); // uncorrelated axes
+        // The covariance matrix is symmetric.
+        assert_eq!(cov[0][1], cov[1][0]);
+    }
+
+    #[test]
+    fn covariance_captures_positive_correlation() {
+        let mut m = TouchModel::unbiased();
+        // A user whose x and y offsets move together produces positive off-diagonal.
+        for (dx, dy) in [(-2.0, -2.0), (-1.0, -1.0), (1.0, 1.0), (2.0, 2.0)] {
+            m.observe(KeyId('a'), dx, dy).unwrap();
+        }
+        let cov = m.covariance(KeyId('a'));
+        assert!(cov[0][1] > 0.0, "off-diagonal was {}", cov[0][1]);
+        assert_eq!(cov[0][1], cov[1][0]);
+    }
+
+    #[test]
+    fn covariance_stays_zero_for_an_unseen_key() {
+        let mut m = TouchModel::unbiased();
+        m.observe(KeyId('a'), 1.0, 1.0).unwrap();
+        assert_eq!(m.covariance(KeyId('z')), [[0.0, 0.0], [0.0, 0.0]]);
+    }
+
+    #[test]
+    fn a_rejected_observation_leaves_covariance_untouched() {
+        let mut m = TouchModel::unbiased();
+        for (dx, dy) in [(2.0, 0.0), (-2.0, 0.0)] {
+            m.observe(KeyId('a'), dx, dy).unwrap();
+        }
+        let before = m.covariance(KeyId('a'));
+        assert_eq!(
+            m.observe(KeyId('a'), f32::NAN, 0.0),
+            Err(TouchModelError::NonFiniteOffset)
+        );
+        assert_eq!(m.covariance(KeyId('a')), before);
     }
 }
