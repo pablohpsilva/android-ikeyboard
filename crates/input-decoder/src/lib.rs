@@ -155,26 +155,50 @@ impl InvCov {
         d: 1.0,
     };
 
-    /// Invert a 2x2 population covariance for use as `Σ⁻¹`, once per key at
-    /// build time (never per tap, never a `sqrt`). The diagonal is regularized
-    /// with a small ε so a zero or rank-deficient covariance is still finite,
-    /// and any non-positive / non-finite determinant falls back to the identity
-    /// (→ squared-Euclidean). Callers pass the identity directly for keys with
-    /// fewer than two observations so those stay byte-for-byte unchanged.
+    /// Turn a 2x2 population covariance into a **scale-normalized, shrunk** `Σ⁻¹`,
+    /// once per key at build time (never per tap, never a `sqrt`).
+    ///
+    /// Two regularizations make this robust — and are the fix for the "a
+    /// consistently-tapped key rejects an on-key tap, so the tap resolves to a
+    /// neighbour" decode bug:
+    ///
+    /// 1. **Shrinkage toward isotropic.** The covariance is blended with an
+    ///    isotropic prior of the same mean variance (`Σ' = (1-λ)Σ + λσ̄²I`). This
+    ///    bounds the condition number, so no single axis' variance can collapse to
+    ///    ~0 and turn the key into a hypersensitive needle whose `Σ⁻¹` explodes.
+    /// 2. **Scale normalization.** `Σ⁻¹` is scaled by the mean variance `σ̄²`, so an
+    ///    isotropic covariance yields *exactly* the identity — matching the plain
+    ///    squared-Euclidean scale used by unlearned keys (ADR-15 invariant). Absolute
+    ///    tap tightness (in px²) therefore never competes on a different scale than
+    ///    the Euclidean fallback; the covariance contributes only bounded
+    ///    *anisotropy* (a direction the user spreads over is penalized less).
+    ///
+    /// A zero / non-finite mean variance or a non-positive / non-finite determinant
+    /// falls back to the identity. Callers still pass the identity directly for keys
+    /// with fewer than two observations.
     fn from_covariance(cov: [[f32; 2]; 2]) -> Self {
-        const EPS: f32 = 1e-3;
-        let a = cov[0][0] + EPS;
-        let b = cov[0][1];
-        let d = cov[1][1] + EPS;
-        let det = a * d - b * b;
+        /// Blend weight of the isotropic prior; bounds the condition number so a
+        /// near-degenerate covariance can never produce a needle-sharp key.
+        const SHRINK: f32 = 0.5;
+        let (sxx, sxy, syy) = (cov[0][0], cov[0][1], cov[1][1]);
+        let mean_var = 0.5 * (sxx + syy);
+        if !mean_var.is_finite() || mean_var <= 0.0 {
+            return Self::IDENTITY;
+        }
+        // Σ' = (1-λ)Σ + λ·σ̄²·I — shrink toward the isotropic prior.
+        let sxx_s = (1.0 - SHRINK) * sxx + SHRINK * mean_var;
+        let syy_s = (1.0 - SHRINK) * syy + SHRINK * mean_var;
+        let sxy_s = (1.0 - SHRINK) * sxy;
+        let det = sxx_s * syy_s - sxy_s * sxy_s;
         if !det.is_finite() || det <= 0.0 {
             return Self::IDENTITY;
         }
-        let inv_det = 1.0 / det;
+        // Σ⁻¹ · σ̄²: normalize so an isotropic Σ maps to the identity.
+        let scale = mean_var / det;
         Self {
-            a: d * inv_det,
-            b: -b * inv_det,
-            d: a * inv_det,
+            a: syy_s * scale,
+            b: -sxy_s * scale,
+            d: sxx_s * scale,
         }
     }
 
@@ -291,6 +315,31 @@ mod tests {
         assert_eq!(out.best(), Some(KeyId('e')));
         let conf = out.ranked()[0].1.value();
         assert!(conf > 0.5 && conf < 1.0, "confidence was {conf}");
+    }
+
+    #[test]
+    fn a_consistently_tapped_key_still_accepts_a_within_key_tap() {
+        // Regression (device bug: "type e, get w"): a key the user hits very
+        // consistently accumulates a near-zero tap covariance. Its inverse must
+        // not blow up into a hypersensitive "needle" that rejects a tap landing
+        // squarely inside the key — which made an on-key tap resolve to a
+        // neighbour whose (unlearned) identity covariance was comparatively lax.
+        let decoder = NearestKeyDecoder::new();
+        let layout = Layout::qwerty_tracer_row();
+        let mut model = TouchModel::unbiased();
+        // Hit 'e' six times at an almost identical offset → tiny covariance.
+        for _ in 0..6 {
+            model.observe(KeyId('e'), 5.0, 0.0).unwrap();
+        }
+        // A tap well inside 'e' (rect 200..300, centre 250; learned centre ~255).
+        let out = decoder
+            .decode(TouchPoint::new(270.0, 60.0), &layout, &model)
+            .unwrap();
+        assert_eq!(
+            out.best(),
+            Some(KeyId('e')),
+            "an on-key tap must resolve to the consistently-tapped key, not a neighbour"
+        );
     }
 
     #[test]
