@@ -143,7 +143,7 @@ fn user_dictionary_add_and_query() {
     assert!(fk.knows_word("zebra"));
     // Whitelisting is not a frequency observation.
     assert_eq!(fk.word_frequency("zebra"), 0);
-    fk.learn_word("zebra", &Ordinary);
+    fk.learn_word("", "zebra", &Ordinary);
     assert_eq!(fk.word_frequency("zebra"), 1);
 }
 
@@ -157,7 +157,9 @@ fn persist_and_restore_round_trip_through_secure_store() {
 
     let mut fk = core();
     fk.add_to_dictionary("zebra");
-    fk.learn_word("hello", &Ordinary);
+    fk.learn_word("the", "hello", &Ordinary);
+    fk.observe_strip_pick("teh", "teh", &Ordinary);
+    fk.observe_delete_retype("ducking", &Ordinary);
     fk.persist(&store).unwrap();
 
     let mut restored = core();
@@ -166,6 +168,13 @@ fn persist_and_restore_round_trip_through_secure_store() {
     assert!(restored.knows_word("zebra"));
     assert!(restored.knows_word("hello"));
     assert_eq!(restored.word_frequency("hello"), 1);
+    // Context (next-word) and correction signals survive the round-trip too.
+    assert_eq!(
+        restored.context_next_words("the", 5),
+        vec!["hello".to_string()]
+    );
+    assert_eq!(restored.correction_pref_count("teh", "teh"), 1);
+    assert_eq!(restored.correction_unwanted_count("ducking"), 1);
 }
 
 /// A store that always fails, to cover the `Store` error surface without needing
@@ -183,7 +192,7 @@ impl SecureStore for FailingStore {
 #[test]
 fn persistence_failures_surface_as_store_errors() {
     let mut fk = core();
-    fk.learn_word("hello", &Ordinary);
+    fk.learn_word("", "hello", &Ordinary);
     assert_eq!(fk.persist(&FailingStore), Err(FeatherKeyError::Store));
     assert_eq!(fk.restore(&FailingStore), Err(FeatherKeyError::Store));
 }
@@ -197,15 +206,15 @@ fn construction_rejects_bad_configuration() {
         FeatherKeyCore::new(Vec::new()).err(),
         Some(FeatherKeyError::NoLanguages)
     );
-    // Unsorted word list.
-    assert_eq!(
-        FeatherKeyCore::new(vec![(
-            "en".to_owned(),
-            vec!["b".to_owned(), "a".to_owned()]
-        )])
-        .err(),
-        Some(FeatherKeyError::Lexicon)
-    );
+    // Word order is no longer a rejection reason: words now arrive in FREQUENCY
+    // order (most-common first, DECISION option A) and the core byte-sorts them
+    // internally for the fst while recording their input position as bundled
+    // rank. A "b, a" list is a valid two-word lexicon, not a Lexicon error.
+    assert!(FeatherKeyCore::new(vec![(
+        "en".to_owned(),
+        vec!["b".to_owned(), "a".to_owned()]
+    )])
+    .is_ok());
     // Duplicate language tag.
     assert_eq!(
         FeatherKeyCore::new(vec![

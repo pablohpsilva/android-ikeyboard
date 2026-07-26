@@ -396,8 +396,11 @@ version = "0.0.0"
 dependencies = [
  "featherkey-autocorrect",
  "featherkey-candidate-ranker",
+ "featherkey-context",
  "featherkey-contracts",
+ "featherkey-corrections",
  "featherkey-dictionary",
+ "featherkey-fold",
  "featherkey-input-decoder",
  "featherkey-kernel",
  "featherkey-language-momentum",

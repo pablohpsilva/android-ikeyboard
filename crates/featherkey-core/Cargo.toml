@@ -34,6 +34,9 @@ featherkey-locale-manager = { path = "../locale-manager" }
 featherkey-prediction = { path = "../prediction" }
 featherkey-autocorrect = { path = "../autocorrect" }
 featherkey-personalization = { path = "../personalization" }
+featherkey-context = { path = "../context" }
+featherkey-corrections = { path = "../corrections" }
+featherkey-fold = { path = "../fold" }
 featherkey-sensitive-context = { path = "../sensitive-context" }
 featherkey-secure-store = { path = "../secure-store" }
 featherkey-language-momentum = { path = "../language-momentum" }

@@ -34,7 +34,7 @@ impl FeatherKeyCore {
         device_known: &[String],
         device_cands: Vec<featherkey_contracts::Candidate>,
     ) -> Result<Correction, FeatherKeyError> {
-        let locales = LocaleManager::new(self.packs.clone())?;
+        let locales = LocaleManager::new(self.locale_packs())?;
 
         // (1) No-clobber: empty text, a word intended by the user, or one the
         // device knows is left exactly as typed.
@@ -83,7 +83,7 @@ impl FeatherKeyCore {
     /// competing candidate's momentum-weighted score overtakes the bonus.
     fn score_with_sticky(&self, cands: &[featherkey_contracts::Candidate]) -> Vec<(usize, f64)> {
         use featherkey_contracts::Source;
-        let primary = self.packs.first().map(|(id, _)| id.as_str().to_owned());
+        let primary = self.packs.first().map(|p| p.lang.as_str().to_owned());
         let sticky = cands
             .iter()
             .position(|c| {
@@ -139,10 +139,10 @@ impl FeatherKeyCore {
     /// primary (first active) lexicon for fuzzy candidates, the live learned
     /// vocabulary, and a locale manager over every active language.
     fn build_corrector(&self) -> Result<NoClobberCorrector, FeatherKeyError> {
-        let locales = LocaleManager::new(self.packs.clone())?;
-        let (_, primary) = self.packs.first().ok_or(FeatherKeyError::NoLanguages)?;
+        let locales = LocaleManager::new(self.locale_packs())?;
+        let primary = self.packs.first().ok_or(FeatherKeyError::NoLanguages)?;
         Ok(NoClobberCorrector::new(
-            primary.clone(),
+            primary.dict.clone(),
             self.personalization.clone(),
             locales,
         ))

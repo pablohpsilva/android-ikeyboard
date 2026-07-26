@@ -226,6 +226,18 @@ impl TouchModel {
         }
     }
 
+    /// Every observed key's learned mean offset, as `(key char, dx, dy)`, in
+    /// ascending key order (deterministic). A key that has never been observed is
+    /// absent (there is nothing learned to report). The composition root uses this
+    /// to hand the per-key tap biases to the swipe/gesture decoder.
+    #[must_use]
+    pub fn offsets(&self) -> Vec<(char, f32, f32)> {
+        let mut out: Vec<(char, f32, f32)> =
+            self.means.iter().map(|(k, m)| (k.0, m.dx, m.dy)).collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
     /// Encrypt-and-store the whole model — every key's learned mean offset and
     /// its observation count — as one atomic blob under [`Namespace::TouchModel`]
     /// through the injected store. A single [`put`](SecureStore::put) means a
@@ -386,6 +398,16 @@ mod tests {
         assert_eq!(model.offset(A), (0.0, 0.0));
         assert_eq!(model.offset(KeyId('z')), (0.0, 0.0));
         assert_eq!(model.observations(A), 0);
+    }
+
+    #[test]
+    fn offsets_enumerate_only_observed_keys_in_ascending_order() {
+        let mut model = TouchModel::unbiased();
+        assert!(model.offsets().is_empty()); // nothing learned yet
+        model.observe(B, 1.0, -1.0).unwrap();
+        model.observe(A, 2.0, 3.0).unwrap();
+        // Ascending key order (A before B), only observed keys present.
+        assert_eq!(model.offsets(), vec![('a', 2.0, 3.0), ('b', 1.0, -1.0)]);
     }
 
     #[test]

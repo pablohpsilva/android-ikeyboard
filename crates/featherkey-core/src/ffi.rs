@@ -157,6 +157,32 @@ pub struct FfiRanked {
     pub lang: String,
 }
 
+/// One learned word and its observed frequency, handed to the shell's swipe
+/// decoder so gesture paths can be ranked by the user's own usage.
+#[derive(uniffi::Record)]
+pub struct FfiWordFreq {
+    pub word: String,
+    pub freq: u32,
+}
+
+/// One key's learned tap-offset bias, for the shell to re-centre gesture key
+/// positions before swipe decoding.
+#[derive(uniffi::Record)]
+pub struct FfiTapOffset {
+    pub key: String,
+    pub dx: f32,
+    pub dy: f32,
+}
+
+/// One `prev -> next` bigram transition with its count, for migrating the legacy
+/// Kotlin `context.tsv` into the encrypted core.
+#[derive(uniffi::Record)]
+pub struct FfiTransition {
+    pub prev: String,
+    pub next: String,
+    pub count: u32,
+}
+
 impl From<FfiRankCandidate> for featherkey_contracts::Candidate {
     fn from(c: FfiRankCandidate) -> Self {
         featherkey_contracts::Candidate {
@@ -258,10 +284,83 @@ impl KeyboardCore {
         })
     }
 
-    /// Learn `word` — unless `field` is sensitive (E-2 / BR-26).
-    pub fn learn_word(&self, word: String, field: std::sync::Arc<dyn SensitiveField>) {
+    /// Learn `word` typed after `preceding` — updating both the learned
+    /// vocabulary and the next-word model — unless `field` is sensitive
+    /// (E-2 / BR-26), in which case both are left untouched.
+    pub fn learn_word(
+        &self,
+        preceding: String,
+        word: String,
+        field: std::sync::Arc<dyn SensitiveField>,
+    ) {
         let mut core = self.lock();
-        core.learn_word(&word, &FieldSource(field.as_ref()));
+        core.learn_word(&preceding, &word, &FieldSource(field.as_ref()));
+    }
+
+    /// The whole suggestion-strip blend, core-owned: predictor completions +
+    /// `device` candidates → momentum ranking → dictionary fold-group variant
+    /// guarantee. The shell renders the returned words in order.
+    pub fn rank_suggestions(
+        &self,
+        preceding: String,
+        prefix: String,
+        device: Vec<FfiRankCandidate>,
+    ) -> Vec<FfiRanked> {
+        let cands = device.into_iter().map(Into::into).collect();
+        self.lock()
+            .rank_suggestions(&preceding, &prefix, cands)
+            .into_iter()
+            .map(|r| FfiRanked {
+                word: r.word,
+                lang: r.lang,
+            })
+            .collect()
+    }
+
+    /// Every learned word paired with its observed frequency (for swipe ranking).
+    pub fn learned_frequencies(&self) -> Vec<FfiWordFreq> {
+        self.lock()
+            .learned_frequencies()
+            .into_iter()
+            .map(|(word, freq)| FfiWordFreq { word, freq })
+            .collect()
+    }
+
+    /// Every observed key's learned tap-offset bias (for gesture re-centring).
+    pub fn tap_offsets(&self) -> Vec<FfiTapOffset> {
+        self.lock()
+            .tap_offsets()
+            .into_iter()
+            .map(|(key, dx, dy)| FfiTapOffset { key, dx, dy })
+            .collect()
+    }
+
+    /// Record a strip pick (`prefix -> picked`) — unless `field` is sensitive.
+    pub fn observe_strip_pick(
+        &self,
+        prefix: String,
+        picked: String,
+        field: std::sync::Arc<dyn SensitiveField>,
+    ) {
+        self.lock()
+            .observe_strip_pick(&prefix, &picked, &FieldSource(field.as_ref()));
+    }
+
+    /// Record a delete-and-retype demotion for `word` — unless `field` is sensitive.
+    pub fn observe_delete_retype(
+        &self,
+        word: String,
+        field: std::sync::Arc<dyn SensitiveField>,
+    ) {
+        self.lock()
+            .observe_delete_retype(&word, &FieldSource(field.as_ref()));
+    }
+
+    /// Migrate legacy `(prev, next, count)` bigram transitions into the encrypted
+    /// next-word model (set-semantics; idempotent). A deliberate one-time import.
+    pub fn import_context(&self, transitions: Vec<FfiTransition>) {
+        self.lock()
+            .import_context(transitions.into_iter().map(|t| (t.prev, t.next, t.count)));
     }
 
     /// Fold a tap offset for `key` — unless `field` is sensitive (E-2 / BR-26).

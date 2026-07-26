@@ -50,12 +50,18 @@ proptest! {
     ) {
         let mut fk = core();
         for w in &words {
-            fk.learn_word(w, &Sensitive);
+            fk.learn_word("the", w, &Sensitive);
         }
         for w in &words {
             prop_assert!(!fk.knows_word(w), "sensitive field leaked a learned word: {w}");
             prop_assert_eq!(fk.word_frequency(w), 0);
         }
+        // The single gate also covers the next-word (context) model: no
+        // "the -> w" transition may have been recorded either.
+        prop_assert!(
+            fk.context_next_words("the", 32).is_empty(),
+            "sensitive field leaked a next-word transition"
+        );
     }
 
     /// The same input in an ordinary field IS learned — proving the gate is what
@@ -66,11 +72,28 @@ proptest! {
     ) {
         let mut fk = core();
         for w in &words {
-            fk.learn_word(w, &Ordinary);
+            fk.learn_word("the", w, &Ordinary);
         }
         for w in &words {
             prop_assert!(fk.knows_word(w));
             prop_assert!(fk.word_frequency(w) >= 1);
+        }
+    }
+
+    /// Correction signals are gated by the same rule: nothing a user picks or
+    /// reverts inside a sensitive field is ever recorded — for ANY input.
+    #[test]
+    fn sensitive_field_learns_no_correction_signals(
+        picks in proptest::collection::vec("[a-z]{1,8}", 0..24)
+    ) {
+        let mut fk = core();
+        for w in &picks {
+            fk.observe_strip_pick("pre", w, &Sensitive);
+            fk.observe_delete_retype(w, &Sensitive);
+        }
+        for w in &picks {
+            prop_assert_eq!(fk.correction_pref_count("pre", w), 0);
+            prop_assert_eq!(fk.correction_unwanted_count(w), 0);
         }
     }
 }
@@ -114,8 +137,8 @@ fn sensitive_field_learns_no_tap_geometry() {
 #[test]
 fn gate_is_consulted_per_call() {
     let mut fk = core();
-    fk.learn_word("secretword", &Sensitive);
-    fk.learn_word("publicword", &Ordinary);
+    fk.learn_word("", "secretword", &Sensitive);
+    fk.learn_word("", "publicword", &Ordinary);
     assert!(!fk.knows_word("secretword"));
     assert!(fk.knows_word("publicword"));
 }
