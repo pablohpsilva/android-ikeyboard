@@ -48,7 +48,9 @@
 - W1c: `featherkey_corrections::Corrections::{new, note_pick(&mut,prefix,picked), note_unwanted(&mut,word), pref_count(&self,prefix,word)->u32, unwanted_count(&self,word)->u32, import_*, persist, load}`
 - W1d: `TouchModel::covariance(KeyId)->[[f32;2];2]` (+ v2 codec)
 - W2a: `Dictionary::{fold_prefix(&self,folded:&str)->Vec<String>}` built from an injected folder
-- W3: `StatisticalPredictor::new_ranked(lexicons, freq_snapshot, context_snapshot)` consuming W1a/W1b/W2a
+- W0(extra): `Personalization::frequencies(&self)->&BTreeMap<String,u32>` (new accessor — required by W3/W4; personalization exposes only `frequency(word)` today)
+- W3: `StatisticalPredictor::new_ranked(lang_lexicons: Vec<(String,Dictionary)>, freq, dict_rank, context)` producing **lang-tagged `Vec<Candidate>`** (NOT bare `Suggestions` — `candidate_ranker` weights by `cand.lang`, and `Suggestions` has no lang field)
+- W4: core owns the whole blend behind one FFI `rank_suggestions(preceding, prefix, device: Vec<FfiRankCandidate>) -> Vec<FfiRankedWord{word,lang}>` = predictor lang-tagged candidates + device candidates → `candidate_ranker::rank(&momentum)` → fold-group variant guarantee. Kotlin just renders.
 
 ---
 
@@ -76,9 +78,10 @@ let all = [
 - [ ] **Step 2: Run it, see it fail.** `cargo test -p featherkey-contracts` → FAIL (`no variant Corrections`).
 - [ ] **Step 3: Implement.** Add `Corrections` to the enum (after `Clipboard`) with a doc comment `/// Per-user correction signals (sole writer: \`corrections\`).` and `Namespace::Corrections => "corrections"` to `as_str`.
 - [ ] **Step 4: Run.** `cargo test -p featherkey-contracts` → PASS.
-- [ ] **Step 5: Scaffold three crates.** Each `Cargo.toml` uses the workspace edition/lints (copy `crates/personalization/Cargo.toml`, change `name`; `fold` adds `unicode-normalization = "0.1"` and no `featherkey-contracts` dep; `context`/`corrections` depend on `featherkey-contracts` and `featherkey-kernel` as `personalization` does). Each `src/lib.rs` starts with `#![…]` lints matching a sibling and a `//!` doc line. Add all three paths to `Cargo.toml` `members`.
-- [ ] **Step 6: Build the workspace.** `cargo build` → succeeds (empty crates compile).
-- [ ] **Step 7: Commit.** `git add -A && git commit -m "feat(tier1): scaffold fold/context/corrections crates + Corrections namespace"`
+- [ ] **Step 5: Scaffold three crates.** Copy `crates/personalization/Cargo.toml` (name `featherkey-personalization`, deps = `featherkey-contracts` only, `proptest` dev-dep — **it does NOT depend on kernel**), change `name` to `featherkey-<crate>`. Deps per crate: **`fold`** → `unicode-normalization = "0.1"` only (no contracts); **`context`** and **`corrections`** → `featherkey-contracts` + `proptest` dev-dep (String keys, so no kernel). Each `src/lib.rs` starts with the sibling's `#![…]` lints + a `//!` doc line. Add all three dir paths to `Cargo.toml` `members`.
+- [ ] **Step 6: Expose the learned frequency map (required by W3/W4).** In `crates/personalization/src/lib.rs`, add `#[must_use] pub fn frequencies(&self) -> &std::collections::BTreeMap<String, u32> { &self.frequencies }` with a test asserting it reflects `observe`d counts. (Today only `frequency(word)` exists; W3's freq snapshot and W4's `learned_frequencies()` FFI both need to enumerate the map.)
+- [ ] **Step 7: Build the workspace.** `cargo build` → succeeds; `cargo test -p featherkey-personalization` → PASS.
+- [ ] **Step 8: Commit.** `git add -A && git commit -m "feat(tier1): scaffold fold/context/corrections crates, Corrections namespace, personalization::frequencies accessor"`
 
 ---
 
@@ -340,8 +343,8 @@ use featherkey_corrections::Corrections;
 **Files:** Modify `crates/prediction/src/lib.rs`; deps on `featherkey-fold`, `featherkey-context`.
 
 **Interfaces:**
-- Consumes: `Dictionary::fold_prefix` (W2a), a frequency snapshot (`&BTreeMap<String,u32>` — dict rank and/or personalization), a context snapshot (`&BTreeMap<String,u32>` for `preceding` from W1b).
-- Produces: `StatisticalPredictor::new_ranked(lexicons, freq, dict_rank, context)` and an enriched `suggest` ordering by **context DESC → learned DESC → dict-rank ASC** (reproducing Kotlin `Vocabulary.candidatesByLanguage:121-125`), plus empty-prefix next-word from the context snapshot.
+- Consumes: `Dictionary::fold_prefix` (W2a), `featherkey_fold::fold` (W1a), a learned-frequency snapshot (`&BTreeMap<String,u32>` from `Personalization::frequencies`, W0 step 6), a context snapshot (`&BTreeMap<String,u32>` for `preceding`, W1b).
+- Produces: `StatisticalPredictor::new_ranked(lang_lexicons: Vec<(String, Dictionary)>, freq, dict_rank, context)` and a method returning **lang-tagged `Vec<Candidate>`** (word, lang, `Source::Lexicon`, `source_rank`), ordered by **context DESC → learned DESC → dict-rank ASC** (reproducing Kotlin `Vocabulary.candidatesByLanguage:121-125`), plus empty-prefix next-word from the context snapshot. **It must return `Candidate` (lang-tagged), not `Suggestions`** — `candidate_ranker::score` weights by `cand.lang` and `Suggestions` carries no language.
 
 - [ ] **Step 1: Failing tests** reproducing the Kotlin order and empty-prefix next-word:
 
@@ -359,7 +362,7 @@ use featherkey_corrections::Corrections;
 ```
 
 - [ ] **Step 2: Run, fail.** `cargo test -p featherkey-prediction` → FAIL.
-- [ ] **Step 3: Implement.** Add `new_ranked`; in `suggest`, gather candidates via `lexicon.fold_prefix(&fold(prefix))` (accent-insensitive); order by the composite key `(context desc, learned desc, dict_rank asc)`; on empty prefix, return the context snapshot's top next-words (removing the current `Suggestions::default()` early-return, guarded to only fire when a context snapshot is present). Keep the old `new`/`suggest` behavior available for callers that pass empty snapshots (back-compat) so existing tests still pass.
+- [ ] **Step 3: Implement.** Add `new_ranked(lang_lexicons, freq, dict_rank, context)` storing `Vec<(String, Dictionary)>` so each completion keeps its language. Add a method returning `Vec<Candidate>`: for each `(lang, dict)`, gather `dict.fold_prefix(&fold(prefix))` (accent-insensitive), order the merged set by `(context desc, learned desc, dict_rank asc)`, and emit `Candidate { word, lang, source: Source::Lexicon, source_rank: position }`. On empty prefix, emit the context snapshot's top next-words as candidates (tagged with their language). Keep the existing `Predictor::suggest`/`new` behavior intact (bare `Suggestions`, empty-prefix→empty) so current callers/tests are unaffected — the new ranked method is additive.
 - [ ] **Step 4: Run.** `cargo test -p featherkey-prediction` → PASS (new + existing).
 - [ ] **Step 5: Commit.** `git commit -am "feat(prediction): context/personalization/fold-aware ranking (option b)"`
 
@@ -371,14 +374,14 @@ use featherkey_corrections::Corrections;
 
 **Interfaces:**
 - Consumes: W1b/W1c models, W3 predictor, W1d covariance.
-- Produces (FFI): `learned_frequencies()->Vec<(String,u32)>`, `tap_offsets()->Vec<(String,f32,f32)>`, `observe_strip_pick(prefix,picked,field)`, `observe_delete_retype(word,field)`, context `import`; extended `persist`/`restore` covering context + corrections; `suggest` now returns the fully-ranked list incl. fold-group variants.
+- Produces (FFI): **`rank_suggestions(preceding, prefix, device: Vec<FfiRankCandidate>) -> Vec<FfiRankedWord{word,lang}>`** (the whole blend, core-owned), `learned_frequencies()->Vec<(String,u32)>`, `tap_offsets()->Vec<(String,f32,f32)>`, `observe_strip_pick(prefix,picked,field)`, `observe_delete_retype(word,field)`, context `import`; extended `persist`/`restore` covering context + corrections.
 
 - [ ] **Step 1: Own the models in the façade (failing test).** Add `context: Context` and `corrections: Corrections` fields to `FeatherKeyCore`; `restore`/`persist` load/save them (extend `learn.rs` persist/restore at `featherkey-core/src/learn.rs:79-95`). Add a core test asserting a recorded transition survives `persist`→`restore` through a `MemStore`.
 - [ ] **Step 2: Run, fail** → implement fields + persist/restore → PASS. `cargo test -p featherkey-core`.
-- [ ] **Step 3: Route `suggest` through the enriched predictor (failing test).** Change `FeatherKeyCore::suggest` (`lib.rs:249`) to build `StatisticalPredictor::new_ranked(self.lexicon_clones(), self.personalization frequency snapshot, dict_rank, self.context.next_counts(preceding))` using **borrowed snapshots** (no per-call deep clone of the whole personalization map — expose a borrowing accessor or build a lightweight snapshot). Move the dictionary fold-group variant guarantee here. Add a core test: typing `hell` yields `he'll` in the suggestions.
+- [ ] **Step 3: Own the whole blend in a new `rank_suggestions` (failing test).** Add `FeatherKeyCore::rank_suggestions(preceding, prefix, device: Vec<Candidate>) -> Vec<RankedCandidate>` that: builds `StatisticalPredictor::new_ranked` over `self.packs` (which are `(LangId, Dictionary)` — pass **borrowed** snapshots: `self.personalization.frequencies()` from W0 step 6, and `self.context.next_counts(preceding)`; do NOT deep-clone the whole map per call), collects the predictor's lang-tagged `Vec<Candidate>`, appends `device`, runs `featherkey_candidate_ranker::rank(&all, &self.momentum, k)`, then applies the dictionary fold-group variant guarantee. Keep the old `suggest` (`lib.rs:249`) as-is for compatibility. Core tests: typing `hell` yields `he'll`; an `en`-momentum tie promotes the `en` candidate (proves lang survived the pipeline).
 - [ ] **Step 4: Run.** PASS.
 - [ ] **Step 5: Record hooks (gated).** Add `learn_word` to also `self.context.record(prev, word)` (thread `prev`), and add `observe_strip_pick`/`observe_delete_retype` that gate via `self.sensitivity.should_suppress(field)` first (mirror `learn_word` at `learn.rs:26`), then update `corrections`. Test the sensitive-field short-circuit.
-- [ ] **Step 6: FFI surface.** In `ffi.rs`, add `learned_frequencies`, `tap_offsets` (from `touch_model.offset` per known key), `observe_strip_pick`, `observe_delete_retype`, context `import`; extend `persist`. Mirror the existing FFI method shapes (`ffi.rs:262-327`) incl. the `FieldSource` gate wrapper.
+- [ ] **Step 6: FFI surface.** In `ffi.rs`, add a `FfiRankedWord { word: String, lang: String }` record and `rank_suggestions(preceding, prefix, device: Vec<FfiRankCandidate>) -> Vec<FfiRankedWord>` (map `FfiRankCandidate`→`Candidate`, call the core, map `RankedCandidate`→`FfiRankedWord`); plus `learned_frequencies` (from `personalization.frequencies()`), `tap_offsets` (from `touch_model.offset` per known key), `observe_strip_pick`, `observe_delete_retype`, context `import`; extend `persist`. Mirror the existing FFI method shapes (`ffi.rs:262-327`) and the `FfiRankCandidate`/`FfiSource` conversion already used by `rank` (`ffi.rs:257-262`), incl. the `FieldSource` gate wrapper on the observe methods.
 - [ ] **Step 7: Run full core + regenerate bindings.** `cargo test -p featherkey-core` → PASS; build the FFI/UniFFI bindings per the existing build step.
 - [ ] **Step 8: Commit.** `git commit -am "feat(core): own context+corrections, route suggest through ranked predictor, extend FFI"`
 
@@ -390,7 +393,7 @@ use featherkey_corrections::Corrections;
 
 **Interfaces:** Consumes W4 FFI + W1e helpers.
 
-- [ ] **Step 1: Delegate `rankForStrip` to Rust `suggest`.** Replace the Kotlin `vocab.candidatesByLanguage` ranking (`FeatherKeyImeService.kt:534-547`) with a call to `bridge.suggest(preceding, prefix)`, still gathering **device** candidates in Kotlin and blending both through `bridge.rank` (`FfiSource.DEVICE` preserved). Keep the accent-variant post-step but source dictionary variants from Rust `suggest` and only device variants from Kotlin. Update/trim the `rankForStrip` tests accordingly.
+- [ ] **Step 1: Delegate `rankForStrip` to core `rank_suggestions`.** Replace the Kotlin `vocab.candidatesByLanguage` ranking **and** the Kotlin `bridge.rank` blend (`FeatherKeyImeService.kt:534-547`) with: gather **device** candidates in Kotlin as `FfiRankCandidate(word, lang, DEVICE, i)` (as today, `:543`), then call `bridge.rankSuggestions(preceding, prefix, deviceCands)` — the core now does predictor + device + momentum + variant blend and returns lang-tagged ranked words. The dictionary fold-group variant guarantee is core-side; keep only the **device-derived** variant as a thin Kotlin post-step (device spell-checker is Android-only). Update/trim `rankForStrip` tests accordingly.
 - [ ] **Step 2: Source swipe `learned` + offsets from Rust.** Change the `GestureDecoder.decode(...)` call (`:316`) to pass `bridge.learnedFrequencies()`; apply `bridge.tapOffsets()` via `GestureGeometry.shiftCenters` (W1e) before decode.
 - [ ] **Step 3: Wire correction signals.** Feed commit/backspace/pick events through `CorrectionDetector` and call `bridge.observeStripPick(...)` / `bridge.observeDeleteRetype(...)`; for revert-after-autocorrect, call the existing `add_to_dictionary`/learn path (no-clobber already covers it).
 - [ ] **Step 4: Delete the plaintext models.** Remove `UsageModel`/`ContextModel` fields, `usage.record`/`bigrams.record`/`persist` calls (`:353,362,770-779`), imports, and the files. Remove the ranking guts of `Vocabulary.candidatesByLanguage` (keep only device-blend helpers still used).
@@ -423,4 +426,6 @@ use featherkey_corrections::Corrections;
 ## Self-review notes
 - **Spec coverage:** every spec node (#4 sub-steps 4a–4e, #2, #3, #1) maps to a task (W1b/W2a/W3/W4/W5/W6a=#4; W1d/W2b=#2; W5 step 2=#3; W1c/W1e/W4/W5=#1). ✓
 - **Types consistent:** signatures in the Interface summary match each task's Produces. ✓
-- **Known follow-ups (not blockers):** the `suggest` per-keystroke snapshot cost must be **measured** in W4 (introduce a materialized read-model only if borrowed snapshots regress); `unicode-normalization` is the one new dependency.
+- **Known follow-ups (not blockers):** the `rank_suggestions` per-keystroke snapshot cost must be **measured** in W4 (introduce a materialized read-model only if borrowed snapshots regress); `unicode-normalization` is the one new dependency (W1a verifies its exact API — `char::is_combining_mark`, `.nfd()` — with the parity test before relying on it).
+- **Fold parity nuance (W1a):** `unicode_normalization::char::is_combining_mark` matches canonical-combining-class ≠ 0 (broader than Kotlin `Diacritics`' `Mn`-only). For accents this is equivalent; the W1a parity table + W2a regression pins are the guard. If a pin diverges, restrict to general-category `Mn` (add `unicode-general-category`) rather than loosening the pin.
+- **Corrected after review (r-u-sure):** (A) new crates depend on `contracts` only, **not** kernel; (B) added `Personalization::frequencies()` accessor (W0 step 6) — it didn't exist; (C) the predictor returns **lang-tagged `Candidate`s** and the full blend is core-owned via `rank_suggestions`, because `candidate_ranker` weights by `cand.lang` and `Suggestions` has no language field.
