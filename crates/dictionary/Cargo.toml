@@ -11,6 +11,7 @@ description = "Compact per-language lexicons; prefix/fuzzy lookup."
 layer = "domain"
 
 [dependencies]
+featherkey-fold = { path = "../fold" }
 fst = "0.4.7"
 
 

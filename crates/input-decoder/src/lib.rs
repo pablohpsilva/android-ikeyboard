@@ -67,8 +67,11 @@ impl NearestKeyDecoder {
     }
 }
 
-/// Squared Euclidean distance. Squared is enough for ranking and avoids a
-/// `sqrt`; the confidence step takes the root only where the magnitude matters.
+/// Squared Euclidean distance. Superseded on the ranking path by the
+/// Mahalanobis quadratic form ([`InvCov::quadratic`]) — with the identity that
+/// quadratic *is* this — but retained as the reference the byte-for-byte
+/// regression guard measures against, hence test-only.
+#[cfg(test)]
 fn distance_sq(a: TouchPoint, b: TouchPoint) -> f32 {
     let dx = a.x - b.x;
     let dy = a.y - b.y;
@@ -128,6 +131,61 @@ fn effective_center(center: TouchPoint, offset: (f32, f32)) -> TouchPoint {
     TouchPoint::new(center.x + offset.0, center.y + offset.1)
 }
 
+/// A key's precomputed inverse covariance `Σ⁻¹`, symmetric by construction and
+/// stored as its three distinct entries (`[[a, b], [b, d]]`). Applied as the
+/// Mahalanobis quadratic form `dᵀ Σ⁻¹ d`, it scales a tap offset by how tightly
+/// this user hits the key along each axis: a direction the user spreads over
+/// (large variance) is penalized less than one they hit consistently.
+///
+/// The **identity** `[[1,0],[1,0]]` reduces the quadratic form to plain
+/// squared-Euclidean `dx² + dy²`, so an unseen / low-count / non-invertible key
+/// decodes byte-for-byte as the pre-Mahalanobis decoder did (ADR-15 invariant).
+#[derive(Debug, Clone, Copy)]
+struct InvCov {
+    a: f32,
+    b: f32,
+    d: f32,
+}
+
+impl InvCov {
+    /// `Σ⁻¹ = I`: the quadratic form collapses to squared-Euclidean.
+    const IDENTITY: Self = Self {
+        a: 1.0,
+        b: 0.0,
+        d: 1.0,
+    };
+
+    /// Invert a 2x2 population covariance for use as `Σ⁻¹`, once per key at
+    /// build time (never per tap, never a `sqrt`). The diagonal is regularized
+    /// with a small ε so a zero or rank-deficient covariance is still finite,
+    /// and any non-positive / non-finite determinant falls back to the identity
+    /// (→ squared-Euclidean). Callers pass the identity directly for keys with
+    /// fewer than two observations so those stay byte-for-byte unchanged.
+    fn from_covariance(cov: [[f32; 2]; 2]) -> Self {
+        const EPS: f32 = 1e-3;
+        let a = cov[0][0] + EPS;
+        let b = cov[0][1];
+        let d = cov[1][1] + EPS;
+        let det = a * d - b * b;
+        if !det.is_finite() || det <= 0.0 {
+            return Self::IDENTITY;
+        }
+        let inv_det = 1.0 / det;
+        Self {
+            a: d * inv_det,
+            b: -b * inv_det,
+            d: a * inv_det,
+        }
+    }
+
+    /// The Mahalanobis squared distance `dᵀ Σ⁻¹ d` for offset `(dx, dy)`. With
+    /// the identity this is exactly `dx² + dy²`. No `sqrt` — this is the ranking
+    /// magnitude; the confidence step still takes the root downstream.
+    fn quadratic(&self, dx: f32, dy: f32) -> f32 {
+        self.a * dx * dx + 2.0 * self.b * dx * dy + self.d * dy * dy
+    }
+}
+
 impl InputDecoder for NearestKeyDecoder {
     fn decode(
         &self,
@@ -139,15 +197,27 @@ impl InputDecoder for NearestKeyDecoder {
             return Err(CoreError::EmptyLayout);
         }
 
-        // Distance from the touch to every key's model-biased center, paired
-        // with its id. The learned offset re-centres each key on where this user
-        // actually taps it (BR-7); an unbiased model leaves centers untouched.
+        // Mahalanobis squared distance from the touch to every key's model-
+        // biased center, paired with its id. The learned offset re-centres each
+        // key on where this user actually taps it (BR-7), and the per-key
+        // inverse covariance weights the offset by how consistently they hit
+        // that key along each axis. The inverse covariance is computed once per
+        // key here (never per tap in an inner loop, never a `sqrt`); a key with
+        // fewer than two observations uses the identity, so an unbiased model
+        // leaves centers untouched and reduces to plain squared-Euclidean.
         let mut scored: Vec<(KeyId, f32)> = layout
             .keys()
             .iter()
             .map(|k| {
                 let center = effective_center(k.center(), model.offset(k.id));
-                (k.id, distance_sq(touch, center))
+                let inv_cov = if model.observations(k.id) < 2 {
+                    InvCov::IDENTITY
+                } else {
+                    InvCov::from_covariance(model.covariance(k.id))
+                };
+                let dx = touch.x - center.x;
+                let dy = touch.y - center.y;
+                (k.id, inv_cov.quadratic(dx, dy))
             })
             .collect();
 
@@ -350,5 +420,102 @@ mod tests {
             .decode(touch, &layout, &TouchModel::default())
             .unwrap();
         assert_eq!(a, b);
+    }
+
+    /// The "today" decoder, re-implemented inline as pure squared-Euclidean +
+    /// inverse-distance shares. This is the pre-Mahalanobis reference the byte-
+    /// for-byte guard measures against, independent of the new code path.
+    fn reference_squared_euclidean(touch: TouchPoint, layout: &Layout) -> KeyCandidates {
+        let mut scored: Vec<(KeyId, f32)> = layout
+            .keys()
+            .iter()
+            .map(|k| (k.id, distance_sq(touch, k.center())))
+            .collect();
+        scored.sort_by(|a, b| a.1.total_cmp(&b.1));
+        let dists: Vec<f32> = scored.iter().map(|(_, d)| d.sqrt()).collect();
+        let basis = ShareBasis::new(&dists);
+        let ranked = scored
+            .iter()
+            .zip(dists.iter())
+            .map(|((id, _), &d)| (*id, basis.share(d)))
+            .collect();
+        KeyCandidates { ranked }
+    }
+
+    /// CRITICAL regression guard: with a zero-covariance (unbiased) model the
+    /// Mahalanobis quadratic form must reduce to plain squared-Euclidean, so
+    /// `decode` is byte-for-byte identical to the pre-change decoder — same
+    /// order, same `f32` confidences — across a spread of touch positions.
+    #[test]
+    fn zero_covariance_model_reduces_to_squared_euclidean_byte_for_byte() {
+        let decoder = NearestKeyDecoder::new();
+        let layout = Layout::qwerty_tracer_row();
+        for touch in [
+            TouchPoint::new(230.0, 60.0),
+            TouchPoint::new(250.0, 60.0),
+            TouchPoint::new(70.0, 33.0),
+            TouchPoint::new(410.0, 90.0),
+            TouchPoint::new(0.0, 0.0),
+        ] {
+            let got = decoder
+                .decode(touch, &layout, &TouchModel::unbiased())
+                .unwrap();
+            let want = reference_squared_euclidean(touch, &layout);
+            assert_eq!(got, want, "mismatch at {touch:?}");
+        }
+    }
+
+    /// Anisotropy: a key learned with a wide *horizontal* spread (and ~zero
+    /// mean) must penalize a horizontal tap offset far less than an equal-
+    /// magnitude vertical one — the whole point of covariance weighting. Under
+    /// the old isotropic squared-Euclidean the two offsets score equally, so
+    /// this fails until the Mahalanobis form lands.
+    #[test]
+    fn wide_x_covariance_penalizes_x_offset_less_than_equal_y_offset() {
+        let decoder = NearestKeyDecoder::new();
+        let layout = Layout::qwerty_tracer_row();
+        // Teach 'e' a wide horizontal spread with a ~centered mean by feeding
+        // symmetric +/-40px horizontal offsets: var(dx) large, var(dy) ~0.
+        let mut model = TouchModel::unbiased();
+        for _ in 0..8 {
+            model.observe(KeyId('e'), 40.0, 0.0).unwrap();
+            model.observe(KeyId('e'), -40.0, 0.0).unwrap();
+        }
+        // Same-magnitude offset from 'e' centre (250,60): once in x, once in y.
+        let x_tap = decoder
+            .decode(TouchPoint::new(270.0, 60.0), &layout, &model)
+            .unwrap();
+        let y_tap = decoder
+            .decode(TouchPoint::new(250.0, 80.0), &layout, &model)
+            .unwrap();
+        let e_conf = |c: &KeyCandidates| {
+            c.ranked()
+                .iter()
+                .find(|(k, _)| *k == KeyId('e'))
+                .map(|(_, v)| v.value())
+                .unwrap()
+        };
+        let x_conf = e_conf(&x_tap);
+        let y_conf = e_conf(&y_tap);
+        assert!(
+            x_conf > y_conf,
+            "wide-x covariance: x-offset conf {x_conf} should exceed y-offset conf {y_conf}"
+        );
+    }
+
+    /// Unit check on the inverse-covariance quadratic form directly: a non-
+    /// invertible covariance falls back to the identity (plain squared-Euclidean),
+    /// and a wide-x covariance makes an x-offset cheaper than an equal y-offset.
+    /// (The zero-covariance/unseen-key identity reduction is the `observations<2`
+    /// guard in `decode`, covered by the byte-for-byte regression test.)
+    #[test]
+    fn inv_cov_falls_back_to_identity_and_weights_anisotropically() {
+        // Non-finite covariance => non-finite determinant => identity fallback.
+        let id = InvCov::from_covariance([[f32::NAN, 0.0], [0.0, 0.0]]);
+        assert_eq!(id.quadratic(3.0, 4.0), 3.0 * 3.0 + 4.0 * 4.0);
+
+        // Wide x, tight y: an x-offset costs far less than an equal y-offset.
+        let anis = InvCov::from_covariance([[100.0, 0.0], [0.0, 0.0]]);
+        assert!(anis.quadratic(10.0, 0.0) < anis.quadratic(0.0, 10.0));
     }
 }

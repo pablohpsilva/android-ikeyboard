@@ -66,6 +66,11 @@ pub struct Dictionary {
     /// substitution/insertion alphabet for fuzzy lookup so candidate generation
     /// stays bounded by the language rather than all of Unicode.
     alphabet: Vec<char>,
+    /// `(folded, original)` pairs sorted by `folded`, mirroring the Kotlin
+    /// `Vocabulary` folded/sortedWords arrays. This is the accent-insensitive
+    /// index [`fold_prefix`](Dictionary::fold_prefix) binary-searches: a bare
+    /// match key (`fold("café") == "cafe"`) paired back to the real spelling.
+    folded: Vec<(String, String)>,
 }
 
 impl Dictionary {
@@ -86,6 +91,7 @@ impl Dictionary {
     {
         let mut builder = SetBuilder::memory();
         let mut alphabet = BTreeSet::new();
+        let mut folded = Vec::new();
         for word in words {
             let word = word.as_ref();
             // `insert` is the sole failure point: it rejects any key that is
@@ -95,12 +101,19 @@ impl Dictionary {
                 .insert(word)
                 .map_err(|_| DictionaryError::Unsorted)?;
             alphabet.extend(word.chars());
+            folded.push((featherkey_fold::fold(word), word.to_owned()));
         }
+        // The folded key order differs from the FST's byte order (accents fold
+        // away, uppercase lowercases), so sort the index by its own key. Sort by
+        // `(folded, original)` for a deterministic order among words that share a
+        // folded form (e.g. `re`/`ré`).
+        folded.sort();
         // `into_set` on the in-memory builder is infallible (it hands back the
         // bytes it just wrote), so there is no second error path to leak.
         Ok(Self {
             set: builder.into_set(),
             alphabet: alphabet.into_iter().collect(),
+            folded,
         })
     }
 
@@ -130,6 +143,32 @@ impl Dictionary {
             out.push(String::from_utf8_lossy(key).into_owned());
         }
         out
+    }
+
+    /// Original spellings whose **match-folded** form (lowercased, diacritics
+    /// and apostrophes stripped — see [`featherkey_fold::fold`]) begins with
+    /// `folded_prefix`, capped at [`MAX_COMPLETIONS`].
+    ///
+    /// This is the accent-insensitive companion to [`prefix`](Dictionary::prefix):
+    /// `fold_prefix("cafe")` surfaces `"café"`, `fold_prefix("dont")` surfaces
+    /// `"don't"`. `folded_prefix` is expected to be already folded by the caller
+    /// (the prediction layer folds the user's keystrokes once); it is compared
+    /// as-is against the stored folded keys. An empty prefix matches every word
+    /// (still capped). Results are ordered by `(folded, original)`.
+    #[must_use]
+    pub fn fold_prefix(&self, folded_prefix: &str) -> Vec<String> {
+        // The index is sorted by folded key, so all matches form one contiguous
+        // run. Binary-search its lower bound (mirrors the Kotlin `lowerBound`),
+        // then walk forward while the folded key still starts with the prefix.
+        let start = self
+            .folded
+            .partition_point(|(folded, _)| folded.as_str() < folded_prefix);
+        self.folded[start..]
+            .iter()
+            .take_while(|(folded, _)| folded.starts_with(folded_prefix))
+            .take(MAX_COMPLETIONS)
+            .map(|(_, original)| original.clone())
+            .collect()
     }
 
     /// Dictionary words exactly one edit (delete, transpose, substitute, or
@@ -296,6 +335,24 @@ mod tests {
             format!("{}", DictionaryError::Unsorted),
             "word list must be in non-decreasing (sorted) order"
         );
+    }
+
+    #[test]
+    fn fold_prefix_surfaces_accented_and_apostrophe_words() {
+        // Real spellings in; base-letter prefix out. The fixture is inserted in
+        // sorted BYTE order (the FST's set contract): uppercase `I` (0x49) sorts
+        // before the lowercase words, and inside `he'll`/`hello` the apostrophe
+        // (0x27) sorts before `l` (0x6c) so `he'll` precedes `hello`.
+        let d = Dictionary::from_sorted_words(
+            ["I've", "café", "don't", "he'll", "hello", "também", "você"].iter(),
+        )
+        .expect("fixture is sorted");
+        assert!(d.fold_prefix("ive").contains(&"I've".to_string()));
+        assert!(d.fold_prefix("cafe").contains(&"café".to_string()));
+        assert!(d.fold_prefix("hell").contains(&"he'll".to_string()));
+        assert!(d.fold_prefix("dont").contains(&"don't".to_string()));
+        assert!(d.fold_prefix("tambe").contains(&"também".to_string()));
+        assert!(d.fold_prefix("voce").contains(&"você".to_string()));
     }
 
     #[test]

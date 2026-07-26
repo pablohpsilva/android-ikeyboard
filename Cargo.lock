@@ -437,6 +437,7 @@ dependencies = [
 name = "featherkey-dictionary"
 version = "0.0.0"
 dependencies = [
+ "featherkey-fold",
  "fst",
 ]
 
