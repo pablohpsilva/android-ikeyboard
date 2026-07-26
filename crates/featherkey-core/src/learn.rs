@@ -68,7 +68,10 @@ impl FeatherKeyCore {
     /// next-word model (migrating the legacy Kotlin `context.tsv`). Set-semantics,
     /// so re-running a migration is idempotent. Not gated: migration is a
     /// deliberate one-time import of the user's own prior data.
-    pub fn import_context<I: IntoIterator<Item = (String, String, u32)>>(&mut self, transitions: I) {
+    pub fn import_context<I: IntoIterator<Item = (String, String, u32)>>(
+        &mut self,
+        transitions: I,
+    ) {
         self.context.import(transitions);
     }
 

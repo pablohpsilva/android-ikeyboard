@@ -278,9 +278,9 @@ mod tests {
         let mut p = Personalization::new();
         p.import([
             ("ok".to_owned(), 4),
-            ("zero".to_owned(), 0),        // non-positive → skipped
-            ("ta\tb".to_owned(), 2),       // contains tab → skipped
-            ("".to_owned(), 7),            // empty → skipped
+            ("zero".to_owned(), 0),  // non-positive → skipped
+            ("ta\tb".to_owned(), 2), // contains tab → skipped
+            ("".to_owned(), 7),      // empty → skipped
         ]);
         assert_eq!(p.frequency("ok"), 4);
         assert_eq!(p.frequency("zero"), 0);

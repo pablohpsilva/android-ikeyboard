@@ -211,7 +211,13 @@ mod tests {
         let keys: Vec<&str> = all.iter().map(|n| n.as_str()).collect();
         assert_eq!(
             keys,
-            ["touch_model", "user_dict", "personal_lm", "clipboard", "corrections"]
+            [
+                "touch_model",
+                "user_dict",
+                "personal_lm",
+                "clipboard",
+                "corrections"
+            ]
         );
         // Distinct table names — no two namespaces collide in storage.
         for (i, a) in keys.iter().enumerate() {

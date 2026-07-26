@@ -31,7 +31,7 @@ use std::fmt::Write as _;
 use featherkey_contracts::StoreError;
 use featherkey_kernel::KeyId;
 
-use crate::Mean;
+use crate::mean::Mean;
 
 /// Field separator inside a line.
 const SEP: char = '\t';
@@ -222,7 +222,10 @@ mod tests {
 
     #[test]
     fn model_round_trips() {
-        let m = model_cov(&[('a', 2.5, -3.25, 37, 4.0, 9.0, -1.5), ('z', -0.5, 4.0, 2, 1.0, 2.0, 0.5)]);
+        let m = model_cov(&[
+            ('a', 2.5, -3.25, 37, 4.0, 9.0, -1.5),
+            ('z', -0.5, 4.0, 2, 1.0, 2.0, 0.5),
+        ]);
         let bytes = encode(&m);
         assert_eq!(decode(&bytes).unwrap(), m);
     }

@@ -86,9 +86,7 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
-    fn model(
-        rows: &[(&str, &str, u32)],
-    ) -> BTreeMap<String, BTreeMap<String, u32>> {
+    fn model(rows: &[(&str, &str, u32)]) -> BTreeMap<String, BTreeMap<String, u32>> {
         let mut m: BTreeMap<String, BTreeMap<String, u32>> = BTreeMap::new();
         for &(prev, next, count) in rows {
             m.entry(prev.to_owned())

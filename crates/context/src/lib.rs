@@ -133,7 +133,10 @@ impl Context {
             if !is_storable(&prev) || !is_storable(&next) {
                 continue;
             }
-            self.frequencies.entry(prev).or_default().insert(next, count);
+            self.frequencies
+                .entry(prev)
+                .or_default()
+                .insert(next, count);
         }
     }
 

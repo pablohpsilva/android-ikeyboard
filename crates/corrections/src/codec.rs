@@ -72,7 +72,13 @@ pub(crate) fn encode_model(
 #[allow(clippy::type_complexity)]
 pub(crate) fn decode_model(
     bytes: &[u8],
-) -> Result<(BTreeMap<String, BTreeMap<String, u32>>, BTreeMap<String, u32>), StoreError> {
+) -> Result<
+    (
+        BTreeMap<String, BTreeMap<String, u32>>,
+        BTreeMap<String, u32>,
+    ),
+    StoreError,
+> {
     let text = std::str::from_utf8(bytes).map_err(|_| StoreError::Backend)?;
     let mut prefs: BTreeMap<String, BTreeMap<String, u32>> = BTreeMap::new();
     let mut unwanted: BTreeMap<String, u32> = BTreeMap::new();
@@ -208,10 +214,7 @@ mod tests {
 
     #[test]
     fn decode_rejects_a_four_field_line() {
-        assert_eq!(
-            decode_model(b"1\ta\tb\tc").err(),
-            Some(StoreError::Backend)
-        );
+        assert_eq!(decode_model(b"1\ta\tb\tc").err(), Some(StoreError::Backend));
     }
 
     proptest! {

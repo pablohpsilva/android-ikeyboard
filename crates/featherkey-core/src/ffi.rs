@@ -347,11 +347,7 @@ impl KeyboardCore {
     }
 
     /// Record a delete-and-retype demotion for `word` — unless `field` is sensitive.
-    pub fn observe_delete_retype(
-        &self,
-        word: String,
-        field: std::sync::Arc<dyn SensitiveField>,
-    ) {
+    pub fn observe_delete_retype(&self, word: String, field: std::sync::Arc<dyn SensitiveField>) {
         self.lock()
             .observe_delete_retype(&word, &FieldSource(field.as_ref()));
     }
