@@ -51,12 +51,12 @@ Verified by execution, not assertion (last full run: 17 tests pass, 0 warnings, 
 
 | Artifact | Status | Evidence |
 |---|---|---|
-| `crates/kernel` | Done | Value objects `TouchPoint`/`KeyId`/`Confidence`, `CoreError`; zero deps; 5 tests |
-| `crates/layout-engine` | Done | `Key`/`Layout` + `qwerty_tracer_row()`; deps: kernel; 4 tests |
-| `crates/input-decoder` | Done **(sans touch-model)** | `NearestKeyDecoder`; deps: kernel, layout-engine; 5 tests. **Trait is `decode(touch, layout)` — SEDD §5.4 requires a `model` arg; see D-4.** |
+| `core/crates/kernel` | Done | Value objects `TouchPoint`/`KeyId`/`Confidence`, `CoreError`; zero deps; 5 tests |
+| `core/crates/layout-engine` | Done | `Key`/`Layout` + `qwerty_tracer_row()`; deps: kernel; 4 tests |
+| `core/crates/input-decoder` | Done **(sans touch-model)** | `NearestKeyDecoder`; deps: kernel, layout-engine; 5 tests. **Trait is `decode(touch, layout)` — SEDD §5.4 requires a `model` arg; see D-4.** |
 | Keystroke tracer bullet | Done | `input-decoder/tests/tracer_bullet.rs`, 3 tests, touch→char; closes the thin slice of BR-5/BR-6 |
-| BDD spec | Done | `features/keystroke_decoding.feature`, tagged `@BR-5`/`@BR-6` |
-| Fitness functions | Done | `tools/fitness/check.py`: file/fn size caps, core purity, acyclic DAG + kernel-purity; **proven to fail on violations** |
+| BDD spec | Done | `core/features/keystroke_decoding.feature`, tagged `@BR-5`/`@BR-6` |
+| Fitness functions | Done | `core/tools/fitness/check.py`: file/fn size caps, core purity, acyclic DAG + kernel-purity; **proven to fail on violations** |
 | CI | Done (Rust) | `.github/workflows/ci.yml`: fmt, clippy `-D warnings`, test, fitness, **98% line-coverage gate** (branch informational); `android-shell` job dormant until a Gradle build exists |
 | Android shell | Scaffold only | `ime-service`/`keyboard-view`/`ffi-bridge` + UDL, **uncompiled** (no JDK/Gradle/SDK/NDK here) |
 
@@ -115,9 +115,9 @@ Every increment flows through the same five stages. Stages 2–4 loop until stag
 
 1. **Tests pass** — `cargo test --workspace`, 0 failures, 0 warnings (`cargo build` clean; `clippy -D warnings` in CI).
 2. **Coverage ≥ 98% line** on the new crate *and* the workspace (`cargo llvm-cov --fail-under-lines 98`). Branch coverage reported; production-code branches expected at 100%.
-3. **Fitness green** — `tools/fitness/check.py` exit 0 (no god-files, core purity, acyclic DAG, and the inward Dependency Rule once E-1 lands).
+3. **Fitness green** — `core/tools/fitness/check.py` exit 0 (no god-files, core purity, acyclic DAG, and the inward Dependency Rule once E-1 lands).
 4. **Interface fidelity** — the public API matches the SEDD §5.4 port/trait sketch, or a deviation is recorded and justified (as D-4 does for `input-decoder`).
-5. **BDD** — at least one Gherkin scenario per closed BR, tagged with the BR ID, in `features/`.
+5. **BDD** — at least one Gherkin scenario per closed BR, tagged with the BR ID, in `core/features/`.
 6. **Traceability** — the SEDD §15 row(s) for the closed BR(s) reference the new module; this plan's wave table is ticked.
 7. **No panics on the hot path** — `Result` at boundaries; `unwrap_used`/`expect_used`/`panic` lints clean (SEDD §5.5 r3).
 
@@ -136,7 +136,7 @@ Verdict must be ✅ *Complete and verified* to exit. ⚠ or 🚧 → loop back t
 Before commit, the increment must prove it broke nothing:
 - `cargo test --workspace` — every pre-existing test still green.
 - `cargo llvm-cov --workspace --fail-under-lines 98` — coverage did not regress.
-- `tools/fitness/check.py` — still exit 0.
+- `core/tools/fitness/check.py` — still exit 0.
 - Public-API diff of touched-but-not-owned crates — empty, unless a break was scheduled (D-4).
 - `git status` — no stray artifacts; `target/` ignored; commit has **no** AI-attribution trailer (standing user preference).
 
@@ -160,7 +160,7 @@ The grounding analysis found ambiguities in the docs and gaps in enforcement tha
 
 | ID | Gap | Fix |
 |---|---|---|
-| **E-1** | Fitness does **not** enforce the inward Dependency Rule (a domain crate could import an adapter and nothing would catch it). | Extend `tools/fitness/check.py` with a layer map (domain / port / adapter / composition) and assert no domain→adapter edge. Add a negative test proving it bites. |
+| **E-1** | Fitness does **not** enforce the inward Dependency Rule (a domain crate could import an adapter and nothing would catch it). | Extend `core/tools/fitness/check.py` with a layer map (domain / port / adapter / composition) and assert no domain→adapter edge. Add a negative test proving it bites. |
 | **E-2** | `sensitive-context` ordering (BR-26: password fields *structurally* cannot be learned) is prose-only; no test guarantees the gate runs before `personalization`/`prediction`. | An application-layer property test at the `featherkey-core` composition root. Scheduled with Wave 4 but the *contract* is written when `sensitive-context` lands (Wave 1). |
 | **E-3** | CI stages promised by SEDD §13.1 are missing: supply-chain (`cargo-deny`/`cargo-audit`, BR-65), permission/network guard (BR-20/BR-27), reproducibility (BR-24). Several **Must** privacy/security BRs currently have *no active guardrail*. | Add these as CI jobs. `cargo-deny` + `cargo-audit` first (cheap, high value). These are process-owned BRs (see §7) and must not wait for a module. |
 | **E-4** | The **`featherkey-core`** composition façade was absent from the SEDD §5.2 registry though named in §3.6/ARCH; the `contracts` port crate (ADR-12) was also unregistered. | **Done (SEDD v0.7):** added `contracts` + `featherkey-core` to §5.2. `featherkey-core` keeps the UniFFI surface (no separate `featherkey-ffi` crate — consistent with §3.6/ARCH); it is Wave 4, `contracts` is Wave 0.5. |
@@ -284,7 +284,7 @@ Honesty about the boundary (no JDK/Gradle/Android SDK/NDK here):
 - **`crash-guard`'s** FFI-seam and watchdog behavior (its core logic *is* testable now).
 - The **UniFFI-generated bindings** actually compiling against Kotlin.
 
-These are validated by standing up the dormant `android-shell` CI job on a runner that has the Android toolchain (the workflow is already written and gated on `android/gradlew` existing). Until then, Wave 5 work is authored and reviewed but explicitly marked *unverified*, exactly as the current scaffold is.
+These are validated by standing up the dormant `android-shell` CI job on a runner that has the Android toolchain (the workflow is already written and gated on `apps/android/gradlew` existing). Until then, Wave 5 work is authored and reviewed but explicitly marked *unverified*, exactly as the current scaffold is.
 
 ---
 

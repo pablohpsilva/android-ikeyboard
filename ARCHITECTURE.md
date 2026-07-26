@@ -20,6 +20,7 @@
 | 0.2 | 2026-07-24 | Set minimum test coverage to **98%** line+branch (§7.3); added this revision history for consistency with the BRD/SEDD; synced document-chain references to BRD v0.7 / SEDD v0.6 (after the BR-17 resolution) |
 | 0.3 | 2026-07-24 | Synced SEDD chain reference to v0.7 (adds ADR-12–16, the `contracts`/`featherkey-core` registry entries, and the two-domain writer split). No architectural change in this document. |
 | 0.4 | 2026-07-24 | Reconciled the document with the as-built repo (per SEDD ADR-17): added `contracts` to the module registry (§5.4); updated the module anatomy (§5.2) and repository layout (§11) to the actual `crates/` workspace + centralized repo-root `features/` + flat single-concept `src/`; made per-crate `README.md` a stated requirement (now satisfied). No change to any architectural mandate (AM-1..AM-7) or fitness function. |
+| 0.5 | 2026-07-26 | Restructured to an `apps/` + `core/` monorepo (SEDD **ADR-20**, superseding ADR-17): updated the repository layout (§11) and path pointers to `core/crates/*`, `core/features/`, `core/tools/`, `apps/android/`. No architectural-mandate or fitness-function change. |
 
 ---
 
@@ -166,7 +167,7 @@ A **module** is a bounded unit that does **one well-specified job** (AM-6). In R
 
 - Every crate has a **`README.md`** stating its one job, ports, and invariants (§5.1).
 - Ports are **not** re-declared per module: all port traits live in the shared **`contracts`** crate (ADR-12), so a domain crate implements/consumes a trait it imports rather than owning a `ports/` directory.
-- **BDD `.feature` files are centralized** in the repo-root **`features/`** directory (one `<module>.feature` per crate), not nested per module — this keeps the BR↔scenario traceability check (§8.3) over a single tree.
+- **BDD `.feature` files are centralized** in the **`core/features/`** directory (one `<module>.feature` per crate), not nested per module — this keeps the BR↔scenario traceability check (§8.3) over a single tree.
 - For a **small crate**, `src/lib.rs` may hold the crate's logic directly (one concept, within the §6 size caps); the `domain/`/`application/`/`ports/` subfolders are an option a crate adopts **only when it grows** past a single concept, not a mandatory scaffold. The size/complexity caps (§6.1), not the folder count, are what prevent god-files.
 - Internal files are **private by default**; only the crate's public API is exported (ISP at module scale).
 
@@ -290,7 +291,7 @@ Commits SHOULD reflect this rhythm; a PR that adds behavior with **no accompanyi
 | Contract (per port) | shared suite | port's crate `tests/` | every adapter of a port (LSP) |
 | Fuzz | `cargo-fuzz` | `fuzz/` | untrusted inputs (security) |
 | Integration | `cargo test` / instrumented | module `tests/` | public API only |
-| Acceptance (BDD) | `cucumber` / Cucumber-JVM | `features/` | user-facing behavior (§8) |
+| Acceptance (BDD) | `cucumber` / Cucumber-JVM | `core/features/` | user-facing behavior (§8) |
 
 ### 7.3 Coverage & gates
 
@@ -417,32 +418,36 @@ These are the core's inbound API (the UniFFI surface via `featherkey-core`). Kep
 A **monorepo**: a Cargo workspace (Rust core) plus a Gradle multi-module build (Android shell), so boundaries are physical and the dependency DAG is machine-checkable.
 
 ```
-featherkey/
+featherkey/                          # monorepo root
   ARCHITECTURE.md  BUSINESS_REQUIREMENTS.md  SOFTWARE_ENGINEERING.md
-  IMPLEMENTATION_PLAN.md
-  Cargo.toml                      # Rust workspace: lists all core crates
-  crates/                         # the Rust core (one crate per module)
-    kernel/                       # shared value objects + errors (no deps)
-    contracts/                    # port traits, deps on kernel only (ADR-12)
-    input-decoder/  touch-model/  layout-engine/  locale-manager/
-    dictionary/  prediction/  autocorrect/  personalization/
-    smart-typing/  editing/  sensitive-context/  diagnostics/
-    secure-store/                 # adapter: persistence/crypto
-    crash-guard/                  # adapter: fault isolation
-    featherkey-core/              # composition: façade + UniFFI-ready surface (Wave 4; ADR-18)
-    # planned, not yet built: gesture, clipboard-core, neural-runtime (v1.x), dictation (v2+)
-    <crate>/README.md  <crate>/src/  <crate>/tests/   # (each follows §5.2 anatomy)
-  features/                       # ALL BDD .feature files, one <module>.feature per crate
-  android/                        # Gradle multi-module (scaffold; built in Wave 5)
-    app/                          # composition root (Kotlin) + manifest
-    ime-service/  keyboard-view/  settings-ui/  onboarding/
-    accessibility-adapter/  platform-services/  ffi-bridge/
-  tools/                          # fitness/ (§13), bdd_check.py (§8.3), ci-local.sh
+  IMPLEMENTATION_PLAN.md  PLAY_STORE_PUBLISHING.md  README.md
+  apps/                             # deployable applications
+    android/                        # Gradle multi-module keyboard app (built in Wave 5)
+      app/                          # composition root (Kotlin) + manifest
+      ime-service/  keyboard-view/  settings-ui/  onboarding/
+      accessibility-adapter/  platform-services/  ffi-bridge/
+    web/                            # website app (placeholder; design pending)
+  core/                             # the Rust engine — a single Cargo workspace
+    Cargo.toml                      # workspace: lists all core crates
+    deny.toml  rust-toolchain.toml
+    crates/                         # one crate per module
+      kernel/                       # shared value objects + errors (no deps)
+      contracts/                    # port traits, deps on kernel only (ADR-12)
+      input-decoder/  touch-model/  layout-engine/  locale-manager/
+      dictionary/  prediction/  autocorrect/  personalization/
+      smart-typing/  editing/  sensitive-context/  diagnostics/
+      secure-store/                 # adapter: persistence/crypto
+      crash-guard/                  # adapter: fault isolation
+      featherkey-core/              # composition: façade + UniFFI-ready surface (Wave 4; ADR-18)
+      # planned, not yet built: gesture, clipboard-core, neural-runtime (v1.x), dictation (v2+)
+      <crate>/README.md  <crate>/src/  <crate>/tests/   # (each follows §5.2 anatomy)
+    features/                       # ALL BDD .feature files, one <module>.feature per crate
+    tools/                          # fitness/ (§13), bdd_check.py (§8.3), ci-local.sh
   # planned: build-logic/ (Gradle convention plugins), fuzz/ (cargo-fuzz targets)
 ```
 
-- Crates live under **`crates/`** (a single Cargo workspace), **not** a `core/` subfolder; BDD features are **centralized** under the repo-root **`features/`** directory rather than nested per crate (§5.2).
-- Each `crates/*` crate follows the **same anatomy** (§5.2) and carries its own `README.md`; the DAG and layer rules are enforced by `tools/fitness` (§13).
+- The Rust core lives under **`core/`** (a single Cargo workspace at `core/crates/*`); the Android app lives under **`apps/android/`**, with **`apps/web/`** reserved for the website. BDD features are **centralized** under **`core/features/`** rather than nested per crate (§5.2). The move from the original flat repo-root layout to this `apps/` + `core/` monorepo is recorded as **ADR-20** (which supersedes **ADR-17**).
+- Each `core/crates/*` crate follows the **same anatomy** (§5.2) and carries its own `README.md`; the DAG and layer rules are enforced by `core/tools/fitness` (§13).
 - Crates are added to the workspace **as they are implemented** (TDD-first), so the workspace member list is the source of truth for what exists today; the §5.4 registry is the full target map, including modules not yet built.
 
 ---
