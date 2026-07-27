@@ -10,6 +10,11 @@ apps/android/.gradle/
 apps/android/build/
 apps/android/**/build/
 apps/android/local.properties
+# Release signing secrets — the upload keystore and its credentials must NEVER be
+# committed. Losing/exposing these compromises the ability to ship updates.
+apps/android/keystore.properties
+*.jks
+*.keystore
 *.iml
 .idea/
 # Native libraries are BUILD ARTIFACTS, not source: they are reproduced from the

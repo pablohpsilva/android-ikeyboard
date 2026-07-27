@@ -106,7 +106,8 @@ keyPassword=…
   accurately.
 - **Graphics:** app icon **512×512**, feature graphic **1024×500**, at least **2**
   phone screenshots.
-- **Descriptions:** short (≤80 chars) + full (≤4000 chars).
+- **Descriptions:** short (≤80 chars) + full (≤4000 chars). Ready-to-paste copy in
+  [§8 Store descriptions](#8-store-descriptions-ready-to-paste).
 - **Content rating** questionnaire, target-audience declaration, ads declaration
   (no ads).
 
@@ -134,3 +135,52 @@ state this truthfully.
 - [ ] Prepare graphics + descriptions
 - [ ] Complete Data Safety + content-rating forms
 - [ ] Create the app in Play Console, upload the `.aab` to internal testing first
+
+## 8. Store descriptions (ready to paste)
+
+Copy aligned with the app's actual positioning (`strings.xml`, `README.md`, and the
+`apps/web` landing page). Keep the privacy claims truthful and consistent with the
+privacy policy and Data Safety form (§4, §5): FeatherKey learns **on-device**, in
+encrypted storage, and uploads nothing.
+
+### Short description (Play limit: 80 characters)
+
+```
+A fast, private keyboard that learns how you write — all on-device.
+```
+
+(66 characters. Alternative if you want the promise more explicit:
+`Private keyboard that learns how you write — on-device, nothing uploaded.` — 72.)
+
+### Full description (Play limit: 4000 characters)
+
+```
+FeatherKey is a fast, private keyboard that learns how you write — and keeps everything on your phone.
+
+Most keyboards get smarter by sending what you type to the cloud. FeatherKey does the opposite. It learns your words, your habits and your next-word patterns entirely on-device, in encrypted storage. Nothing is uploaded, shared or synced. Ever. Passwords and payment fields are always skipped.
+
+WHY FEATHERKEY
+
+• Truly private — learning happens on your phone, in encrypted storage. Your typing never leaves the device.
+• Fast — a lightweight native engine keeps typing responsive, with no network round-trips.
+• It adapts to you — key targets and autocorrect thresholds adjust to your accuracy over time, so it gets more accurate the more you type.
+• You're in control — turn learning on or off whenever you like, and clear everything the keyboard has learned with one tap.
+
+FEATURES
+
+• Adaptive tap & autocorrect — key targets and correction thresholds tune themselves to how you actually type.
+• Swipe to type — glide across the keys and pick from a strip of suggestions as you go.
+• Several languages at once — blend multiple languages without switching mid-sentence.
+• Accents & long-press variants — accented characters ordered to match your languages.
+• Voice & emoji — hand off to dictation and reach an emoji layer, one tap from the symbol row.
+• Next-word suggestions — learned from your own writing, on your own device.
+
+PRIVACY BY DESIGN
+
+FeatherKey processes everything you type on-device. There are no accounts, no tracking, and no keystroke upload. The optional learning that personalises your suggestions is stored encrypted on your phone and can be cleared at any time from Settings. Passwords and payment fields are never learned from.
+
+Type freely. Your words stay yours.
+```
+
+(~1,760 characters — well under the 4000 limit, leaving room to expand the language
+list or feature bullets as those ship.)
