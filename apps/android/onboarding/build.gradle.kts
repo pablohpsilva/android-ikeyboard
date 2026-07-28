@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.featherkey.onboarding"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig { minSdk = 26 }
     buildFeatures { compose = true }
     compileOptions {

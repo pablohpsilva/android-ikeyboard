@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "com.featherkey.ffi"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         minSdk = 26
         // The UniFFI bindgen writes generated Kotlin into src/main/kotlin/uniffi/…

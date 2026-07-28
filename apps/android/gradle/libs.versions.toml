@@ -1,7 +1,7 @@
 # Version catalog. Versions authored to a coherent late-2024 baseline; bump to
 # your current stable and let Gradle resolve. NOT verified against a live build.
 [versions]
-agp = "8.7.3"
+agp = "8.9.1"
 kotlin = "2.0.21"
 coreKtx = "1.15.0"
 appcompat = "1.7.0"
