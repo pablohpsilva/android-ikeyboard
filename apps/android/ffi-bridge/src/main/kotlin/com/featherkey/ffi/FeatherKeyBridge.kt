@@ -68,9 +68,6 @@ class FeatherKeyBridge private constructor(private val core: KeyboardCore) : Aut
     fun suggest(preceding: String, prefix: String): List<FfiSuggestion> =
         core.suggest(preceding, prefix)
 
-    fun correct(text: String, preceding: String, prefix: String): FfiCorrection =
-        core.correct(text, preceding, prefix)
-
     /** Rank shell-gathered candidates with current language momentum. */
     fun rank(candidates: List<FfiRankCandidate>, k: UInt): List<FfiRanked> = core.rank(candidates, k)
 

@@ -158,12 +158,34 @@ pub struct Correction {
     pub applied: bool,
 }
 
+/// What the **shell** knows about a token that the core cannot see: the device
+/// (OS) spell-checker's verdict and its candidate spellings.
+///
+/// The core ships its own lexicons, but the platform dictionary covers scripts
+/// and vocabularies it does not — so a correction decision needs both. These
+/// arrive per call, not per construction: the shell re-queries the OS for each
+/// word. Empty means "no device information", never "the device rejects it".
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DeviceHints {
+    /// Words the device dictionary recognises — each one is intended (BR-12).
+    pub known: Vec<String>,
+    /// Device-sourced candidate spellings, already language-tagged and ranked
+    /// within their source.
+    pub candidates: Vec<Candidate>,
+}
+
 /// Driving port: decide whether/how to correct a token (SEDD §5.4). It MUST
-/// never replace a word the user clearly intended — an exact dictionary match or
-/// a whitelisted word is returned unchanged with `applied == false` (BR-12, the
-/// no-clobber rule, verified by a property test in the `autocorrect` crate).
+/// never replace a word the user clearly intended — an exact dictionary match, a
+/// whitelisted word, or a word `device.known` recognises is returned unchanged
+/// with `applied == false` (BR-12, the no-clobber rule, verified by a property
+/// test in the `autocorrect` crate).
+///
+/// `device` carries the per-call platform hints (ADR-21). The scoring substrate
+/// — lexicons, bundled ranks, learned vocabulary, language momentum — is
+/// implementation state injected when the corrector is built, so this port
+/// describes *a decision*, not *a scoring model*.
 pub trait AutoCorrect {
-    fn correct(&self, token: &Token, ctx: &TypingContext) -> Correction;
+    fn correct(&self, token: &Token, ctx: &TypingContext, device: &DeviceHints) -> Correction;
 }
 
 /// Where a candidate came from — used only to weight sources against each other.
@@ -291,7 +313,12 @@ mod tests {
 
     struct NoClobber;
     impl AutoCorrect for NoClobber {
-        fn correct(&self, token: &Token, _ctx: &TypingContext) -> Correction {
+        fn correct(
+            &self,
+            token: &Token,
+            _ctx: &TypingContext,
+            _device: &DeviceHints,
+        ) -> Correction {
             Correction {
                 primary: token.text.clone(),
                 alternatives: Vec::new(),
@@ -314,7 +341,7 @@ mod tests {
         let token = Token {
             text: alloc::string::String::from("cat"),
         };
-        let c = NoClobber.correct(&token, &ctx);
+        let c = NoClobber.correct(&token, &ctx, &DeviceHints::default());
         assert_eq!(c.primary, "cat");
         assert!(!c.applied);
         assert!(c.alternatives.is_empty());

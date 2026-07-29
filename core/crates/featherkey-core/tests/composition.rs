@@ -77,7 +77,7 @@ fn suggest_on_unknown_prefix_is_empty() {
 #[test]
 fn correct_never_clobbers_a_known_word() {
     let fk = core();
-    let c = fk.correct("cat", "", "").unwrap();
+    let c = fk.choose_correction("cat", &[], vec![]).unwrap();
     assert_eq!(c.primary, "cat");
     assert!(!c.applied);
     assert!(c.alternatives.is_empty());
@@ -87,7 +87,7 @@ fn correct_never_clobbers_a_known_word() {
 fn correct_fixes_a_non_word() {
     let fk = core();
     // "caz" is one substitution from "cat".
-    let c = fk.correct("caz", "", "").unwrap();
+    let c = fk.choose_correction("caz", &[], vec![]).unwrap();
     assert!(c.applied);
     assert_eq!(c.primary, "cat");
 }
@@ -96,7 +96,7 @@ fn correct_fixes_a_non_word() {
 fn correct_respects_learned_vocabulary() {
     let mut fk = core();
     fk.add_to_dictionary("caz"); // user insists "caz" is a word
-    let c = fk.correct("caz", "", "").unwrap();
+    let c = fk.choose_correction("caz", &[], vec![]).unwrap();
     assert!(!c.applied, "a whitelisted word must not be clobbered");
     assert_eq!(c.primary, "caz");
 }

@@ -268,15 +268,18 @@ impl KeyboardCore {
             .collect()
     }
 
-    /// Correct `text` in its context (never clobbers an intended word).
+    /// Uncalled alias of [`choose_correction`](Self::choose_correction), kept
+    /// only because the committed UniFFI bindings cannot be regenerated offline
+    /// (ADR-21). Signature frozen — argument names included.
     pub fn correct(
         &self,
         text: String,
         preceding: String,
         prefix: String,
     ) -> Result<FfiCorrection, FfiError> {
+        let _ = (&preceding, &prefix); // unused; names frozen for the bindings
         let core = self.lock();
-        let c = core.correct(&text, &preceding, &prefix)?;
+        let c = core.choose_correction(&text, &[], Vec::new())?;
         Ok(FfiCorrection {
             primary: c.primary,
             alternatives: c.alternatives,

@@ -1,29 +1,32 @@
 //! `Correct` use-case (ARCH §9.1): decide whether/how to correct a typed token
 //! without ever clobbering a word the user clearly intended (BR-12).
 //!
-//! The corrector owns its lexical substrate by value, so the façade rebuilds one
-//! on demand from its authoritative state — a clone of each lexicon, a clone of
-//! the current [`Personalization`] snapshot, and a fresh [`LocaleManager`] over
-//! the active languages. Rebuilding (rather than caching) keeps correction
-//! consulting the *current* learned vocabulary with no cache to invalidate;
-//! correction is off the sub-millisecond decode hot path, so the clone cost is
-//! acceptable at MVP (a materialized read model is a v1.x optimization).
+//! The *policy* lives in [`featherkey_autocorrect`] — the crate SEDD §5/§15 and
+//! ARCH §5.4 name as the owner of BR-12/BR-15/BR-45. This module is the
+//! composition half: it hands that crate the current substrate (every active
+//! pack with its bundled ranks, the learned vocabulary, the active-language set,
+//! the live momentum) and returns its verdict.
+//!
+//! The corrector owns its substrate by value, so the façade rebuilds one on
+//! demand from its authoritative state rather than caching — correction then
+//! always consults the *current* learned vocabulary, with no cache to
+//! invalidate. Correction runs at a word boundary, off the sub-millisecond
+//! decode hot path, so the clone cost is acceptable at MVP (a materialized read
+//! model is a v1.x optimization).
 
-use featherkey_autocorrect::NoClobberCorrector;
-use featherkey_contracts::{AutoCorrect, Correction, Token, TypingContext};
+use featherkey_autocorrect::{LexiconPack, NoClobberCorrector};
+use featherkey_contracts::{AutoCorrect, Correction, DeviceHints, Token, TypingContext};
 use featherkey_locale_manager::LocaleManager;
 
 use crate::error::FeatherKeyError;
 use crate::FeatherKeyCore;
 
-/// Stickiness of the trusted edit-distance fix versus the momentum nudge. The
-/// primary-language closest fix carries this bonus, so an unambiguous typo keeps
-/// its fix unless a competing-language candidate's momentum-weighted score
-/// overtakes it. High ⇒ legacy behaviour; low ⇒ momentum flips corrections sooner.
-pub const CORE_FUZZY_PRIOR: f64 = 0.5;
-
 impl FeatherKeyCore {
-    /// Multilingual, momentum-aware correction. See the design spec §Correction.
+    /// Multilingual, momentum-aware correction — the one correction entry point.
+    ///
+    /// `device_known` is what the platform spell-checker recognises (each such
+    /// word is intended, BR-12) and `device_cands` its candidate spellings; both
+    /// are gathered by the shell because the core cannot see the OS dictionary.
     ///
     /// # Errors
     /// [`FeatherKeyError::Locale`]/[`NoLanguages`] if the active set cannot form a
@@ -34,206 +37,40 @@ impl FeatherKeyCore {
         device_known: &[String],
         device_cands: Vec<featherkey_contracts::Candidate>,
     ) -> Result<Correction, FeatherKeyError> {
-        let locales = LocaleManager::new(self.locale_packs())?;
-
-        // (1) No-clobber: empty text, a word intended by the user, or one the
-        // device knows is left exactly as typed.
-        if text.is_empty() || self.is_intended(&locales, text, device_known) {
-            return Ok(unchanged(text));
-        }
-
-        // (2) Candidates: all-language fuzzy (per-language rank) ∪ device candidates.
-        let cands = gather_candidates(&self.packs, text, device_cands);
-        if cands.is_empty() {
-            return Ok(unchanged(text));
-        }
-
-        // (3) Score with the sticky-fix bonus, then take the winner + alternatives.
-        let scored = self.score_with_sticky(&cands);
-        let winner = cands[scored[0].0].word.clone();
-        let applied = winner != text;
-        let alternatives = if applied {
-            distinct_alternatives(&scored, &cands, &winner)
-        } else {
-            Vec::new()
-        };
-        Ok(Correction {
-            primary: if applied { winner } else { text.to_owned() },
-            alternatives,
-            applied,
-        })
-    }
-
-    /// The no-clobber test (BR-12): a word the user clearly intended — already
-    /// learned/whitelisted, valid in any active language (raw or lowercased), or
-    /// confirmed by the device dictionary — must never be rewritten.
-    fn is_intended(&self, locales: &LocaleManager, text: &str, device_known: &[String]) -> bool {
-        let lower = text.to_lowercase();
-        self.personalization.is_known(text)
-            || locales.detect(text).is_some()
-            || locales.detect(&lower).is_some()
-            || device_known.iter().any(|w| w.eq_ignore_ascii_case(text))
-    }
-
-    /// Score every candidate with the shared ranker, adding [`CORE_FUZZY_PRIOR`]
-    /// to the sticky fix, and return `(index, score)` pairs sorted best-first.
-    ///
-    /// The sticky fix is the primary language's **commonest** lexicon neighbour
-    /// — its `source_rank == 0`, which `gather_candidates` assigns by bundled
-    /// frequency — with the first lexicon candidate as fallback. So a trusted fix
-    /// holds unless a competing candidate's momentum-weighted score overtakes the
-    /// bonus.
-    fn score_with_sticky(&self, cands: &[featherkey_contracts::Candidate]) -> Vec<(usize, f64)> {
-        use featherkey_contracts::Source;
-        let primary = self.packs.first().map(|p| p.lang.as_str().to_owned());
-        let sticky = cands
-            .iter()
-            .position(|c| {
-                c.source == Source::Lexicon
-                    && c.source_rank == 0
-                    && Some(&c.lang) == primary.as_ref()
-            })
-            .or_else(|| cands.iter().position(|c| c.source == Source::Lexicon));
-
-        let mut scored: Vec<(usize, f64)> = cands
-            .iter()
-            .enumerate()
-            .map(|(i, c)| {
-                let mut s = featherkey_candidate_ranker::score(c, &self.momentum);
-                if Some(i) == sticky {
-                    s += CORE_FUZZY_PRIOR;
-                }
-                (i, s)
-            })
-            .collect();
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        scored
-    }
-
-    /// Correct `text` in its `(preceding, prefix)` context. A word already known
-    /// — in a lexicon, whitelisted/learned, or valid in any active language — is
-    /// returned verbatim with `applied == false` (the no-clobber rule, BR-12).
-    ///
-    /// # Errors
-    /// [`FeatherKeyError::Locale`] / [`FeatherKeyError::NoLanguages`] if the
-    /// active language set cannot form a corrector (structurally prevented by the
-    /// constructor's validation, but surfaced rather than panicked).
-    pub fn correct(
-        &self,
-        text: &str,
-        preceding: &str,
-        prefix: &str,
-    ) -> Result<Correction, FeatherKeyError> {
         let corrector = self.build_corrector()?;
-        let ctx = TypingContext {
-            preceding: preceding.to_owned(),
-            prefix: prefix.to_owned(),
-        };
         Ok(corrector.correct(
             &Token {
                 text: text.to_owned(),
             },
-            &ctx,
+            &TypingContext::default(),
+            &DeviceHints {
+                known: device_known.to_vec(),
+                candidates: device_cands,
+            },
         ))
     }
 
-    /// Assemble a `NoClobberCorrector` from a clone of the current state: the
-    /// primary (first active) lexicon for fuzzy candidates, the live learned
-    /// vocabulary, and a locale manager over every active language.
+    /// Assemble a corrector from a snapshot of the current state: every active
+    /// pack (lexicon + bundled ranks), the live learned vocabulary, a locale
+    /// manager over the active languages, and the current language momentum.
     fn build_corrector(&self) -> Result<NoClobberCorrector, FeatherKeyError> {
         let locales = LocaleManager::new(self.locale_packs())?;
-        let primary = self.packs.first().ok_or(FeatherKeyError::NoLanguages)?;
+        let packs = self
+            .packs
+            .iter()
+            .map(|p| LexiconPack {
+                lang: p.lang.as_str().to_owned(),
+                dict: p.dict.clone(),
+                rank: p.rank.clone(),
+            })
+            .collect();
         Ok(NoClobberCorrector::new(
-            primary.dict.clone(),
+            packs,
             self.personalization.clone(),
             locales,
+            self.momentum.clone(),
         ))
     }
-}
-
-/// A correction that leaves `text` exactly as typed.
-fn unchanged(text: &str) -> Correction {
-    Correction {
-        primary: text.to_owned(),
-        alternatives: Vec::new(),
-        applied: false,
-    }
-}
-
-/// One pack's edit-distance-1 neighbours of `text`, **commonest first** by the
-/// bundled rank recovered in [`build_packs`](crate::packs::build_packs); a word
-/// carrying no bundled rank sorts last, and equal ranks keep lexicographic order
-/// so the result is deterministic.
-///
-/// This exists because [`Dictionary::fuzzy`] collects into a `BTreeSet` and so
-/// answers in *alphabetical* order — fine for a set, wrong as the `source_rank`
-/// the ranker reads as commonness. Total: no panic, no `expect`.
-fn ranked_neighbours(
-    dict: &featherkey_dictionary::Dictionary,
-    rank: &std::collections::HashMap<String, u32>,
-    text: &str,
-) -> Vec<String> {
-    let mut ns = dict.fuzzy(text);
-    ns.sort_by(|a, b| {
-        let (ra, rb) = (
-            rank.get(a).copied().unwrap_or(u32::MAX),
-            rank.get(b).copied().unwrap_or(u32::MAX),
-        );
-        ra.cmp(&rb).then_with(|| a.cmp(b))
-    });
-    ns
-}
-
-/// Correction candidates for `text`: every active language's edit-distance-1
-/// neighbours (each ranked within its own language, [`Source::Lexicon`]) unioned
-/// with the device-supplied candidates.
-///
-/// `source_rank` is each neighbour's **position after ordering by bundled
-/// frequency** — not the raw bundled rank, which would span the whole lexicon and
-/// swamp the ranker's momentum term (design §4.1) — mirroring how
-/// `StatisticalPredictor::suggest_ranked` builds the strip's candidates.
-fn gather_candidates(
-    packs: &[crate::packs::Pack],
-    text: &str,
-    device_cands: Vec<featherkey_contracts::Candidate>,
-) -> Vec<featherkey_contracts::Candidate> {
-    use featherkey_contracts::{Candidate, Source};
-    let mut cands: Vec<Candidate> = Vec::new();
-    for p in packs {
-        for (position, word) in ranked_neighbours(&p.dict, &p.rank, text)
-            .into_iter()
-            .enumerate()
-        {
-            cands.push(Candidate {
-                word,
-                lang: p.lang.as_str().to_owned(),
-                source: Source::Lexicon,
-                // A lexicon's word count is far below `u32::MAX`.
-                source_rank: position as u32,
-            });
-        }
-    }
-    cands.extend(device_cands);
-    cands
-}
-
-/// The up-to-two best alternatives after the winner, as **distinct** words: a
-/// cognate emitted for several active languages appears once, and the winner is
-/// never echoed (the spec requires distinct alternative words).
-fn distinct_alternatives(
-    scored: &[(usize, f64)],
-    cands: &[featherkey_contracts::Candidate],
-    winner: &str,
-) -> Vec<String> {
-    let mut seen = std::collections::HashSet::new();
-    seen.insert(winner.to_owned());
-    scored
-        .iter()
-        .skip(1)
-        .map(|&(i, _)| cands[i].word.clone())
-        .filter(|w| seen.insert(w.clone()))
-        .take(2)
-        .collect()
 }
 
 #[cfg(test)]
@@ -299,19 +136,6 @@ mod tests {
         }
         let strong = core.choose_correction("cit", &[], vec![]).expect("ok");
         assert_eq!(strong.primary, "cot"); // strong Spanish momentum overrides the bonus
-    }
-
-    #[test]
-    fn single_language_choose_correction_matches_legacy_correct() {
-        let core = FeatherKeyCore::new(vec![(
-            "en".into(),
-            vec!["bat".into(), "cat".into(), "hat".into()],
-        )])
-        .expect("core");
-        let legacy = core.correct("zat", "", "zat").expect("legacy");
-        let now = core.choose_correction("zat", &[], vec![]).expect("now");
-        assert_eq!(now.primary, legacy.primary);
-        assert_eq!(now.applied, legacy.applied);
     }
 
     #[test]
@@ -381,27 +205,6 @@ mod rank_tests {
             vec!["cat".into(), "dog".into(), "hat".into(), "bat".into()],
         )])
         .expect("core")
-    }
-
-    /// The `unwrap_or(u32::MAX)` fallback: a neighbour carrying no bundled rank
-    /// sorts **last**, never first. Unreachable through the public API —
-    /// `build_packs` derives a pack's `rank` and its `Dictionary` from the same
-    /// word list — so it is exercised here, directly on the helper, to keep the
-    /// function total rather than merely untested.
-    #[test]
-    fn ranked_neighbours_sorts_unranked_last() {
-        use std::collections::HashMap;
-        let dict = featherkey_dictionary::Dictionary::from_sorted_words(["bat", "cat", "hat"])
-            .expect("sorted");
-        let mut rank = HashMap::new();
-        rank.insert("hat".to_string(), 7);
-        rank.insert("cat".to_string(), 0);
-        // "bat" has no bundled rank: it must trail both ranked words, despite
-        // sorting first alphabetically.
-        assert_eq!(
-            super::ranked_neighbours(&dict, &rank, "xat"),
-            vec!["cat".to_string(), "hat".to_string(), "bat".to_string()]
-        );
     }
 
     #[test]

@@ -26,51 +26,83 @@
 //! [`correct`](AutoCorrect::correct) is total and returns plain data on every
 //! path; no `unwrap`/`expect`/`panic!` appears in this crate.
 
-use featherkey_contracts::{AutoCorrect, Correction, Token, TypingContext};
+use std::collections::HashMap;
+
+use featherkey_contracts::{AutoCorrect, Correction, DeviceHints, Token, TypingContext};
 use featherkey_dictionary::Dictionary;
+use featherkey_language_momentum::Momentum;
 use featherkey_locale_manager::LocaleManager;
 use featherkey_personalization::Personalization;
 
-/// A no-clobber corrector over one fuzzy [`Dictionary`], the user's
-/// [`Personalization`] model, and the active-language [`LocaleManager`].
+mod rank;
+
+pub use rank::CORE_FUZZY_PRIOR;
+
+/// One active language's lexical substrate: its tag, its lexicon, and the
+/// **bundled frequency rank** of each word (`0` = commonest).
 ///
-/// The dictionary plays two roles: it is one source of validity
-/// ([`contains`](Dictionary::contains)) and the sole source of correction
-/// candidates ([`fuzzy`](Dictionary::fuzzy)). The locale manager widens validity
-/// to every active language (BR-18); personalization widens it to the user's own
-/// vocabulary. None of the three can *cause* a correction — they can only veto
-/// one — which is exactly the no-clobber guarantee (BR-12).
+/// A [`Dictionary`] is a byte-sorted `fst` and deliberately carries no
+/// frequency, so commonness travels alongside it. The composition root builds
+/// these from the shell's activation order (the bundled asset order), which is
+/// generated and gated by `core/tools/order_lexicons.py`.
+#[derive(Debug, Clone)]
+pub struct LexiconPack {
+    /// The language tag, e.g. `"en"`.
+    pub lang: String,
+    /// The byte-sorted lexicon.
+    pub dict: Dictionary,
+    /// `word -> bundled rank` (`0` = commonest). A word absent here sorts last.
+    pub rank: HashMap<String, u32>,
+}
+
+/// A no-clobber corrector over every active language's [`LexiconPack`], the
+/// user's [`Personalization`] model, the active-language [`LocaleManager`], and
+/// the current language [`Momentum`].
+///
+/// The packs play two roles: they are one source of validity
+/// ([`contains`](Dictionary::contains)) and the sole source of lexicon
+/// correction candidates ([`fuzzy`](Dictionary::fuzzy)). The locale manager
+/// widens validity to every active language (BR-18); personalization widens it
+/// to the user's own vocabulary; [`DeviceHints::known`] widens it to whatever
+/// the platform dictionary recognises. None of them can *cause* a correction —
+/// they can only veto one — which is exactly the no-clobber guarantee (BR-12).
+/// Momentum never vetoes either; it only orders the candidates that survive.
 #[derive(Debug)]
 pub struct NoClobberCorrector {
-    dictionary: Dictionary,
+    packs: Vec<LexiconPack>,
     personalization: Personalization,
     locales: LocaleManager,
+    momentum: Momentum,
 }
 
 impl NoClobberCorrector {
-    /// Assemble a corrector from the lexical substrate it consults: the fuzzy
-    /// dictionary, the user's learned/whitelisted vocabulary, and the active
-    /// languages. All three are owned so the corrector is self-contained and
-    /// `correct` needs no further wiring.
+    /// Assemble a corrector from the substrate it consults: every active
+    /// language's lexicon and bundled ranks, the user's learned/whitelisted
+    /// vocabulary, the active-language set, and the current momentum. All are
+    /// owned so the corrector is self-contained and `correct` needs no further
+    /// wiring.
     #[must_use]
     pub fn new(
-        dictionary: Dictionary,
+        packs: Vec<LexiconPack>,
         personalization: Personalization,
         locales: LocaleManager,
+        momentum: Momentum,
     ) -> Self {
         Self {
-            dictionary,
+            packs,
             personalization,
             locales,
+            momentum,
         }
     }
 
     /// Is `word` a real word the user clearly intended (BR-12)? True when it is
-    /// exactly in the dictionary, known to the user, or recognised by *any*
-    /// active language (BR-18). An empty token has no word to correct, so it is
-    /// treated as intended (returned unchanged) rather than run through fuzzy
-    /// generation, which would otherwise invent a single-letter "correction".
-    fn is_intended(&self, word: &str) -> bool {
+    /// exactly in an active lexicon, known to the user, recognised by *any*
+    /// active language (BR-18), or confirmed by the device dictionary. An empty
+    /// token has no word to correct, so it is treated as intended rather than run
+    /// through fuzzy generation, which would otherwise invent a single-letter
+    /// "correction".
+    fn is_intended(&self, word: &str, device_known: &[String]) -> bool {
         if word.is_empty() || self.personalization.is_known(word) {
             return true;
         }
@@ -78,10 +110,12 @@ impl NoClobberCorrector {
         // sentence-initial "Cat") is never clobbered to "cat" (BR-12). Casing is
         // smart-typing's concern, not ours — we only refuse to destroy a word.
         let lower = word.to_lowercase();
-        self.dictionary.contains(word)
-            || self.dictionary.contains(&lower)
+        self.packs
+            .iter()
+            .any(|p| p.dict.contains(word) || p.dict.contains(&lower))
             || self.locales.detect(word).is_some()
             || self.locales.detect(&lower).is_some()
+            || device_known.iter().any(|w| w.eq_ignore_ascii_case(word))
     }
 }
 
@@ -95,25 +129,33 @@ fn unchanged(word: &str) -> Correction {
 }
 
 impl AutoCorrect for NoClobberCorrector {
-    fn correct(&self, token: &Token, _ctx: &TypingContext) -> Correction {
+    fn correct(&self, token: &Token, _ctx: &TypingContext, device: &DeviceHints) -> Correction {
         let word = token.text.as_str();
-        // BR-12: a word the user clearly intended is never clobbered.
-        if self.is_intended(word) {
+        // (1) BR-12: a word the user clearly intended is never clobbered.
+        if self.is_intended(word, &device.known) {
             return unchanged(word);
         }
-        // Not a real word anywhere — offer edit-distance-1 neighbours. `fuzzy`
-        // excludes the query itself, so any candidate genuinely differs and
-        // `applied` is honestly `true`.
-        let candidates = self.dictionary.fuzzy(word);
-        match candidates.split_first() {
-            // No neighbour to suggest: leave the token as typed rather than
-            // guess, keeping the no-clobber promise even for a non-word.
-            None => unchanged(word),
-            Some((primary, rest)) => Correction {
-                primary: primary.clone(),
-                alternatives: rest.to_vec(),
-                applied: true,
-            },
+        // (2) Candidates: all-language fuzzy (per-language frequency rank) ∪ the
+        // device's own candidates.
+        let cands = rank::gather_candidates(&self.packs, word, device.candidates.clone());
+        if cands.is_empty() {
+            // Nothing to offer: leave the token as typed rather than guess,
+            // keeping the no-clobber promise even for a non-word.
+            return unchanged(word);
+        }
+        // (3) Score with the sticky-fix bonus, then take the winner + alternatives.
+        let scored = rank::score_with_sticky(&cands, &self.packs, &self.momentum);
+        let winner = cands[scored[0].0].word.clone();
+        let applied = winner != word;
+        let alternatives = if applied {
+            rank::distinct_alternatives(&scored, &cands, &winner)
+        } else {
+            Vec::new()
+        };
+        Correction {
+            primary: if applied { winner } else { word.to_owned() },
+            alternatives,
+            applied,
         }
     }
 }
@@ -124,6 +166,23 @@ mod tests {
     use super::*;
     use featherkey_locale_manager::LangId;
     use proptest::prelude::*;
+
+    /// A pack whose bundled rank follows the fixture's own order.
+    fn pack(tag: &str, words: &[&str]) -> LexiconPack {
+        LexiconPack {
+            lang: tag.to_owned(),
+            dict: dict(words),
+            rank: words
+                .iter()
+                .enumerate()
+                .map(|(i, w)| ((*w).to_owned(), i as u32))
+                .collect(),
+        }
+    }
+
+    fn mom(tag: &str) -> Momentum {
+        Momentum::new(tag, &[tag.to_owned()])
+    }
 
     /// Build a dictionary from pre-sorted fixture words. `expect` is confined to
     /// tests, never library code (SEDD §5.5 r3).
@@ -140,7 +199,12 @@ mod tests {
     /// personalization model is empty and the sole active language has an empty
     /// lexicon, so neither can veto a correction on its own.
     fn corrector_over(words: &[&str]) -> NoClobberCorrector {
-        NoClobberCorrector::new(dict(words), Personalization::new(), locales("xx", &[]))
+        NoClobberCorrector::new(
+            vec![pack("xx", words)],
+            Personalization::new(),
+            locales("xx", &[]),
+            mom("xx"),
+        )
     }
 
     fn token(text: &str) -> Token {
@@ -150,7 +214,11 @@ mod tests {
     }
 
     fn correct(c: &NoClobberCorrector, text: &str) -> Correction {
-        c.correct(&token(text), &TypingContext::default())
+        c.correct(
+            &token(text),
+            &TypingContext::default(),
+            &DeviceHints::default(),
+        )
     }
 
     // --- BR-12 no-clobber: a valid word is returned verbatim ------------------
@@ -170,7 +238,12 @@ mod tests {
         // even though fuzzy neighbours ("acre"/"acne") exist in the dictionary.
         let mut personal = Personalization::new();
         personal.whitelist("acme");
-        let c = NoClobberCorrector::new(dict(&["acne", "acre"]), personal, locales("xx", &[]));
+        let c = NoClobberCorrector::new(
+            vec![pack("xx", &["acne", "acre"])],
+            personal,
+            locales("xx", &[]),
+            mom("xx"),
+        );
         let got = correct(&c, "acme");
         assert_eq!(got.primary, "acme");
         assert!(!got.applied);
@@ -183,7 +256,12 @@ mod tests {
         // and therefore intended.
         let mut personal = Personalization::new();
         personal.observe("brb");
-        let c = NoClobberCorrector::new(dict(&["bra", "orb"]), personal, locales("xx", &[]));
+        let c = NoClobberCorrector::new(
+            vec![pack("xx", &["bra", "orb"])],
+            personal,
+            locales("xx", &[]),
+            mom("xx"),
+        );
         let got = correct(&c, "brb");
         assert_eq!(got.primary, "brb");
         assert!(!got.applied);
@@ -201,7 +279,12 @@ mod tests {
             (LangId::new("pt"), dict(&["mundo", "olph"])),
         ])
         .expect("valid active set");
-        let c = NoClobberCorrector::new(dict(&["hello", "world"]), Personalization::new(), both);
+        let c = NoClobberCorrector::new(
+            vec![pack("en", &["hello", "world"])],
+            Personalization::new(),
+            both,
+            mom("en"),
+        );
         let got = correct(&c, "mundo");
         assert_eq!(got.primary, "mundo");
         assert!(!got.applied);
@@ -285,13 +368,20 @@ mod tests {
             // exactly the contract `from_sorted_words` requires.
             let sorted: Vec<String> = words.iter().cloned().collect();
             let dictionary = Dictionary::from_sorted_words(&sorted).expect("btree_set is sorted");
+            let rank = sorted
+                .iter()
+                .enumerate()
+                .map(|(i, w)| (w.clone(), i as u32))
+                .collect();
             let corrector = NoClobberCorrector::new(
-                dictionary,
+                vec![LexiconPack { lang: "xx".to_owned(), dict: dictionary, rank }],
                 Personalization::new(),
                 locales("xx", &[]),
+                mom("xx"),
             );
             for word in &sorted {
-                let got = corrector.correct(&token(word), &TypingContext::default());
+                let got =
+                    corrector.correct(&token(word), &TypingContext::default(), &DeviceHints::default());
                 prop_assert_eq!(&got.primary, word);
                 prop_assert!(!got.applied);
                 prop_assert!(got.alternatives.is_empty());
@@ -310,12 +400,14 @@ mod tests {
                 personal.whitelist(word);
             }
             let corrector = NoClobberCorrector::new(
-                dict(&["cat", "cot", "dog"]),
+                vec![pack("xx", &["cat", "cot", "dog"])],
                 personal,
                 locales("xx", &[]),
+                mom("xx"),
             );
             for word in &words {
-                let got = corrector.correct(&token(word), &TypingContext::default());
+                let got =
+                    corrector.correct(&token(word), &TypingContext::default(), &DeviceHints::default());
                 prop_assert_eq!(&got.primary, word);
                 prop_assert!(!got.applied);
                 prop_assert!(got.alternatives.is_empty());

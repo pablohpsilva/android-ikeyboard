@@ -3,9 +3,10 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use featherkey_autocorrect::NoClobberCorrector;
-use featherkey_contracts::{AutoCorrect, Token, TypingContext};
+use featherkey_autocorrect::{LexiconPack, NoClobberCorrector};
+use featherkey_contracts::{AutoCorrect, DeviceHints, Token, TypingContext};
 use featherkey_dictionary::Dictionary;
+use featherkey_language_momentum::Momentum;
 use featherkey_locale_manager::{LangId, LocaleManager};
 use featherkey_personalization::Personalization;
 
@@ -21,7 +22,22 @@ fn corrector() -> NoClobberCorrector {
         (LangId::new("pt"), dict(&["mundo", "olph"])),
     ])
     .expect("valid active set");
-    NoClobberCorrector::new(dict(&["cat", "cot", "hat"]), Personalization::new(), active)
+    let words = ["cat", "cot", "hat"];
+    let pack = LexiconPack {
+        lang: "en".to_owned(),
+        dict: dict(&words),
+        rank: words
+            .iter()
+            .enumerate()
+            .map(|(i, w)| ((*w).to_owned(), i as u32))
+            .collect(),
+    };
+    NoClobberCorrector::new(
+        vec![pack],
+        Personalization::new(),
+        active,
+        Momentum::new("en", &["en".to_owned(), "pt".to_owned()]),
+    )
 }
 
 fn correct(text: &str) -> featherkey_contracts::Correction {
@@ -30,6 +46,7 @@ fn correct(text: &str) -> featherkey_contracts::Correction {
             text: text.to_owned(),
         },
         &TypingContext::default(),
+        &DeviceHints::default(),
     )
 }
 
@@ -73,12 +90,27 @@ fn br12_a_whitelisted_word_is_never_clobbered() {
         .expect("valid active set");
     let mut personal = Personalization::new();
     personal.whitelist("acme");
-    let c = NoClobberCorrector::new(dict(&["acne", "acre"]), personal, active);
+    let words = ["acne", "acre"];
+    let c = NoClobberCorrector::new(
+        vec![LexiconPack {
+            lang: "en".to_owned(),
+            dict: dict(&words),
+            rank: words
+                .iter()
+                .enumerate()
+                .map(|(i, w)| ((*w).to_owned(), i as u32))
+                .collect(),
+        }],
+        personal,
+        active,
+        Momentum::new("en", &["en".to_owned()]),
+    );
     let got = c.correct(
         &Token {
             text: "acme".to_owned(),
         },
         &TypingContext::default(),
+        &DeviceHints::default(),
     );
     assert_eq!(got.primary, "acme");
     assert!(!got.applied);
