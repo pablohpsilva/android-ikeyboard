@@ -23,6 +23,7 @@ import android.graphics.Path
 import android.graphics.PointF
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.os.SystemClock
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.HapticFeedbackConstants
@@ -81,9 +82,29 @@ class KeyboardView @JvmOverloads constructor(
     var suggestions: List<String> = emptyList()
         set(value) { field = value; invalidate() }
 
-    /** Shift state (next letter uppercase; highlights the shift key). */
-    var shifted: Boolean = false
-        set(value) { field = value; invalidate() }
+    /**
+     * Shift state: off, a one-shot shift, or caps lock (see [ShiftKey]). Owned by
+     * the view — the IME arms it via [armShift] and spends it via [consumeShift]
+     * rather than assigning, so a one-shot clear can never silently drop a lock.
+     */
+    var shiftMode: ShiftMode = ShiftMode.OFF
+        private set(value) { if (value != field) { field = value; invalidate() } }
+
+    /** True while the next letter should be upper-cased (one-shot shift or caps lock). */
+    val shifted: Boolean get() = shiftMode != ShiftMode.OFF
+
+    /** True while caps lock holds: whole words commit upper-case, not just the first letter. */
+    val capsLocked: Boolean get() = shiftMode == ShiftMode.LOCKED
+
+    /**
+     * Arm or disarm the one-shot shift (auto-capitalization). A no-op while caps
+     * lock holds: the user asked for every letter upper-case, so a context change
+     * that "wants lowercase" must not quietly cancel the lock.
+     */
+    fun armShift(on: Boolean) { shiftMode = ShiftKey.afterAutoCaps(shiftMode, on) }
+
+    /** A letter was committed: spend a one-shot shift. Caps lock is unaffected. */
+    fun consumeShift() { shiftMode = ShiftKey.afterLetter(shiftMode) }
 
     /** Active-language hint shown on the space bar, e.g. "EN" or "EN PT". */
     var spaceHint: String = "EN"
@@ -177,7 +198,12 @@ class KeyboardView @JvmOverloads constructor(
     }
 
     /** Return to the letter page (called by the IME when a new field starts). */
-    fun resetPage() { page = Page.ALPHA; shifted = false; requestLayout(); invalidate() }
+    fun resetPage() {
+        page = Page.ALPHA
+        shiftMode = ShiftMode.OFF // a new field starts unshifted and unlocked
+        lastShiftTapAt = 0L
+        requestLayout(); invalidate()
+    }
 
     private val renderKeys: List<RenderKey> get() = keys.ifEmpty { FALLBACK_QWERTY }
 
@@ -246,6 +272,21 @@ class KeyboardView @JvmOverloads constructor(
     private val longPressRunnable = Runnable { startAccentMode() }
     private fun longPressTimeoutMs() = 300L
     private fun accentActive() = accentSession.active
+
+    // --- Shift double-tap (press twice quickly for caps lock) ---
+    // Uptime of the previous shift tap; 0 = no shift tap immediately preceded
+    // this one (a tap on any other key clears it, so only *consecutive* shift
+    // taps can lock).
+    private var lastShiftTapAt = 0L
+
+    /** A shift tap: single toggles the one-shot, a second within
+     *  [ShiftKey.DOUBLE_TAP_MS] locks caps, and the next tap releases the lock. */
+    private fun onShiftTap() {
+        val now = SystemClock.uptimeMillis()
+        val gap = if (lastShiftTapAt == 0L) Long.MAX_VALUE else now - lastShiftTapAt
+        shiftMode = ShiftKey.onTap(shiftMode, gap)
+        lastShiftTapAt = now
+    }
 
     // --- Backspace auto-repeat (press-and-hold to delete continuously) ---
     // The first delete fires on touch-down like any key; while the finger stays
@@ -617,13 +658,26 @@ class KeyboardView @JvmOverloads constructor(
     }
 
     private fun drawShift(canvas: Canvas, r: RectF, c: Palette) {
-        if (shifted) {
-            // Active: a solid arrow in the normal icon colour (not the accent).
-            iconFill.color = c.icon
-            drawIcon(canvas, ICON_SHIFT, r, ICON_FRAC, iconFill)
-        } else {
-            iconPaint.color = c.icon; iconPaint.strokeWidth = dp(1.7f)
-            drawIcon(canvas, ICON_SHIFT, r, ICON_FRAC, iconPaint)
+        when (shiftMode) {
+            // Idle: the outlined arrow.
+            ShiftMode.OFF -> {
+                iconPaint.color = c.icon; iconPaint.strokeWidth = dp(1.7f)
+                drawIcon(canvas, ICON_SHIFT, r, ICON_FRAC, iconPaint)
+            }
+            // One-shot: a solid arrow in the normal icon colour (not the accent).
+            ShiftMode.ONE_SHOT -> {
+                iconFill.color = c.icon
+                drawIcon(canvas, ICON_SHIFT, r, ICON_FRAC, iconFill)
+            }
+            // Locked: the same solid arrow underlined, and in the accent colour.
+            // Caps lock is a *sticky* mode — it survives letters, spaces and page
+            // switches — so unlike the one-shot it has to be unmistakable at a
+            // glance, or the user types a whole sentence in capitals by accident.
+            ShiftMode.LOCKED -> {
+                iconFill.color = c.accent
+                drawIcon(canvas, ICON_SHIFT, r, ICON_FRAC, iconFill)
+                drawIcon(canvas, ICON_SHIFT_BAR, r, ICON_FRAC, iconFill)
+            }
         }
     }
 
@@ -705,13 +759,17 @@ class KeyboardView @JvmOverloads constructor(
                 stopBackspaceRepeat()
                 if (accentActive()) {
                     val chosen = accentSession.release()
-                    if (chosen != null) onAccentKey?.invoke(chosen)
+                    if (chosen != null) {
+                        lastShiftTapAt = 0L // a letter: breaks the shift double-tap window
+                        onAccentKey?.invoke(chosen)
+                    }
                     resetAccent(); resetGesture()
                     return true
                 }
                 val g = gestureCell
                 if (g != null) {
                     if (gesturing && trail.size >= 3) {
+                        lastShiftTapAt = 0L // a glided word: breaks the shift double-tap window
                         onGesture?.invoke(ArrayList(trail), letterCenters())
                     } else {
                         // A tap after all: report the finger-down point so the
@@ -826,6 +884,9 @@ class KeyboardView @JvmOverloads constructor(
     }
 
     private fun fire(cell: Cell, tx: Float, ty: Float) {
+        // Any other key breaks the shift double-tap window, so "shift, a, shift"
+        // typed quickly toggles twice instead of locking caps.
+        if (!(cell is Cell.Special && cell.kind == Sp.SHIFT)) lastShiftTapAt = 0L
         when (cell) {
             is Cell.Letter -> {
                 // Map the finger to a *continuous* point in the core's logical
@@ -840,7 +901,7 @@ class KeyboardView @JvmOverloads constructor(
             is Cell.Char -> onCharKey?.invoke(cell.label)
             is Cell.Suggest -> onSuggestion?.invoke(cell.index)
             is Cell.Special -> when (cell.kind) {
-                Sp.SHIFT -> shifted = !shifted
+                Sp.SHIFT -> onShiftTap()
                 Sp.BACKSPACE -> onFunctionKey?.invoke(FunctionKey.BACKSPACE)
                 Sp.ENTER -> onFunctionKey?.invoke(FunctionKey.ENTER)
                 Sp.SPACE -> onFunctionKey?.invoke(FunctionKey.SPACE)
@@ -1066,6 +1127,10 @@ class KeyboardView @JvmOverloads constructor(
             "M9 19a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-6a1 1 0 0 1 1-1h3.293a.707.707 0 0 0 " +
                 ".5-1.207l-7.086-7.086a1 1 0 0 0-1.414 0l-7.086 7.086a.707.707 0 0 0 .5 1.207H8a1 1 0 0 1 1 1z",
         )
+        /** The caps-lock underscore, drawn under [ICON_SHIFT] (which ends at y=20)
+         *  on the same 24×24 grid, so both share one transform and stay aligned.
+         *  A filled rect rather than a stroked line — the locked arrow is filled. */
+        val ICON_SHIFT_BAR: Path = PathParser.createPathFromPathData("M9 21.6h6v2.2H9z")
         val ICON_BACKSPACE: Path = PathParser.createPathFromPathData(
             "M10 5a2 2 0 0 0-1.344.519l-6.328 5.74a1 1 0 0 0 0 1.481l6.328 5.741A2 2 0 0 0 " +
                 "10 19h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2z M12 9L18 15 M18 9L12 15",

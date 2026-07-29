@@ -111,6 +111,24 @@ class TypingRulesTest {
         assertEquals("hello", CaseMatch.matchLeading("hel", "hello")) // lowercase stays
     }
 
+    // --- Caps lock: an all-caps prefix completes to an all-caps word ----------
+
+    @Test fun case_match_carries_an_all_caps_prefix_to_the_replacement() {
+        assertEquals("HELLO", CaseMatch.matchCase("HEL", "hello"))
+        assertEquals("TAMBÉM", CaseMatch.matchCase("TAMBEM", "também"))
+    }
+
+    @Test fun case_match_falls_back_to_the_leading_capital_when_not_all_caps() {
+        assertEquals("Hello", CaseMatch.matchCase("Hel", "hello"))
+        assertEquals("hello", CaseMatch.matchCase("hel", "hello"))
+    }
+
+    @Test fun a_single_capital_is_not_read_as_all_caps() {
+        // A lone sentence-start "I" must complete to "I'm", never "I'M".
+        assertEquals("I'm", CaseMatch.matchCase("I", "i'm"))
+        assertEquals("Hello", CaseMatch.matchCase("H", "hello"))
+    }
+
     // --- Bug: accented/contracted forms never show in the suggestion strip ----
 
     @Test fun guaranteed_variant_is_inserted_after_the_top_prediction() {

@@ -259,14 +259,19 @@ class FeatherKeyImeService : InputMethodService() {
      * capital would be wrong. One-shot: the next letter is upper-cased and shift
      * clears, and tapping shift first always wins, so a deliberate lowercase is
      * never fought. Called at every context change so caps track the caret.
+     *
+     * Goes through [KeyboardView.armShift], which is inert under caps lock — a
+     * mid-word or post-space call must not cancel a lock the user asked for.
      */
     private fun applyAutoCaps() {
         val kb = keyboard ?: return
         val ic = currentInputConnection ?: return
-        kb.shifted = AutoCaps.shouldCapitalize(
-            editorInputType,
-            ic.getCursorCapsMode(editorInputType),
-            ic.getTextBeforeCursor(2, 0),
+        kb.armShift(
+            AutoCaps.shouldCapitalize(
+                editorInputType,
+                ic.getCursorCapsMode(editorInputType),
+                ic.getTextBeforeCursor(2, 0),
+            ),
         )
     }
 
@@ -347,14 +352,23 @@ class FeatherKeyImeService : InputMethodService() {
             pending.clear()
         }
         // Honor auto-caps for swipe too: a sentence-initial glide capitalizes its
-        // word just as typing would (the shift is armed by applyAutoCaps).
-        val out = if (keyboard?.shifted == true) CaseMatch.matchLeading("A", best) else best
-        keyboard?.shifted = false
+        // word just as typing would (the shift is armed by applyAutoCaps). Under
+        // caps lock the whole glided word is upper-cased, not just its first
+        // letter — a locked keyboard would have typed it that way.
+        val kb = keyboard
+        val out = when {
+            kb?.capsLocked == true -> best.uppercase()
+            kb?.shifted == true -> CaseMatch.matchLeading("A", best)
+            else -> best
+        }
+        kb?.consumeShift()
         ic.commitText(out, 1)
         pending.clear(); pending.append(out) // treat as the current word: alts replace it
         atomicSpan = out.length // a wrong swipe clears whole on the next backspace
         lastAtomicWord = out
-        keyboard?.suggestions = ranked.take(3).ifEmpty { words.take(3) }
+        val alts = ranked.take(3).ifEmpty { words.take(3) }
+        // Match the strip to what a pick would commit (see updateSuggestions).
+        keyboard?.suggestions = if (kb?.capsLocked == true) alts.map { it.uppercase() } else alts
         schedulePersist()
     }
 
@@ -441,7 +455,7 @@ class FeatherKeyImeService : InputMethodService() {
         corrections.reset()
         pending.append(ch)
         ic.commitText(ch, 1)
-        if (kb?.shifted == true) kb.shifted = false
+        kb?.consumeShift() // spends a one-shot shift; caps lock holds
         updateSuggestions()
     }
 
@@ -484,7 +498,7 @@ class FeatherKeyImeService : InputMethodService() {
         corrections.reset()
         pending.append(out)
         ic.commitText(out, 1)
-        if (kb?.shifted == true) kb.shifted = false
+        kb?.consumeShift() // spends a one-shot shift; caps lock holds
         updateSuggestions()
     }
 
@@ -562,9 +576,16 @@ class FeatherKeyImeService : InputMethodService() {
      * previous one (context) and the user's own learned words first, then
      * frequency across languages. On an empty prefix just after a word: the
      * next-word predictions for the previous word (BR-10 next-word ranking).
+     *
+     * Ranking always runs on the lower-cased prefix (that is how the lexicons are
+     * keyed), but under caps lock the strip is shown — and therefore committed —
+     * upper-cased, so picking a suggestion mid-sentence can't silently drop the
+     * user out of capitals.
      */
     private fun updateSuggestions() {
-        keyboard?.suggestions = rankForStrip(pending.toString().lowercase())
+        val ranked = rankForStrip(pending.toString().lowercase())
+        keyboard?.suggestions =
+            if (keyboard?.capsLocked == true) ranked.map { it.uppercase() } else ranked
     }
 
     /**
@@ -632,8 +653,9 @@ class FeatherKeyImeService : InputMethodService() {
         val cur = pending.toString()
         // Keep the case the word was heading toward: if the pending word was
         // capitalized (sentence start / auto-caps), the picked suggestion is too,
-        // so tapping a completion for "Hel" gives "Hello", not "hello".
-        val out = CaseMatch.matchLeading(cur, word)
+        // so tapping a completion for "Hel" gives "Hello", not "hello" — and an
+        // all-caps prefix from caps lock ("HEL") completes to "HELLO".
+        val out = CaseMatch.matchCase(cur, word)
         if (cur.isNotEmpty()) ic.deleteSurroundingText(cur.length, 0)
         ic.commitText("$out ", 1)
         // A non-top pick is a signal the ranking was off for this prefix; feed it to

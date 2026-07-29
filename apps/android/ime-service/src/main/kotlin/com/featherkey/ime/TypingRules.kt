@@ -164,4 +164,15 @@ object CaseMatch {
     fun matchLeading(source: String, target: String): String =
         if (source.isNotEmpty() && source[0].isUpperCase()) target.replaceFirstChar { it.uppercaseChar() }
         else target
+
+    /** [target] recased to match [source]'s casing as a whole: an all-caps [source]
+     *  (what caps lock produces — "HELL") gives an all-caps result ("HELLO"),
+     *  otherwise this is [matchLeading]. Two cased characters are required before
+     *  all-caps is inferred, so a lone sentence-start "I" still completes to "I'm"
+     *  rather than "I'M". */
+    fun matchCase(source: String, target: String): String {
+        val cased = source.filter { it.isLetter() }
+        val allCaps = cased.length >= 2 && cased.all { it.isUpperCase() }
+        return if (allCaps) target.uppercase() else matchLeading(source, target)
+    }
 }
