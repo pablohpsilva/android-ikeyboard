@@ -244,7 +244,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Serves:** BR-16, BR-17, BR-18, BR-19
 - **Structs:** `LangId`, `LocaleManager`
 - **Enums:** `LocaleError`
-- **Methods:** `LangId::as_str`, `LangId::new`, `LocaleManager::active`, `LocaleManager::detect`, `LocaleManager::fuzzy_all`, `LocaleManager::new`, `LocaleManager::set_active`
+- **Methods:** `LangId::as_str`, `LangId::new`, `LocaleManager::active`, `LocaleManager::detect`, `LocaleManager::new`, `LocaleManager::set_active`
 - **Integration tests:** `tests/detection.rs`
 
 ### featherkey-personalization
@@ -392,7 +392,7 @@ Behaviour specs in `core/features/`, tagged to requirement IDs and gated by
 | `featherkey-core.feature` | The composed keyboard core | 7 | BR-5, BR-7, BR-8, BR-10, BR-12, BR-16, BR-26 |
 | `input-decoder.feature` | Model-biased keystroke decoding | 3 | BR-6, BR-7, BR-46 |
 | `keystroke_decoding.feature` | Keystroke decoding accuracy | 3 | BR-5, BR-6 |
-| `language-momentum.feature` | Language momentum across concurrent languages | 5 | BR-12, BR-18, BR-19 |
+| `language-momentum.feature` | Language momentum across concurrent languages | 6 | BR-10, BR-12, BR-18, BR-19 |
 | `layout-engine.feature` | Non-alphabetic pages and RTL-ready layouts | 3 | BR-47, BR-53 |
 | `locale-manager.feature` | Concurrent multilingual typing with automatic per-word detection | 5 | BR-16, BR-17, BR-18, BR-19 |
 | `personalization.feature` | On-device personal vocabulary learning | 3 | BR-7, BR-13 |
@@ -767,7 +767,6 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `LocaleManager` | struct — `featherkey-locale-manager` |
 | `LocaleManager::active` | method — `featherkey-locale-manager` |
 | `LocaleManager::detect` | method — `featherkey-locale-manager` |
-| `LocaleManager::fuzzy_all` | method — `featherkey-locale-manager` |
 | `LocaleManager::new` | method — `featherkey-locale-manager` |
 | `LocaleManager::set_active` | method — `featherkey-locale-manager` |
 | `MAX_COMPLETIONS` | const — `featherkey-dictionary` |

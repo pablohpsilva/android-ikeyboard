@@ -51,3 +51,10 @@ Feature: Language momentum across concurrent languages
     When I finish typing that word outside a sensitive field
     Then the committed word is left exactly as typed
     And no correction is applied
+
+  @BR-10 @mvp
+  Scenario: A typo is corrected to the commonest neighbour, not the first alphabetically
+    Given an English lexicon activated in frequency order where "cat" is commoner than "bat"
+    When I finish typing a misspelling that is one edit from both "bat" and "cat"
+    Then the applied correction is "cat"
+    And "bat" is offered only after the commoner alternatives

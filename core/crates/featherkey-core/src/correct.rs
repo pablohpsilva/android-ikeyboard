@@ -43,7 +43,7 @@ impl FeatherKeyCore {
         }
 
         // (2) Candidates: all-language fuzzy (per-language rank) ∪ device candidates.
-        let cands = gather_candidates(&locales, text, device_cands);
+        let cands = gather_candidates(&self.packs, text, device_cands);
         if cands.is_empty() {
             return Ok(unchanged(text));
         }
@@ -78,9 +78,11 @@ impl FeatherKeyCore {
     /// Score every candidate with the shared ranker, adding [`CORE_FUZZY_PRIOR`]
     /// to the sticky fix, and return `(index, score)` pairs sorted best-first.
     ///
-    /// The sticky fix is the primary language's closest lexicon neighbour
-    /// (fallback: the first lexicon candidate), so a trusted fix holds unless a
-    /// competing candidate's momentum-weighted score overtakes the bonus.
+    /// The sticky fix is the primary language's **commonest** lexicon neighbour
+    /// — its `source_rank == 0`, which `gather_candidates` assigns by bundled
+    /// frequency — with the first lexicon candidate as fallback. So a trusted fix
+    /// holds unless a competing candidate's momentum-weighted score overtakes the
+    /// bonus.
     fn score_with_sticky(&self, cands: &[featherkey_contracts::Candidate]) -> Vec<(usize, f64)> {
         use featherkey_contracts::Source;
         let primary = self.packs.first().map(|p| p.lang.as_str().to_owned());
@@ -158,27 +160,58 @@ fn unchanged(text: &str) -> Correction {
     }
 }
 
+/// One pack's edit-distance-1 neighbours of `text`, **commonest first** by the
+/// bundled rank recovered in [`build_packs`](crate::packs::build_packs); a word
+/// carrying no bundled rank sorts last, and equal ranks keep lexicographic order
+/// so the result is deterministic.
+///
+/// This exists because [`Dictionary::fuzzy`] collects into a `BTreeSet` and so
+/// answers in *alphabetical* order — fine for a set, wrong as the `source_rank`
+/// the ranker reads as commonness. Total: no panic, no `expect`.
+fn ranked_neighbours(
+    dict: &featherkey_dictionary::Dictionary,
+    rank: &std::collections::HashMap<String, u32>,
+    text: &str,
+) -> Vec<String> {
+    let mut ns = dict.fuzzy(text);
+    ns.sort_by(|a, b| {
+        let (ra, rb) = (
+            rank.get(a).copied().unwrap_or(u32::MAX),
+            rank.get(b).copied().unwrap_or(u32::MAX),
+        );
+        ra.cmp(&rb).then_with(|| a.cmp(b))
+    });
+    ns
+}
+
 /// Correction candidates for `text`: every active language's edit-distance-1
 /// neighbours (each ranked within its own language, [`Source::Lexicon`]) unioned
 /// with the device-supplied candidates.
+///
+/// `source_rank` is each neighbour's **position after ordering by bundled
+/// frequency** — not the raw bundled rank, which would span the whole lexicon and
+/// swamp the ranker's momentum term (design §4.1) — mirroring how
+/// `StatisticalPredictor::suggest_ranked` builds the strip's candidates.
 fn gather_candidates(
-    locales: &LocaleManager,
+    packs: &[crate::packs::Pack],
     text: &str,
     device_cands: Vec<featherkey_contracts::Candidate>,
 ) -> Vec<featherkey_contracts::Candidate> {
     use featherkey_contracts::{Candidate, Source};
     let mut cands: Vec<Candidate> = Vec::new();
-    let mut per_lang_rank: std::collections::HashMap<String, u32> =
-        std::collections::HashMap::new();
-    for (id, w) in locales.fuzzy_all(text) {
-        let r = per_lang_rank.entry(id.as_str().to_owned()).or_insert(0);
-        cands.push(Candidate {
-            word: w,
-            lang: id.as_str().to_owned(),
-            source: Source::Lexicon,
-            source_rank: *r,
-        });
-        *r += 1;
+    for p in packs {
+        for (position, word) in ranked_neighbours(&p.dict, &p.rank, text)
+            .into_iter()
+            .enumerate()
+        {
+            cands.push(Candidate {
+                word,
+                lang: p.lang.as_str().to_owned(),
+                source: Source::Lexicon,
+                // A lexicon's word count is far below `u32::MAX`.
+                source_rank: position as u32,
+            });
+        }
     }
     cands.extend(device_cands);
     cands
@@ -331,5 +364,72 @@ mod tests {
         assert_eq!(got.primary, "qqqq");
         assert!(!got.applied);
         assert!(got.alternatives.is_empty());
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod rank_tests {
+    use crate::FeatherKeyCore;
+
+    /// Activation order IS frequency order (`build_packs`): "cat" is the
+    /// commonest word here, "bat" the rarest — but "bat" sorts first
+    /// alphabetically. "xat" is one substitution from bat/cat/hat.
+    fn en_core() -> FeatherKeyCore {
+        FeatherKeyCore::new(vec![(
+            "en".into(),
+            vec!["cat".into(), "dog".into(), "hat".into(), "bat".into()],
+        )])
+        .expect("core")
+    }
+
+    /// The `unwrap_or(u32::MAX)` fallback: a neighbour carrying no bundled rank
+    /// sorts **last**, never first. Unreachable through the public API —
+    /// `build_packs` derives a pack's `rank` and its `Dictionary` from the same
+    /// word list — so it is exercised here, directly on the helper, to keep the
+    /// function total rather than merely untested.
+    #[test]
+    fn ranked_neighbours_sorts_unranked_last() {
+        use std::collections::HashMap;
+        let dict = featherkey_dictionary::Dictionary::from_sorted_words(["bat", "cat", "hat"])
+            .expect("sorted");
+        let mut rank = HashMap::new();
+        rank.insert("hat".to_string(), 7);
+        rank.insert("cat".to_string(), 0);
+        // "bat" has no bundled rank: it must trail both ranked words, despite
+        // sorting first alphabetically.
+        assert_eq!(
+            super::ranked_neighbours(&dict, &rank, "xat"),
+            vec!["cat".to_string(), "hat".to_string(), "bat".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_typo_is_corrected_to_the_commonest_neighbour() {
+        let got = en_core().choose_correction("xat", &[], vec![]).expect("ok");
+        assert!(got.applied);
+        assert_eq!(got.primary, "cat");
+    }
+
+    #[test]
+    fn correction_alternatives_are_frequency_ordered() {
+        let got = en_core().choose_correction("xat", &[], vec![]).expect("ok");
+        assert_eq!(got.alternatives, vec!["hat".to_string(), "bat".to_string()]);
+    }
+
+    #[test]
+    fn momentum_still_decides_across_languages() {
+        let mut core = FeatherKeyCore::new(vec![
+            ("en".into(), vec!["cat".into(), "dog".into()]),
+            ("es".into(), vec!["cas".into(), "gato".into()]),
+        ])
+        .expect("core");
+        for _ in 0..5 {
+            core.observe_language(vec!["es".into()]);
+        }
+        // "cax" is one substitution from en "cat" and es "cas", and is not a
+        // prefix of either (a prefix would be treated as intended, BR-12).
+        let got = core.choose_correction("cax", &[], vec![]).expect("ok");
+        assert_eq!(got.primary, "cas");
     }
 }
