@@ -254,7 +254,7 @@ class FeatherKeyImeService : InputMethodService() {
      *  view exists (keyboard == null there), so the first field's layout would
      *  otherwise be lost — the same reason applyAutoCaps is re-applied there. */
     private fun applyFieldLayout() {
-        keyboard?.resetPage(FieldLayout.opensNumeric(editorInputType))
+        keyboard?.resetPage(FieldLayout.initialPage(editorInputType))
         keyboard?.affixKeys = FieldLayout.affixKeys(editorInputType)
     }
 

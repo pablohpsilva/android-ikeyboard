@@ -11,6 +11,7 @@ package com.featherkey.ime
 
 import android.text.InputType
 import android.view.inputmethod.EditorInfo
+import com.featherkey.keyboard.InitialPage
 
 /** Double-space → ". " (Gboard/iOS convention). */
 object PunctuationRules {
@@ -64,15 +65,16 @@ object AutoCaps {
 /** Which initial layout a field should present, from its inputType. Pure so it
  *  unit-tests off-device like its siblings above. */
 object FieldLayout {
-    /** True when a field is numeric in nature and should open on the 123 page:
-     *  the number, phone, and date/time classes. Covers numeric-PIN password
-     *  fields, which are TYPE_CLASS_NUMBER. */
-    fun opensNumeric(inputType: Int): Boolean =
+    /** Which page a field should open on, from its inputType. Number and phone
+     *  fields get the telephone dialpad; date/time keeps the 123 numbers page (it
+     *  needs / : - separators the dialpad lacks); everything else opens on letters.
+     *  Covers numeric-PIN password fields (TYPE_CLASS_NUMBER → dialpad). */
+    fun initialPage(inputType: Int): InitialPage =
         when (inputType and InputType.TYPE_MASK_CLASS) {
             InputType.TYPE_CLASS_NUMBER,
-            InputType.TYPE_CLASS_PHONE,
-            InputType.TYPE_CLASS_DATETIME -> true
-            else -> false
+            InputType.TYPE_CLASS_PHONE -> InitialPage.DIALPAD
+            InputType.TYPE_CLASS_DATETIME -> InitialPage.NUMBERS
+            else -> InitialPage.LETTERS
         }
 
     /** Punctuation keys to flank the space bar on the letter page for this field:

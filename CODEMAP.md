@@ -347,7 +347,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - `GestureDecoder.kt` — `object GestureDecoder` — fun `GestureDecoder.decode`, `GestureDecoder.keyPath`
 - `GestureGeometry.kt` — `object GestureGeometry` — fun `GestureGeometry.shiftCenters`
 - `LegacyMigration.kt` — `object LegacyMigration` — fun `LegacyMigration.isPending`, `LegacyMigration.migrate`, `LegacyMigration.parseContext`, `LegacyMigration.parseUsage`
-- `TypingRules.kt` — `object PunctuationRules`; `object AutoCaps`; `object FieldLayout`; `object EnterKey`; `object TapDisambiguator`; `object SuggestionStrip`; `object GraphemeDeletion`; `object CaseMatch` — fun `AutoCaps.isCapitalizableTextField`, `AutoCaps.shouldCapitalize`, `CaseMatch.matchCase`, `CaseMatch.matchLeading`, `EnterKey.insertsNewline`, `FieldLayout.affixKeys`, `FieldLayout.opensNumeric`, `GraphemeDeletion.lastClusterLength`, `PunctuationRules.doubleSpaceMakesPeriod`, `SuggestionStrip.withGuaranteedVariant`, `TapDisambiguator.choose`
+- `TypingRules.kt` — `object PunctuationRules`; `object AutoCaps`; `object FieldLayout`; `object EnterKey`; `object TapDisambiguator`; `object SuggestionStrip`; `object GraphemeDeletion`; `object CaseMatch` — fun `AutoCaps.isCapitalizableTextField`, `AutoCaps.shouldCapitalize`, `CaseMatch.matchCase`, `CaseMatch.matchLeading`, `EnterKey.insertsNewline`, `FieldLayout.affixKeys`, `FieldLayout.initialPage`, `GraphemeDeletion.lastClusterLength`, `PunctuationRules.doubleSpaceMakesPeriod`, `SuggestionStrip.withGuaranteedVariant`, `TapDisambiguator.choose`
 - `Vocabulary.kt` — `class Vocabulary` — fun `Vocabulary.accentVariantsOf`, `Vocabulary.accentedCanonical`, `Vocabulary.empty`, `Vocabulary.forTest`, `Vocabulary.hasWordPrefix`, `Vocabulary.languagesOf`, `Vocabulary.load`, `Vocabulary.rankOf` — val/var `Vocabulary.words`
 - **Tests:** 7 file(s) — `CorrectionDetectorTest.kt`, `DiacriticsTest.kt`, `GestureDecoderTest.kt`, `GestureGeometryTest.kt`, `LegacyMigrationTest.kt`, `TypingRulesTest.kt`, `VocabularyAccentTest.kt`
 
@@ -627,7 +627,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `FfiWordFreq` | struct — `featherkey-core::ffi` *(internal)* |
 | `FieldLayout` | kotlin object — `:ime-service` |
 | `FieldLayout.affixKeys` | kotlin fun — `:ime-service` |
-| `FieldLayout.opensNumeric` | kotlin fun — `:ime-service` |
+| `FieldLayout.initialPage` | kotlin fun — `:ime-service` |
 | `FieldSensitivity` | kotlin fun interface — `:ffi-bridge` |
 | `FieldSensitivity.isSensitive` | kotlin fun — `:ffi-bridge` |
 | `FLOOR` | const — `featherkey-language-momentum`; const — `featherkey-tap-sequence` |

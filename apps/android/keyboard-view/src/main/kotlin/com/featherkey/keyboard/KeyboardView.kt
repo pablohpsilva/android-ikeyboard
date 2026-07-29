@@ -171,7 +171,7 @@ class KeyboardView @JvmOverloads constructor(
         }
     }
 
-    private enum class Page { ALPHA, NUMBERS, SYMBOLS, EMOJI }
+    private enum class Page { ALPHA, NUMBERS, SYMBOLS, EMOJI, PHONE }
     private var page = Page.ALPHA
 
     // --- Emoji-page state (own draw + scroll path, independent of the cell grid). ---
@@ -206,10 +206,14 @@ class KeyboardView @JvmOverloads constructor(
     }
 
     /** Return to the field-appropriate page (called by the IME when a new field
-     *  starts). Numeric fields open on the numbers page; everything else on the
-     *  letter page. A new field always starts unshifted and unlocked. */
-    fun resetPage(startNumeric: Boolean = false) {
-        page = if (startNumeric) Page.NUMBERS else Page.ALPHA
+     *  starts): dialpad for number/phone, 123 page for date/time, letters
+     *  otherwise. A new field always starts unshifted and unlocked. */
+    fun resetPage(initial: InitialPage = InitialPage.LETTERS) {
+        page = when (initial) {
+            InitialPage.DIALPAD -> Page.PHONE
+            InitialPage.NUMBERS -> Page.NUMBERS
+            InitialPage.LETTERS -> Page.ALPHA
+        }
         shiftMode = ShiftMode.OFF // a new field starts unshifted and unlocked
         lastShiftTapAt = 0L
         requestLayout(); invalidate()
@@ -328,7 +332,7 @@ class KeyboardView @JvmOverloads constructor(
             rect: RectF, val label: String,
             val lx: Float, val ly: Float, val lw: Float,
         ) : Cell(rect)
-        class Char(rect: RectF, val label: String) : Cell(rect)
+        class Char(rect: RectF, val label: String, val sub: String = "") : Cell(rect)
         class Special(rect: RectF, val kind: Sp) : Cell(rect)
         class Suggest(rect: RectF, val index: Int) : Cell(rect)
     }
@@ -355,6 +359,7 @@ class KeyboardView @JvmOverloads constructor(
             stripReserved = stripReserved,
             rowPx = rowHeight, funcPx = funcRowHeight, barPx = bottomBarHeight,
             insetPx = bottomInset.toFloat(), stripPx = stripBand,
+            contentRows = if (page == Page.PHONE) 4 else 3,
         )
         setMeasuredDimension(w, h.toInt())
     }
@@ -457,6 +462,23 @@ class KeyboardView @JvmOverloads constructor(
                 lastRow(Sp.TO_NUMBERS, PUNCT_R3, null, fill = true)
             }
             Page.EMOJI -> Unit // handled by the early return above; builds no cells
+            Page.PHONE -> {
+                // `contentW` is already defined above in buildCells; reuse it.
+                fun dialRow(keys: List<DialKey>, cols: Int, backspace: Boolean) {
+                    val kt = top + rowGap / 2f; val kb = top + rowHeight - rowGap / 2f
+                    val kw = (contentW - keyGap * (cols - 1)) / cols
+                    var x = sideMargin
+                    for (k in keys) {
+                        out += Cell.Char(RectF(x, kt, x + kw, kb), k.label, k.sub); x += kw + keyGap
+                    }
+                    if (backspace) { out += Cell.Special(RectF(x, kt, x + kw, kb), Sp.BACKSPACE) }
+                    top += rowHeight
+                }
+                dialRow(Dialpad.ROWS[0], cols = 3, backspace = false)
+                dialRow(Dialpad.ROWS[1], cols = 3, backspace = false)
+                dialRow(Dialpad.ROWS[2], cols = 3, backspace = false)
+                dialRow(Dialpad.ROWS[3], cols = 4, backspace = true) // ". , 0 ⌫"
+            }
         }
 
         // Function row: [123|ABC] [emoji] [affix?] [ space ] [affix?] [ return ].
@@ -542,7 +564,9 @@ class KeyboardView @JvmOverloads constructor(
         for (cell in cells) when (cell) {
             is Cell.Letter -> drawTextKey(canvas, cell.rect, c, cell === pressed,
                 if (cell.label.length == 1) cell.label.uppercase() else cell.label, rowHeight * 0.44f)
-            is Cell.Char -> drawTextKey(canvas, cell.rect, c, cell === pressed, cell.label, cell.rect.height() * 0.5f)
+            is Cell.Char ->
+                if (cell.sub.isEmpty()) drawTextKey(canvas, cell.rect, c, cell === pressed, cell.label, cell.rect.height() * 0.5f)
+                else drawDialKey(canvas, cell.rect, c, cell === pressed, cell.label, cell.sub)
             is Cell.Special -> drawSpecial(canvas, cell, c)
             is Cell.Suggest -> Unit
         }
@@ -610,6 +634,20 @@ class KeyboardView @JvmOverloads constructor(
         labelPaint.textSize = size
         val cy = r.centerY() - (labelPaint.ascent() + labelPaint.descent()) / 2
         canvas.drawText(text, r.centerX(), cy, labelPaint)
+    }
+
+    /** A dialpad key: the digit in the upper half, its telephone letters small and
+     *  dim below. Uses labelPaint (center-aligned) for both, swapping color/size —
+     *  never hintPaint, which is right-aligned for the space-bar hint. */
+    private fun drawDialKey(canvas: Canvas, r: RectF, c: Palette, isPressed: Boolean, digit: String, sub: String) {
+        keyBg(canvas, r, c, isPressed)
+        labelPaint.color = c.label
+        labelPaint.textSize = r.height() * 0.32f
+        canvas.drawText(digit, r.centerX(), r.centerY() - r.height() * 0.04f, labelPaint)
+        labelPaint.color = c.hint
+        labelPaint.textSize = r.height() * 0.16f
+        canvas.drawText(sub, r.centerX(), r.centerY() + r.height() * 0.28f, labelPaint)
+        labelPaint.color = c.label // restore for subsequent keys
     }
 
     private fun drawAccentPopup(canvas: Canvas, c: Palette) {
