@@ -157,16 +157,16 @@ fn sensitive_strip_pick_does_not_change_ranking() {
         )])
         .expect("valid core")
     };
-    let top = |fk: &FeatherKeyCore| fk.rank_suggestions("", "te", Vec::new())[0].word.clone();
+    let top = |fk: &mut FeatherKeyCore| fk.rank_suggestions("", "te", Vec::new())[0].word.clone();
 
     // Sensitive: repeated picks are dropped, so "tea" (bundled-first) still leads.
     let mut sensitive = lex();
-    assert_eq!(top(&sensitive), "tea");
+    assert_eq!(top(&mut sensitive), "tea");
     for _ in 0..5 {
         sensitive.observe_strip_pick("te", "team", &Sensitive);
     }
     assert_eq!(
-        top(&sensitive),
+        top(&mut sensitive),
         "tea",
         "a sensitive-field strip pick must not promote 'team'"
     );
@@ -177,7 +177,7 @@ fn sensitive_strip_pick_does_not_change_ranking() {
         ordinary.observe_strip_pick("te", "team", &Ordinary);
     }
     assert_eq!(
-        top(&ordinary),
+        top(&mut ordinary),
         "team",
         "an ordinary-field strip pick should promote 'team' (proves the gate suppresses, not a no-op)"
     );
@@ -195,7 +195,7 @@ fn sensitive_delete_retype_does_not_change_ranking() {
         )])
         .expect("valid core")
     };
-    let top = |fk: &FeatherKeyCore| fk.rank_suggestions("", "te", Vec::new())[0].word.clone();
+    let top = |fk: &mut FeatherKeyCore| fk.rank_suggestions("", "te", Vec::new())[0].word.clone();
 
     // Sensitive: deletes are dropped, so "tea" (bundled-first) still leads.
     let mut sensitive = lex();
@@ -203,7 +203,7 @@ fn sensitive_delete_retype_does_not_change_ranking() {
         sensitive.observe_delete_retype("tea", &Sensitive);
     }
     assert_eq!(
-        top(&sensitive),
+        top(&mut sensitive),
         "tea",
         "a sensitive-field delete-retype must not demote 'tea'"
     );
@@ -214,7 +214,7 @@ fn sensitive_delete_retype_does_not_change_ranking() {
         ordinary.observe_delete_retype("tea", &Ordinary);
     }
     assert_eq!(
-        top(&ordinary),
+        top(&mut ordinary),
         "team",
         "an ordinary-field delete-retype should demote 'tea' (proves the gate suppresses, not a no-op)"
     );

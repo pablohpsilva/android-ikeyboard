@@ -412,6 +412,7 @@ dependencies = [
  "featherkey-prediction",
  "featherkey-secure-store",
  "featherkey-sensitive-context",
+ "featherkey-tap-sequence",
  "featherkey-touch-model",
  "proptest",
  "tempfile",
@@ -533,6 +534,10 @@ dependencies = [
 
 [[package]]
 name = "featherkey-smart-typing"
+version = "0.0.0"
+
+[[package]]
+name = "featherkey-tap-sequence"
 version = "0.0.0"
 
 [[package]]

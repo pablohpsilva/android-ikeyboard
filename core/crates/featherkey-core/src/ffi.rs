@@ -251,7 +251,7 @@ impl KeyboardCore {
 
     /// Decode a touch at surface-local pixel `(x, y)`.
     pub fn decode(&self, x: f32, y: f32) -> Result<FfiDecode, FfiError> {
-        let core = self.lock();
+        let mut core = self.lock();
         Ok(core.decode(x, y)?.into())
     }
 
@@ -429,7 +429,7 @@ impl KeyboardCore {
     /// Encrypt and persist learned vocabulary. Call from a background thread on
     /// a debounce; it is off the input path.
     pub fn persist(&self) -> Result<(), FfiError> {
-        let core = self.lock();
+        let mut core = self.lock();
         core.persist(&self.store)?;
         Ok(())
     }

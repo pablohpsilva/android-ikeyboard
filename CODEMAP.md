@@ -40,7 +40,7 @@ silence about something real is the one answer this index must never give.
 
 ## 1. Rust core — crate map
 
-22 crates in the `core/` Cargo workspace. Layers run inward:
+23 crates in the `core/` Cargo workspace. Layers run inward:
 `foundation` → `port` → `domain` → `adapter` → `composition`; a crate may
 only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 
@@ -48,7 +48,7 @@ only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 |---|---|---|---|
 | `featherkey-crash-guard` | adapter | Isolate panics at the FFI seam and provide safe-mode fallback. | — |
 | `featherkey-secure-store` | adapter | Encrypt and persist all personal data — implements the `SecureStore` port; redb + AES-256-GCM. | contracts |
-| `featherkey-core` | composition | Be the composition root — wire the domain crates behind the `contracts` ports and present one narrow, UniFFI-ready use-case API to the shell. | autocorrect, candidate-ranker, context, contracts, corrections, dictionary, fold, input-decoder, kernel, language-momentum, layout-engine, locale-manager, personalization, prediction, secure-store, sensitive-context, touch-model |
+| `featherkey-core` | composition | Be the composition root — wire the domain crates behind the `contracts` ports and present one narrow, UniFFI-ready use-case API to the shell. | autocorrect, candidate-ranker, context, contracts, corrections, dictionary, fold, input-decoder, kernel, language-momentum, layout-engine, locale-manager, personalization, prediction, secure-store, sensitive-context, tap-sequence, touch-model |
 | `featherkey-autocorrect` | domain | Decide a correction for a typed token, never clobbering a word the user clearly intended (no-clobber policy, BR-12). | candidate-ranker, contracts, dictionary, language-momentum, locale-manager, personalization |
 | `featherkey-candidate-ranker` | domain | Merge and rank candidates from all sources using language momentum. | contracts, language-momentum |
 | `featherkey-context` | domain | On-device next-word (bigram) model, persisted encrypted under PersonalLm via the SecureStore port. | contracts |
@@ -65,6 +65,7 @@ only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 | `featherkey-prediction` | domain | Rank prefix-completion suggestions from the active-language lexicons behind the `Predictor` port. | context, contracts, dictionary, fold |
 | `featherkey-sensitive-context` | domain | Decide whether the current editor field is sensitive and must therefore suppress learning and prediction (the BR-26 gate). | contracts |
 | `featherkey-smart-typing` | domain | Apply auto-capitalization, double-space-period, and smart-quote punctuation as pure, deterministic functions of the text preceding the caret and the character just typed. | — |
+| `featherkey-tap-sequence` | domain | decide which real words a *sequence* of ambiguous taps explains. | — |
 | `featherkey-touch-model` | domain | Maintain the per-user adaptive tap-distribution model — the sole writer of tap geometry (ADR-14). | contracts, kernel |
 | `featherkey-kernel` | foundation | Define shared value objects and error types that cross module boundaries — no logic, no dependencies. | — |
 | `featherkey-contracts` | port | Define the port traits (driven & driving) that domain crates depend on instead of adapters — no logic, no dependencies beyond `kernel` (ADR-12). | kernel |
@@ -130,12 +131,12 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 
 - **Path:** `core/crates/featherkey-core` — **Layer:** composition
 - **One job:** Be the composition root — wire the domain crates behind the `contracts` ports and present one narrow, UniFFI-ready use-case API to the shell.
-- **Depends on:** `featherkey-autocorrect`, `featherkey-candidate-ranker`, `featherkey-context`, `featherkey-contracts`, `featherkey-corrections`, `featherkey-dictionary`, `featherkey-fold`, `featherkey-input-decoder`, `featherkey-kernel`, `featherkey-language-momentum`, `featherkey-layout-engine`, `featherkey-locale-manager`, `featherkey-personalization`, `featherkey-prediction`, `featherkey-secure-store`, `featherkey-sensitive-context`, `featherkey-touch-model` — **external:** `thiserror`, `uniffi`
+- **Depends on:** `featherkey-autocorrect`, `featherkey-candidate-ranker`, `featherkey-context`, `featherkey-contracts`, `featherkey-corrections`, `featherkey-dictionary`, `featherkey-fold`, `featherkey-input-decoder`, `featherkey-kernel`, `featherkey-language-momentum`, `featherkey-layout-engine`, `featherkey-locale-manager`, `featherkey-personalization`, `featherkey-prediction`, `featherkey-secure-store`, `featherkey-sensitive-context`, `featherkey-tap-sequence`, `featherkey-touch-model` — **external:** `thiserror`, `uniffi`
 - **Serves:** BR-5, BR-7, BR-8, BR-10, BR-12, BR-16, BR-26
 - **Traits (ports):** `SensitiveField` *(internal)*
 - **Structs:** `DecodeResult`, `FeatherKeyCore`, `FfiCandidate` *(internal)*, `FfiCorrection` *(internal)*, `FfiDecode` *(internal)*, `FfiKey` *(internal)*, `FfiRankCandidate` *(internal)*, `FfiRanked` *(internal)*, `FfiSuggestion` *(internal)*, `FfiTapOffset` *(internal)*, `FfiTransition` *(internal)*, `FfiWordFreq` *(internal)*, `KeyCandidate`, `KeyboardCore` *(internal)*, `LanguagePack` *(internal)*, `LayoutKey`
 - **Enums:** `FeatherKeyError`, `FfiError` *(internal)*, `FfiSource` *(internal)*
-- **Methods:** `FeatherKeyCore::active_languages`, `FeatherKeyCore::add_to_dictionary`, `FeatherKeyCore::choose_correction`, `FeatherKeyCore::context_next_words`, `FeatherKeyCore::correction_pref_count`, `FeatherKeyCore::correction_unwanted_count`, `FeatherKeyCore::decode`, `FeatherKeyCore::import_context`, `FeatherKeyCore::import_frequencies`, `FeatherKeyCore::knows_word`, `FeatherKeyCore::language_weight`, `FeatherKeyCore::layout_keys`, `FeatherKeyCore::learn_word`, `FeatherKeyCore::learned_frequencies`, `FeatherKeyCore::new`, `FeatherKeyCore::observe_delete_retype`, `FeatherKeyCore::observe_language`, `FeatherKeyCore::observe_strip_pick`, `FeatherKeyCore::observe_tap`, `FeatherKeyCore::persist`, `FeatherKeyCore::rank_candidates`, `FeatherKeyCore::rank_suggestions`, `FeatherKeyCore::restore`, `FeatherKeyCore::set_active_languages`, `FeatherKeyCore::set_layout`, `FeatherKeyCore::suggest`, `FeatherKeyCore::tap_offsets`, `FeatherKeyCore::use_alpha_layout`, `FeatherKeyCore::use_numeric_layout`, `FeatherKeyCore::use_symbols_layout`, `FeatherKeyCore::word_frequency`, `KeyboardCore::active_languages` *(internal)*, `KeyboardCore::add_to_dictionary` *(internal)*, `KeyboardCore::choose_correction` *(internal)*, `KeyboardCore::correct` *(internal)*, `KeyboardCore::decode` *(internal)*, `KeyboardCore::import_context` *(internal)*, `KeyboardCore::import_frequencies` *(internal)*, `KeyboardCore::layout_keys` *(internal)*, `KeyboardCore::learn_word` *(internal)*, `KeyboardCore::learned_frequencies` *(internal)*, `KeyboardCore::observe_delete_retype` *(internal)*, `KeyboardCore::observe_language` *(internal)*, `KeyboardCore::observe_strip_pick` *(internal)*, `KeyboardCore::observe_tap` *(internal)*, `KeyboardCore::open` *(internal)*, `KeyboardCore::persist` *(internal)*, `KeyboardCore::rank` *(internal)*, `KeyboardCore::rank_suggestions` *(internal)*, `KeyboardCore::set_active_languages` *(internal)*, `KeyboardCore::suggest` *(internal)*, `KeyboardCore::tap_offsets` *(internal)*, `KeyboardCore::use_alpha_layout` *(internal)*, `KeyboardCore::use_numeric_layout` *(internal)*, `KeyboardCore::use_symbols_layout` *(internal)*, `SensitiveField::is_sensitive` *(internal)*
+- **Methods:** `FeatherKeyCore::active_languages`, `FeatherKeyCore::add_to_dictionary`, `FeatherKeyCore::buffered_taps`, `FeatherKeyCore::choose_correction`, `FeatherKeyCore::context_next_words`, `FeatherKeyCore::correction_pref_count`, `FeatherKeyCore::correction_unwanted_count`, `FeatherKeyCore::decode`, `FeatherKeyCore::import_context`, `FeatherKeyCore::import_frequencies`, `FeatherKeyCore::knows_word`, `FeatherKeyCore::language_weight`, `FeatherKeyCore::layout_keys`, `FeatherKeyCore::learn_word`, `FeatherKeyCore::learned_frequencies`, `FeatherKeyCore::new`, `FeatherKeyCore::observe_delete_retype`, `FeatherKeyCore::observe_language`, `FeatherKeyCore::observe_strip_pick`, `FeatherKeyCore::observe_tap`, `FeatherKeyCore::persist`, `FeatherKeyCore::rank_candidates`, `FeatherKeyCore::rank_suggestions`, `FeatherKeyCore::restore`, `FeatherKeyCore::set_active_languages`, `FeatherKeyCore::set_layout`, `FeatherKeyCore::suggest`, `FeatherKeyCore::tap_offsets`, `FeatherKeyCore::use_alpha_layout`, `FeatherKeyCore::use_numeric_layout`, `FeatherKeyCore::use_symbols_layout`, `FeatherKeyCore::word_frequency`, `KeyboardCore::active_languages` *(internal)*, `KeyboardCore::add_to_dictionary` *(internal)*, `KeyboardCore::choose_correction` *(internal)*, `KeyboardCore::correct` *(internal)*, `KeyboardCore::decode` *(internal)*, `KeyboardCore::import_context` *(internal)*, `KeyboardCore::import_frequencies` *(internal)*, `KeyboardCore::layout_keys` *(internal)*, `KeyboardCore::learn_word` *(internal)*, `KeyboardCore::learned_frequencies` *(internal)*, `KeyboardCore::observe_delete_retype` *(internal)*, `KeyboardCore::observe_language` *(internal)*, `KeyboardCore::observe_strip_pick` *(internal)*, `KeyboardCore::observe_tap` *(internal)*, `KeyboardCore::open` *(internal)*, `KeyboardCore::persist` *(internal)*, `KeyboardCore::rank` *(internal)*, `KeyboardCore::rank_suggestions` *(internal)*, `KeyboardCore::set_active_languages` *(internal)*, `KeyboardCore::suggest` *(internal)*, `KeyboardCore::tap_offsets` *(internal)*, `KeyboardCore::use_alpha_layout` *(internal)*, `KeyboardCore::use_numeric_layout` *(internal)*, `KeyboardCore::use_symbols_layout` *(internal)*, `SensitiveField::is_sensitive` *(internal)*
 - **Integration tests:** `tests/composition.rs`, `tests/e2_sensitive_ordering.rs`, `tests/w6b_ranking_reflects_learning.rs`
 
 ### featherkey-corrections
@@ -297,6 +298,18 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Free functions:** `auto_capitalize`, `curl_quote`, `double_space_period`, `smart_quote`
 - **Integration tests:** `tests/smart_typing_spec.rs`
 
+### featherkey-tap-sequence
+
+- **Path:** `core/crates/tap-sequence` — **Layer:** domain
+- **One job:** decide which real words a *sequence* of ambiguous taps explains.
+- **Depends on:** nothing (leaf)
+- **Traits (ports):** `Lexicon`
+- **Structs:** `Hypothesis`, `TapDistribution`, `TapSequence`
+- **Free functions:** `hypotheses`
+- **Constants:** `BEAM`, `BRANCH`, `COMPLETIONS`, `FLOOR`, `MAX_TAPS`, `TAIL_PENALTY`
+- **Methods:** `Lexicon::completions`, `Lexicon::is_live_prefix`, `TapDistribution::best`, `TapDistribution::from_ranked`, `TapDistribution::is_empty`, `TapDistribution::keys`, `TapDistribution::len`, `TapSequence::capacity`, `TapSequence::clear`, `TapSequence::committed`, `TapSequence::is_empty`, `TapSequence::len`, `TapSequence::new`, `TapSequence::pop`, `TapSequence::push`, `TapSequence::taps`, `TapSequence::truncate`
+- **Integration tests:** `tests/beam.rs`
+
 ### featherkey-touch-model
 
 - **Path:** `core/crates/touch-model` — **Layer:** domain
@@ -400,6 +413,7 @@ Behaviour specs in `core/features/`, tagged to requirement IDs and gated by
 | `secure-store.feature` | Encrypted persistence of personal data | 4 | BR-8, BR-23, BR-62 |
 | `sensitive-context.feature` | Suppress learning in sensitive fields | 2 | BR-26 |
 | `smart-typing.feature` | Smart typing assistance | 7 | BR-48 |
+| `tap-sequence.feature` | Reading a whole word from ambiguous taps | 4 | BR-5, BR-6 |
 | `touch-model.feature` | Adaptive tap-geometry learning | 2 | BR-7, BR-46 |
 
 ## 6. Symbol index
@@ -428,6 +442,8 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `AutoCaps.shouldCapitalize` | kotlin fun — `:ime-service` |
 | `AutoCorrect` | trait — `featherkey-contracts` |
 | `AutoCorrect::correct` | method — `featherkey-contracts` |
+| `BEAM` | const — `featherkey-tap-sequence` |
+| `BRANCH` | const — `featherkey-tap-sequence` |
 | `C::capacity` | method — `featherkey-diagnostics` |
 | `C::is_empty` | method — `featherkey-diagnostics` |
 | `C::len` | method — `featherkey-diagnostics` |
@@ -445,6 +461,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `CellLayoutKey.width` | kotlin val/var — `:keyboard-view` |
 | `Clock` | trait — `featherkey-contracts` |
 | `Clock::now_millis` | method — `featherkey-contracts` |
+| `COMPLETIONS` | const — `featherkey-tap-sequence` |
 | `Confidence` | struct — `featherkey-kernel` |
 | `Confidence::new` | method — `featherkey-kernel` |
 | `Confidence::value` | method — `featherkey-kernel` |
@@ -552,6 +569,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `FeatherKeyCore` | struct — `featherkey-core` |
 | `FeatherKeyCore::active_languages` | method — `featherkey-core` |
 | `FeatherKeyCore::add_to_dictionary` | method — `featherkey-core` |
+| `FeatherKeyCore::buffered_taps` | method — `featherkey-core` |
 | `FeatherKeyCore::choose_correction` | method — `featherkey-core` |
 | `FeatherKeyCore::context_next_words` | method — `featherkey-core` |
 | `FeatherKeyCore::correction_pref_count` | method — `featherkey-core` |
@@ -604,7 +622,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `FfiWordFreq` | struct — `featherkey-core::ffi` *(internal)* |
 | `FieldSensitivity` | kotlin fun interface — `:ffi-bridge` |
 | `FieldSensitivity.isSensitive` | kotlin fun — `:ffi-bridge` |
-| `FLOOR` | const — `featherkey-language-momentum` |
+| `FLOOR` | const — `featherkey-language-momentum`; const — `featherkey-tap-sequence` |
 | `fold` | fn — `featherkey-fold` |
 | `fold_char` | fn — `featherkey-fold` |
 | `FunctionKey` | kotlin enum class — `:keyboard-view` |
@@ -619,6 +637,8 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `guard_result` | fn — `featherkey-crash-guard` |
 | `GuardError` | enum — `featherkey-crash-guard` |
 | `HEAD_START` | const — `featherkey-language-momentum` |
+| `hypotheses` | fn — `featherkey-tap-sequence::beam` |
+| `Hypothesis` | struct — `featherkey-tap-sequence::beam` |
 | `InputDecoder` | trait — `featherkey-input-decoder` |
 | `InputDecoder::decode` | method — `featherkey-input-decoder` |
 | `Key` | struct — `featherkey-layout-engine` |
@@ -759,6 +779,9 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `LegacyMigration.migrate` | kotlin fun — `:ime-service` |
 | `LegacyMigration.parseContext` | kotlin fun — `:ime-service` |
 | `LegacyMigration.parseUsage` | kotlin fun — `:ime-service` |
+| `Lexicon` | trait — `featherkey-tap-sequence` |
+| `Lexicon::completions` | method — `featherkey-tap-sequence` |
+| `Lexicon::is_live_prefix` | method — `featherkey-tap-sequence` |
 | `LexiconPack` | struct — `featherkey-autocorrect` |
 | `Lexicons` | kotlin object — `:ime-service` |
 | `Lexicons.load` | kotlin fun — `:ime-service` |
@@ -771,6 +794,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `LocaleManager::set_active` | method — `featherkey-locale-manager` |
 | `MAX_COMPLETIONS` | const — `featherkey-dictionary` |
 | `MAX_SUGGESTIONS` | const — `featherkey-prediction` |
+| `MAX_TAPS` | const — `featherkey-tap-sequence` |
 | `Momentum` | struct — `featherkey-language-momentum` |
 | `Momentum::new` | method — `featherkey-language-momentum` |
 | `Momentum::observe` | method — `featherkey-language-momentum` |
@@ -844,8 +868,26 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `Suggestions` | struct — `featherkey-contracts` |
 | `SuggestionStrip` | kotlin object — `:ime-service` |
 | `SuggestionStrip.withGuaranteedVariant` | kotlin fun — `:ime-service` |
+| `TAIL_PENALTY` | const — `featherkey-tap-sequence` |
 | `TapDisambiguator` | kotlin object — `:ime-service` |
 | `TapDisambiguator.choose` | kotlin fun — `:ime-service` |
+| `TapDistribution` | struct — `featherkey-tap-sequence` |
+| `TapDistribution::best` | method — `featherkey-tap-sequence` |
+| `TapDistribution::from_ranked` | method — `featherkey-tap-sequence` |
+| `TapDistribution::is_empty` | method — `featherkey-tap-sequence` |
+| `TapDistribution::keys` | method — `featherkey-tap-sequence` |
+| `TapDistribution::len` | method — `featherkey-tap-sequence` |
+| `TapSequence` | struct — `featherkey-tap-sequence` |
+| `TapSequence::capacity` | method — `featherkey-tap-sequence` |
+| `TapSequence::clear` | method — `featherkey-tap-sequence` |
+| `TapSequence::committed` | method — `featherkey-tap-sequence` |
+| `TapSequence::is_empty` | method — `featherkey-tap-sequence` |
+| `TapSequence::len` | method — `featherkey-tap-sequence` |
+| `TapSequence::new` | method — `featherkey-tap-sequence` |
+| `TapSequence::pop` | method — `featherkey-tap-sequence` |
+| `TapSequence::push` | method — `featherkey-tap-sequence` |
+| `TapSequence::taps` | method — `featherkey-tap-sequence` |
+| `TapSequence::truncate` | method — `featherkey-tap-sequence` |
 | `Token` | struct — `featherkey-contracts` |
 | `TouchModel` | struct — `featherkey-touch-model` |
 | `TouchModel::covariance` | method — `featherkey-touch-model` |

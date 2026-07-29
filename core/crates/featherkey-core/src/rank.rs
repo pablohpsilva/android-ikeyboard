@@ -20,6 +20,11 @@ use featherkey_prediction::{StatisticalPredictor, MAX_SUGGESTIONS};
 
 use crate::{FeatherKeyCore, CORRECTION_STICKY_WEIGHT, CORRECTION_UNWANTED_WEIGHT};
 
+/// Weight on a hypothesis's spatial log-probability when it competes in the
+/// ranker. Spatial fit nudges; frequency, learning, context and momentum still
+/// decide.
+const SPATIAL_WEIGHT: f64 = 0.35;
+
 impl FeatherKeyCore {
     /// The whole suggestion-strip blend, core-owned (ARCH §9.1 `Suggest`,
     /// option **b**): predictor completions + shell-gathered `device` candidates
@@ -41,7 +46,7 @@ impl FeatherKeyCore {
     /// materialising them is the deferred W4 follow-up.)
     #[must_use]
     pub fn rank_suggestions(
-        &self,
+        &mut self,
         preceding: &str,
         prefix: &str,
         device: Vec<Candidate>,
@@ -64,11 +69,31 @@ impl FeatherKeyCore {
         // the user repeatedly picks for this prefix) and the "unwanted" demotion
         // (a word the user repeatedly deletes and retypes). Applied before the
         // top-k cut, so a promoted word is never dropped first.
+        let spatial = self.spatial_hypotheses(prefix);
+        for (word, _) in &spatial {
+            if !cands.iter().any(|c| &c.word == word) {
+                cands.push(Candidate {
+                    word: word.clone(),
+                    lang: self.primary_lang(),
+                    source: Source::Lexicon,
+                    // A spatial candidate enters at the back of the lexicon
+                    // ordering; its own bias is what lifts it, so it competes
+                    // rather than arriving pre-promoted.
+                    source_rank: MAX_SUGGESTIONS as u32,
+                });
+            }
+        }
         let ranked = featherkey_candidate_ranker::rank_with_bias(
             &cands,
             &self.momentum,
             MAX_SUGGESTIONS,
-            |word| self.correction_adjustment(prefix, word),
+            |word| {
+                self.correction_adjustment(prefix, word)
+                    + spatial
+                        .iter()
+                        .find(|(w, _)| w == word)
+                        .map_or(0.0, |(_, score)| SPATIAL_WEIGHT * f64::from(*score))
+            },
         );
         self.guarantee_fold_variant(prefix, ranked)
     }
@@ -239,7 +264,7 @@ mod tests {
     fn rank_suggestions_orders_by_bundled_rank_when_nothing_learned() {
         // No context, no learned usage: the commoner bundled word (lower rank,
         // earlier in the frequency-ordered input) wins. Proves dict_rank flows.
-        let core = FeatherKeyCore::new(vec![(
+        let mut core = FeatherKeyCore::new(vec![(
             "en".into(),
             vec!["cat".into(), "car".into(), "can".into()],
         )])
@@ -262,7 +287,7 @@ mod tests {
     #[test]
     fn rank_suggestions_tags_completion_with_its_pack_language() {
         // A completion drawn from the es pack keeps its language across the blend.
-        let core = FeatherKeyCore::new(vec![
+        let mut core = FeatherKeyCore::new(vec![
             ("en".into(), vec!["cat".into()]),
             ("es".into(), vec!["gato".into()]),
         ])
@@ -276,7 +301,7 @@ mod tests {
     fn rank_suggestions_surfaces_the_apostrophe_variant_of_the_typed_token() {
         // Typing "hell" must still offer "he'll" — derived from the fold group,
         // never a hand-authored table.
-        let core = FeatherKeyCore::new(vec![(
+        let mut core = FeatherKeyCore::new(vec![(
             "en".into(),
             vec!["hell".into(), "hello".into(), "he'll".into()],
         )])

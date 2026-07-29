@@ -28,6 +28,7 @@ featherkey-kernel = { path = "../kernel" }
 featherkey-contracts = { path = "../contracts" }
 featherkey-layout-engine = { path = "../layout-engine" }
 featherkey-input-decoder = { path = "../input-decoder" }
+featherkey-tap-sequence = { path = "../tap-sequence" }
 featherkey-touch-model = { path = "../touch-model" }
 featherkey-dictionary = { path = "../dictionary" }
 featherkey-locale-manager = { path = "../locale-manager" }

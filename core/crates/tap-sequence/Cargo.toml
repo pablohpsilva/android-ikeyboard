@@ -1,0 +1,16 @@
+[package]
+name = "featherkey-tap-sequence"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Word-level noisy-channel decode: which real words do a sequence of ambiguous taps explain?"
+
+[package.metadata.featherkey]
+layer = "domain"
+
+[dependencies]
+
+[lints]
+workspace = true

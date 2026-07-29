@@ -27,7 +27,7 @@ fn core() -> FeatherKeyCore {
 
 #[test]
 fn decode_resolves_and_ranks() {
-    let fk = core();
+    let mut fk = core();
     // Centre of the first tracer key "q" is (50, 60).
     let r = fk.decode(50.0, 60.0).unwrap();
     assert_eq!(r.best.as_deref(), Some("q"));

@@ -42,7 +42,7 @@ fn no_device() -> Vec<Candidate> {
 
 #[test]
 fn baseline_order_follows_bundled_rank() {
-    let fk = core();
+    let mut fk = core();
     let out = fk.rank_suggestions("", "te", no_device());
     assert_eq!(
         words(&out),

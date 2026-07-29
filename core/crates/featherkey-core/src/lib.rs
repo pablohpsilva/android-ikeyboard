@@ -31,6 +31,7 @@ mod error;
 mod learn;
 mod packs;
 mod rank;
+mod spatial;
 
 #[cfg(feature = "uniffi")]
 mod ffi;
@@ -62,6 +63,7 @@ use featherkey_personalization::Personalization;
 use crate::packs::{build_packs, primary_tag, Pack};
 use featherkey_prediction::StatisticalPredictor;
 use featherkey_sensitive_context::SensitivityPolicy;
+use featherkey_tap_sequence::{TapDistribution, TapSequence};
 use featherkey_touch_model::TouchModel;
 
 /// Weight of the correction "sticky-fix" bonus in the strip ranking. A candidate
@@ -137,6 +139,10 @@ pub struct FeatherKeyCore {
     /// user is currently writing in; seeded on construction and re-seeded on
     /// every language switch.
     momentum: Momentum,
+    /// The taps of the word in progress, as distributions rather than committed
+    /// characters, so an early slip can still be reconsidered (BR-5/BR-6).
+    /// Transient in-memory state: never persisted, no `Namespace` (BR-26).
+    taps: TapSequence,
 }
 
 impl FeatherKeyCore {
@@ -167,6 +173,7 @@ impl FeatherKeyCore {
             packs,
             sensitivity: SensitivityPolicy::new(),
             momentum: Momentum::new(&primary, &tags),
+            taps: TapSequence::new(),
         })
     }
 
@@ -259,10 +266,20 @@ impl FeatherKeyCore {
     ///
     /// # Errors
     /// [`FeatherKeyError::EmptyLayout`] if the active layout has no keys.
-    pub fn decode(&self, x: f32, y: f32) -> Result<DecodeResult, FeatherKeyError> {
+    pub fn decode(&mut self, x: f32, y: f32) -> Result<DecodeResult, FeatherKeyError> {
         let candidates =
             self.decoder
                 .decode(TouchPoint::new(x, y), &self.layout, &self.touch_model)?;
+        // Keep the tap as a distribution, not just its winner: that is what lets
+        // a slip on this key be reconsidered once the rest of the word arrives
+        // (BR-5/BR-6). Bounded and preallocated, so the hot path never grows the
+        // buffer (BR-46).
+        self.taps.push(TapDistribution::from_ranked(
+            candidates
+                .ranked()
+                .iter()
+                .map(|(id, conf)| (id.ch(), conf.value())),
+        ));
         let ranked = candidates
             .ranked()
             .iter()
