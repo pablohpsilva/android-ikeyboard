@@ -1054,7 +1054,7 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_choose_correction() != 52718.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_correct() != 22143.toShort()) {
+    if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_correct() != 24881.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_decode() != 22687.toShort()) {
@@ -1497,7 +1497,9 @@ public interface KeyboardCoreInterface {
     fun `chooseCorrection`(`text`: kotlin.String, `deviceKnown`: List<kotlin.String>, `deviceCands`: List<FfiRankCandidate>): FfiCorrection
     
     /**
-     * Correct `text` in its context (never clobbers an intended word).
+     * Uncalled alias of [`choose_correction`](Self::choose_correction), kept
+     * only because the committed UniFFI bindings cannot be regenerated offline
+     * (ADR-21). Signature frozen — argument names included.
      */
     fun `correct`(`text`: kotlin.String, `preceding`: kotlin.String, `prefix`: kotlin.String): FfiCorrection
     
@@ -1742,7 +1744,9 @@ open class KeyboardCore: Disposable, AutoCloseable, KeyboardCoreInterface {
 
     
     /**
-     * Correct `text` in its context (never clobbers an intended word).
+     * Uncalled alias of [`choose_correction`](Self::choose_correction), kept
+     * only because the committed UniFFI bindings cannot be regenerated offline
+     * (ADR-21). Signature frozen — argument names included.
      */
     @Throws(FfiException::class)override fun `correct`(`text`: kotlin.String, `preceding`: kotlin.String, `prefix`: kotlin.String): FfiCorrection {
             return FfiConverterTypeFfiCorrection.lift(
