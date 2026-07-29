@@ -565,8 +565,11 @@ class KeyboardView @JvmOverloads constructor(
             is Cell.Letter -> drawTextKey(canvas, cell.rect, c, cell === pressed,
                 if (cell.label.length == 1) cell.label.uppercase() else cell.label, rowHeight * 0.44f)
             is Cell.Char ->
-                if (cell.sub.isEmpty()) drawTextKey(canvas, cell.rect, c, cell === pressed, cell.label, cell.rect.height() * 0.5f)
-                else drawDialKey(canvas, cell.rect, c, cell === pressed, cell.label, cell.sub)
+                // On the dialpad every digit renders through drawDialKey so 1/0/./,
+                // (no letters) match the size and baseline of 2-9 (an empty sub draws
+                // nothing beneath). Other pages keep the standard centered char key.
+                if (page == Page.PHONE) drawDialKey(canvas, cell.rect, c, cell === pressed, cell.label, cell.sub)
+                else drawTextKey(canvas, cell.rect, c, cell === pressed, cell.label, cell.rect.height() * 0.5f)
             is Cell.Special -> drawSpecial(canvas, cell, c)
             is Cell.Suggest -> Unit
         }
