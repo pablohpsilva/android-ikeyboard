@@ -343,3 +343,48 @@ Evidence (design-level facts verified, not adjectives):
 Note: no code was written in this phase; verification is of design correctness
 (existence of named symbols, API validity, precedent), not of a running build —
 that is the build phase's gate. Design phase is clean; advancing to the plan gate.
+
+### Pass 2 — ✅ Complete and verified (BUILD phase, audited against the plan's Definition of Done)
+
+**1. What was required (plan DoD):** TDD-first for the unit-testable seams; `:ime-service`
+and `:keyboard-view` unit suites green; `:app:installDebug` builds; on-device smoke
+(numeric→123 page, email→`@|space|.`, url→`.|space|/`, ordinary text unchanged);
+CODEMAP fresh + bindings unaffected; no core/coverage/fitness impact.
+
+**2. What I did — mapped:**
+- FieldLayout classifier (`opensNumeric`+`affixKeys`) — DONE, `b13b7a6`, 4 TDD tests (red→green).
+- Numeric-family → 123 page — DONE, `4cdcfce`.
+- Email/URL affix keys + `CellLayoutKey.affixKeys` cache seam — DONE, `dd00a74`, TDD cache-key test (red→green).
+- First-field lifecycle fix (`applyFieldLayout()` in both onStartInput + onStartInputView) — DONE, `fc16b0c`.
+- CODEMAP sync for new symbols — DONE, `e7f9b9e`.
+
+**3. Verified — with evidence:**
+- Unit tests RUN: `:ime-service` + `:keyboard-view` = **112 passed / 0 failed / 0 errors**.
+- `:app:installDebug` RUN: **BUILD SUCCESSFUL**, installed on SM-A166B (Android 15).
+- On-device behavior EXERCISED (screenshots, not code-reading): phone field opens on the
+  **123 page**; email field renders `[123][emoji][@][space][.][return]`; URL omnibox renders
+  `[123][emoji][.][space][/][return]`; plain-text (Name) field renders the **unchanged**
+  `[123][emoji][space][return]` with a full-width space bar (regression guard). Post-fix
+  re-render of the email field confirmed the fix did not break the working paths.
+- CI-relevant gates RUN: `codemap.py --check` PASS (fresh), `bindings_check.py --check`
+  PASS (committed bindings match the core — confirms no accidental core/FFI drift). Git tree clean.
+- Independent review: opus whole-branch review found **1 Important** defect (first-field
+  lifecycle gap — layout applied only in onStartInput, which runs before the view exists on
+  the first field); fixed in `fc16b0c`; scoped re-review verdict **ADDRESSED**, no new breakage.
+
+**4. Extra mile / honestly-remaining:**
+- **Not directly reproduced on-device:** the true cold-start "first focused field is numeric"
+  case. Force-stopping the IME to force a fresh view puts the app in Android's *stopped state*,
+  which blocks the framework from auto-binding it (falls back to the system keyboard; logcat
+  shows **no crash**). Mitigation: the fix mirrors the already-shipping `applyAutoCaps()`
+  first-field pattern exactly (same two call sites), and the post-fix regression smoke passed.
+  Residual risk: low.
+- **DATETIME field** not exercised on-device (no convenient date field); covered by the
+  `opensNumeric` unit test.
+- **Pre-existing god-files** (`KeyboardView.kt` 1188 lines, `FeatherKeyImeService.kt` 937)
+  exceed the §4 ≤500-line guidance but predate this branch, grew only ~30/~4 lines, and the
+  fitness gate is core-scoped. Out of scope; noted for a future split.
+- Deferred minor: Task-1 implementer report paraphrased gradle output rather than pasting it.
+
+Evidence is real and passing. **Build phase clean.** Branch `context-aware-layout` (`fc16b0c`)
+is unmerged — holding the merge to `master` for an explicit request per CLAUDE.md §8.
