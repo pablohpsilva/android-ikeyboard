@@ -89,6 +89,19 @@ jobs:
         # This is that check. Same path-resolution note as CODEMAP above.
         run: python3 tools/order_lexicons.py --check
 
+      - name: UniFFI bindings freshness
+        # The committed Kotlin bindings (ffi-bridge/.../generated/featherkey_core.kt)
+        # encode a per-method API checksum that must match the core's. If the core's
+        # FFI surface changes without a bindings regen, a freshly built .so fails
+        # KeyboardCore.open() with a checksum mismatch; the IME's degrade-don't-crash
+        # guard swallows it and the native bridge silently stays null — letters stop
+        # committing on device while function keys still work (they need no bridge).
+        # That shipped on master once (the `correct` checksum drifted across an
+        # autocorrect refactor). This gate rebuilds the bindings from a HOST cdylib
+        # (no NDK — UniFFI's Kotlin, checksums included, is ABI-independent) and fails
+        # on any drift. Regenerate with `python3 tools/bindings_check.py`.
+        run: python3 tools/bindings_check.py --check
+
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 

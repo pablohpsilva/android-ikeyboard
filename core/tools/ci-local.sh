@@ -38,6 +38,9 @@ run python3 tools/codemap.py --check
 step "lexicon frequency order (bundled assets carry rank in their line order)"
 run python3 tools/order_lexicons.py --check
 
+step "UniFFI bindings freshness (committed Kotlin bindings vs. the core's FFI surface)"
+run python3 tools/bindings_check.py --check
+
 step "coverage gate (line >= 98%)"
 if cargo llvm-cov --version >/dev/null 2>&1; then
     run cargo llvm-cov --workspace --fail-under-lines 98 --summary-only
