@@ -61,6 +61,37 @@ object AutoCaps {
     }
 }
 
+/** Which initial layout a field should present, from its inputType. Pure so it
+ *  unit-tests off-device like its siblings above. */
+object FieldLayout {
+    /** True when a field is numeric in nature and should open on the 123 page:
+     *  the number, phone, and date/time classes. Covers numeric-PIN password
+     *  fields, which are TYPE_CLASS_NUMBER. */
+    fun opensNumeric(inputType: Int): Boolean =
+        when (inputType and InputType.TYPE_MASK_CLASS) {
+            InputType.TYPE_CLASS_NUMBER,
+            InputType.TYPE_CLASS_PHONE,
+            InputType.TYPE_CLASS_DATETIME -> true
+            else -> false
+        }
+
+    /** Punctuation keys to flank the space bar on the letter page for this field:
+     *  [leftOfSpace, rightOfSpace], or empty for fields that need none. Email
+     *  addresses always carry "@" and "."; URLs carry "." and "/". Only text-class
+     *  fields qualify (number/symbol pages already carry these characters). */
+    fun affixKeys(inputType: Int): List<String> {
+        if (inputType and InputType.TYPE_MASK_CLASS != InputType.TYPE_CLASS_TEXT) {
+            return emptyList()
+        }
+        return when (inputType and InputType.TYPE_MASK_VARIATION) {
+            InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+            InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS -> listOf("@", ".")
+            InputType.TYPE_TEXT_VARIATION_URI -> listOf(".", "/")
+            else -> emptyList()
+        }
+    }
+}
+
 /** What the Enter key should do in the active field. */
 object EnterKey {
     /** True when Enter should insert a literal newline — a multi-line field, or one

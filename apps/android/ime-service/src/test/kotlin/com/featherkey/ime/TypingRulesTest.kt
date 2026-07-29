@@ -206,4 +206,40 @@ class TypingRulesTest {
         assertEquals(0, GraphemeDeletion.lastClusterLength(""))
         assertEquals(0, GraphemeDeletion.lastClusterLength(null))
     }
+
+    // --- Context-aware initial layout (FieldLayout) ---------------------------
+
+    private val phone = InputType.TYPE_CLASS_PHONE
+    private val datetime = InputType.TYPE_CLASS_DATETIME
+    private val number = InputType.TYPE_CLASS_NUMBER
+    private val numberPin = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+    private val uri = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+    private val webEmail = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS
+
+    @Test fun numeric_family_fields_open_on_the_numbers_page() {
+        assertTrue(FieldLayout.opensNumeric(number))
+        assertTrue(FieldLayout.opensNumeric(phone))
+        assertTrue(FieldLayout.opensNumeric(datetime))
+        assertTrue(FieldLayout.opensNumeric(numberPin)) // numeric PIN is still numeric
+    }
+
+    @Test fun text_family_fields_do_not_open_on_the_numbers_page() {
+        assertFalse(FieldLayout.opensNumeric(text))
+        assertFalse(FieldLayout.opensNumeric(email))
+        assertFalse(FieldLayout.opensNumeric(uri))
+        assertFalse(FieldLayout.opensNumeric(0)) // unknown/unspecified field
+    }
+
+    @Test fun email_and_url_fields_get_affix_keys() {
+        assertEquals(listOf("@", "."), FieldLayout.affixKeys(email))
+        assertEquals(listOf("@", "."), FieldLayout.affixKeys(webEmail))
+        assertEquals(listOf(".", "/"), FieldLayout.affixKeys(uri))
+    }
+
+    @Test fun ordinary_and_non_text_fields_get_no_affix_keys() {
+        assertTrue(FieldLayout.affixKeys(text).isEmpty())
+        assertTrue(FieldLayout.affixKeys(password).isEmpty())
+        assertTrue(FieldLayout.affixKeys(number).isEmpty()) // numeric class, not text
+        assertTrue(FieldLayout.affixKeys(0).isEmpty())
+    }
 }
