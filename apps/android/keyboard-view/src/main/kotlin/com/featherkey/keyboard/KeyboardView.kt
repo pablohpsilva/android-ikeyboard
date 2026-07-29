@@ -197,9 +197,11 @@ class KeyboardView @JvmOverloads constructor(
         ViewCompat.requestApplyInsets(this)
     }
 
-    /** Return to the letter page (called by the IME when a new field starts). */
-    fun resetPage() {
-        page = Page.ALPHA
+    /** Return to the field-appropriate page (called by the IME when a new field
+     *  starts). Numeric fields open on the numbers page; everything else on the
+     *  letter page. A new field always starts unshifted and unlocked. */
+    fun resetPage(startNumeric: Boolean = false) {
+        page = if (startNumeric) Page.NUMBERS else Page.ALPHA
         shiftMode = ShiftMode.OFF // a new field starts unshifted and unlocked
         lastShiftTapAt = 0L
         requestLayout(); invalidate()
