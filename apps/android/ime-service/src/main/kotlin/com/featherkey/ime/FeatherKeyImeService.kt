@@ -232,8 +232,7 @@ class FeatherKeyImeService : InputMethodService() {
         editorImeOptions = info?.imeOptions ?: 0
         editorAction = editorImeOptions and EditorInfo.IME_MASK_ACTION
         keyboard?.suggestions = emptyList()
-        keyboard?.resetPage(FieldLayout.opensNumeric(editorInputType))
-        keyboard?.affixKeys = FieldLayout.affixKeys(editorInputType)
+        applyFieldLayout()
         // Pick up any language or appearance changes made in settings since the
         // last field (both are read synchronously and take effect from here on).
         applyLanguages(langPrefs.activeTags())
@@ -246,7 +245,17 @@ class FeatherKeyImeService : InputMethodService() {
      *  capitalization must be set here or it is lost. */
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        applyFieldLayout()
         applyAutoCaps()
+    }
+
+    /** Apply the field-appropriate initial page + affix keys. Called from both
+     *  onStartInput and onStartInputView because onStartInput can run before the
+     *  view exists (keyboard == null there), so the first field's layout would
+     *  otherwise be lost — the same reason applyAutoCaps is re-applied there. */
+    private fun applyFieldLayout() {
+        keyboard?.resetPage(FieldLayout.opensNumeric(editorInputType))
+        keyboard?.affixKeys = FieldLayout.affixKeys(editorInputType)
     }
 
     /**
