@@ -81,7 +81,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 | `:app` | `com.featherkey.app` | 1 | 0 |
 | `:ffi-bridge` | `com.featherkey.ffi` | 1 | 0 |
 | `:ime-service` | `com.featherkey.ime` | 8 | 7 |
-| `:keyboard-view` | `com.featherkey.keyboard` | 7 | 5 |
+| `:keyboard-view` | `com.featherkey.keyboard` | 8 | 6 |
 | `:onboarding` | `com.featherkey.onboarding` | 2 | 0 |
 | `:platform-services` | `com.featherkey.platform` | 10 | 4 |
 | `:settings-ui` | `com.featherkey.settings` | 2 | 0 |
@@ -356,12 +356,13 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Path:** `apps/android/keyboard-view`
 - `AccentSession.kt` — `class AccentSession` — fun `AccentSession.moveTo`, `AccentSession.open`, `AccentSession.release`, `AccentSession.reset` — val/var `AccentSession.active`, `AccentSession.base`, `AccentSession.index`, `AccentSession.variants`
 - `Accents.kt` — `object Accents` — fun `Accents.hasVariants`, `Accents.variantIndexAt`, `Accents.variantsFor`
+- `Dialpad.kt` — `class DialKey`; `object Dialpad` — val/var `Dialpad.ROWS`
 - `EmojiData.kt` — `class EmojiCategory`; `object EmojiData` — val/var `EmojiData.categories`
 - `KeyRepeat.kt` — `object KeyRepeat` — fun `KeyRepeat.next` — val/var `KeyRepeat.INITIAL_MS`, `KeyRepeat.MIN_MS`, `KeyRepeat.START_MS`, `KeyRepeat.STEP_MS`
 - `KeyboardGeometry.kt` — `object KeyboardGeometry`; `class CellLayoutKey` — fun `KeyboardGeometry.contentTopPx`, `KeyboardGeometry.totalHeightPx` — val/var `CellLayoutKey.affixKeys`, `CellLayoutKey.height`, `CellLayoutKey.keysVersion`, `CellLayoutKey.pageOrdinal`, `CellLayoutKey.width`
-- `KeyboardView.kt` — `class RenderKey`; `enum class FunctionKey`; `class KeyboardView` — fun `KeyboardView.applyAppearance`, `KeyboardView.armShift`, `KeyboardView.consumeShift`, `KeyboardView.onAttachedToWindow`, `KeyboardView.onDetachedFromWindow`, `KeyboardView.onDraw`, `KeyboardView.onMeasure`, `KeyboardView.onTouchEvent`, `KeyboardView.resetPage` — val/var `KeyboardView.accentLangs`, `KeyboardView.affixKeys`, `KeyboardView.capsLocked`, `KeyboardView.hapticsEnabled`, `KeyboardView.heightScale`, `KeyboardView.keyOutlines`, `KeyboardView.keys`, `KeyboardView.onAccentKey`, `KeyboardView.onCharKey`, `KeyboardView.onEmoji`, `KeyboardView.onFunctionKey`, `KeyboardView.onGesture`, `KeyboardView.onKeyTouch`, `KeyboardView.onSuggestion`, `KeyboardView.recents`, `KeyboardView.shiftMode`, `KeyboardView.shifted`, `KeyboardView.spaceHint`, `KeyboardView.suggestions`
+- `KeyboardView.kt` — `class RenderKey`; `enum class FunctionKey`; `enum class InitialPage`; `class KeyboardView` — fun `KeyboardView.applyAppearance`, `KeyboardView.armShift`, `KeyboardView.consumeShift`, `KeyboardView.onAttachedToWindow`, `KeyboardView.onDetachedFromWindow`, `KeyboardView.onDraw`, `KeyboardView.onMeasure`, `KeyboardView.onTouchEvent`, `KeyboardView.resetPage` — val/var `KeyboardView.accentLangs`, `KeyboardView.affixKeys`, `KeyboardView.capsLocked`, `KeyboardView.hapticsEnabled`, `KeyboardView.heightScale`, `KeyboardView.keyOutlines`, `KeyboardView.keys`, `KeyboardView.onAccentKey`, `KeyboardView.onCharKey`, `KeyboardView.onEmoji`, `KeyboardView.onFunctionKey`, `KeyboardView.onGesture`, `KeyboardView.onKeyTouch`, `KeyboardView.onSuggestion`, `KeyboardView.recents`, `KeyboardView.shiftMode`, `KeyboardView.shifted`, `KeyboardView.spaceHint`, `KeyboardView.suggestions`
 - `ShiftKey.kt` — `enum class ShiftMode`; `object ShiftKey` — fun `ShiftKey.afterAutoCaps`, `ShiftKey.afterLetter`, `ShiftKey.onTap` — val/var `ShiftKey.DOUBLE_TAP_MS`
-- **Tests:** 5 file(s) — `AccentSessionTest.kt`, `AccentsTest.kt`, `KeyRepeatTest.kt`, `KeyboardGeometryTest.kt`, `ShiftKeyTest.kt`
+- **Tests:** 6 file(s) — `AccentSessionTest.kt`, `AccentsTest.kt`, `DialpadTest.kt`, `KeyRepeatTest.kt`, `KeyboardGeometryTest.kt`, `ShiftKeyTest.kt`
 
 ### :onboarding
 
@@ -522,6 +523,9 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `DiagnosticEvent::code` | method — `featherkey-diagnostics` |
 | `Diagnostics` | struct — `featherkey-diagnostics` |
 | `DiagnosticsError` | enum — `featherkey-diagnostics` |
+| `DialKey` | kotlin class — `:keyboard-view` |
+| `Dialpad` | kotlin object — `:keyboard-view` |
+| `Dialpad.ROWS` | kotlin val/var — `:keyboard-view` |
 | `Dictionary` | struct — `featherkey-dictionary` |
 | `Dictionary::contains` | method — `featherkey-dictionary` |
 | `Dictionary::fold_prefix` | method — `featherkey-dictionary` |
@@ -643,6 +647,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `HEAD_START` | const — `featherkey-language-momentum` |
 | `hypotheses` | fn — `featherkey-tap-sequence::beam` |
 | `Hypothesis` | struct — `featherkey-tap-sequence::beam` |
+| `InitialPage` | kotlin enum class — `:keyboard-view` |
 | `InputDecoder` | trait — `featherkey-input-decoder` |
 | `InputDecoder::decode` | method — `featherkey-input-decoder` |
 | `Key` | struct — `featherkey-layout-engine` |

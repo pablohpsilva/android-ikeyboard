@@ -26,6 +26,17 @@ class KeyboardGeometryTest {
     }
     // Note: neither function takes `suggestions` — height cannot depend on strip contents by construction.
 
+    @Test fun dialpad_reserves_a_fourth_content_row() {
+        val three = KeyboardGeometry.totalHeightPx(
+            stripReserved = true, rowPx = 52f, funcPx = 54f, barPx = 46f, insetPx = 10f, stripPx = 42f,
+        )
+        val four = KeyboardGeometry.totalHeightPx(
+            stripReserved = true, rowPx = 52f, funcPx = 54f, barPx = 46f, insetPx = 10f, stripPx = 42f,
+            contentRows = 4,
+        )
+        assertEquals(three + 52f, four, 0.001f) // exactly one extra row
+    }
+
     @Test fun memo_key_is_equal_for_identical_inputs_and_differs_per_field() {
         val base = CellLayoutKey(width = 1080, height = 900, pageOrdinal = 0, keysVersion = 3)
         assertEquals(base, CellLayoutKey(1080, 900, 0, 3))

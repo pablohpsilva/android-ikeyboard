@@ -40,6 +40,9 @@ data class RenderKey(val label: String, val x: Float, val y: Float, val width: F
 /** A non-character key the IME handles directly. */
 enum class FunctionKey { SPACE, BACKSPACE, ENTER, GLOBE, MIC }
 
+/** Which page a field opens on. The view maps these to its private Page. */
+enum class InitialPage { LETTERS, NUMBERS, DIALPAD }
+
 class KeyboardView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
