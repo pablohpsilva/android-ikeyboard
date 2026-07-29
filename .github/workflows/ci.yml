@@ -80,6 +80,15 @@ jobs:
         # both core/ and apps/android/ regardless of the working directory.
         run: python3 tools/codemap.py --check
 
+      - name: Lexicon frequency order
+        # The bundled lexicons carry each word's frequency in their LINE ORDER:
+        # build_packs records the input position as the word's bundled rank, which
+        # then drives correction ranking, the strip's dict_rank, and accent-variant
+        # order. Those files were alphabetical for several waves — every consumer
+        # was reading alphabet as if it were commonness — because nothing checked.
+        # This is that check. Same path-resolution note as CODEMAP above.
+        run: python3 tools/order_lexicons.py --check
+
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 

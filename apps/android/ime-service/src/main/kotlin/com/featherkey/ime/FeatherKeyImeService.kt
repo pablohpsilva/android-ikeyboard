@@ -912,10 +912,16 @@ class FeatherKeyImeService : InputMethodService() {
 /**
  * Loads the active languages' lexicons from `assets/lexicons/<tag>.txt` (one word
  * per line) for the core's correction/autocorrect. The words are passed in asset
- * (frequency) order and NOT re-sorted here: the core records that input position as
- * each word's bundled rank (frequency-carry, option A) before it byte-sorts them
- * internally, so a commoner word outranks a rarer one across languages. Suggestion
- * and swipe ranking also use the frequency-ordered lists via [Vocabulary].
+ * order and NOT re-sorted here: the core records that input position as each word's
+ * bundled rank (frequency-carry, option A) before it byte-sorts them internally, so
+ * a commoner word outranks a rarer one across languages. Suggestion and swipe
+ * ranking also use the frequency-ordered lists via [Vocabulary].
+ *
+ * That makes the assets' LINE ORDER a load-bearing signal, so it is generated and
+ * gated rather than trusted: `core/tools/order_lexicons.py` orders each lexicon by
+ * its word's position in `assets/freq/<tag>.txt`, and `--check` fails CI if one
+ * drifts. It had drifted — the files shipped alphabetically for several waves, so
+ * every consumer read alphabetical position as if it were commonness.
  */
 object Lexicons {
     fun load(context: Context, tags: List<String>): List<Language> =
