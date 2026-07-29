@@ -81,7 +81,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 | `:app` | `com.featherkey.app` | 1 | 0 |
 | `:ffi-bridge` | `com.featherkey.ffi` | 1 | 0 |
 | `:ime-service` | `com.featherkey.ime` | 8 | 7 |
-| `:keyboard-view` | `com.featherkey.keyboard` | 7 | 5 |
+| `:keyboard-view` | `com.featherkey.keyboard` | 8 | 6 |
 | `:onboarding` | `com.featherkey.onboarding` | 2 | 0 |
 | `:platform-services` | `com.featherkey.platform` | 10 | 4 |
 | `:settings-ui` | `com.featherkey.settings` | 2 | 0 |
@@ -347,7 +347,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - `GestureDecoder.kt` — `object GestureDecoder` — fun `GestureDecoder.decode`, `GestureDecoder.keyPath`
 - `GestureGeometry.kt` — `object GestureGeometry` — fun `GestureGeometry.shiftCenters`
 - `LegacyMigration.kt` — `object LegacyMigration` — fun `LegacyMigration.isPending`, `LegacyMigration.migrate`, `LegacyMigration.parseContext`, `LegacyMigration.parseUsage`
-- `TypingRules.kt` — `object PunctuationRules`; `object AutoCaps`; `object EnterKey`; `object TapDisambiguator`; `object SuggestionStrip`; `object GraphemeDeletion`; `object CaseMatch` — fun `AutoCaps.isCapitalizableTextField`, `AutoCaps.shouldCapitalize`, `CaseMatch.matchCase`, `CaseMatch.matchLeading`, `EnterKey.insertsNewline`, `GraphemeDeletion.lastClusterLength`, `PunctuationRules.doubleSpaceMakesPeriod`, `SuggestionStrip.withGuaranteedVariant`, `TapDisambiguator.choose`
+- `TypingRules.kt` — `object PunctuationRules`; `object AutoCaps`; `object FieldLayout`; `object EnterKey`; `object TapDisambiguator`; `object SuggestionStrip`; `object GraphemeDeletion`; `object CaseMatch` — fun `AutoCaps.isCapitalizableTextField`, `AutoCaps.shouldCapitalize`, `CaseMatch.matchCase`, `CaseMatch.matchLeading`, `EnterKey.insertsNewline`, `FieldLayout.affixKeys`, `FieldLayout.initialPage`, `GraphemeDeletion.lastClusterLength`, `PunctuationRules.doubleSpaceMakesPeriod`, `SuggestionStrip.withGuaranteedVariant`, `TapDisambiguator.choose`
 - `Vocabulary.kt` — `class Vocabulary` — fun `Vocabulary.accentVariantsOf`, `Vocabulary.accentedCanonical`, `Vocabulary.empty`, `Vocabulary.forTest`, `Vocabulary.hasWordPrefix`, `Vocabulary.languagesOf`, `Vocabulary.load`, `Vocabulary.rankOf` — val/var `Vocabulary.words`
 - **Tests:** 7 file(s) — `CorrectionDetectorTest.kt`, `DiacriticsTest.kt`, `GestureDecoderTest.kt`, `GestureGeometryTest.kt`, `LegacyMigrationTest.kt`, `TypingRulesTest.kt`, `VocabularyAccentTest.kt`
 
@@ -356,12 +356,13 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Path:** `apps/android/keyboard-view`
 - `AccentSession.kt` — `class AccentSession` — fun `AccentSession.moveTo`, `AccentSession.open`, `AccentSession.release`, `AccentSession.reset` — val/var `AccentSession.active`, `AccentSession.base`, `AccentSession.index`, `AccentSession.variants`
 - `Accents.kt` — `object Accents` — fun `Accents.hasVariants`, `Accents.variantIndexAt`, `Accents.variantsFor`
+- `Dialpad.kt` — `class DialKey`; `object Dialpad` — val/var `Dialpad.ROWS`
 - `EmojiData.kt` — `class EmojiCategory`; `object EmojiData` — val/var `EmojiData.categories`
 - `KeyRepeat.kt` — `object KeyRepeat` — fun `KeyRepeat.next` — val/var `KeyRepeat.INITIAL_MS`, `KeyRepeat.MIN_MS`, `KeyRepeat.START_MS`, `KeyRepeat.STEP_MS`
-- `KeyboardGeometry.kt` — `object KeyboardGeometry`; `class CellLayoutKey` — fun `KeyboardGeometry.contentTopPx`, `KeyboardGeometry.totalHeightPx` — val/var `CellLayoutKey.height`, `CellLayoutKey.keysVersion`, `CellLayoutKey.pageOrdinal`, `CellLayoutKey.width`
-- `KeyboardView.kt` — `class RenderKey`; `enum class FunctionKey`; `class KeyboardView` — fun `KeyboardView.applyAppearance`, `KeyboardView.armShift`, `KeyboardView.consumeShift`, `KeyboardView.onAttachedToWindow`, `KeyboardView.onDetachedFromWindow`, `KeyboardView.onDraw`, `KeyboardView.onMeasure`, `KeyboardView.onTouchEvent`, `KeyboardView.resetPage` — val/var `KeyboardView.accentLangs`, `KeyboardView.capsLocked`, `KeyboardView.hapticsEnabled`, `KeyboardView.heightScale`, `KeyboardView.keyOutlines`, `KeyboardView.keys`, `KeyboardView.onAccentKey`, `KeyboardView.onCharKey`, `KeyboardView.onEmoji`, `KeyboardView.onFunctionKey`, `KeyboardView.onGesture`, `KeyboardView.onKeyTouch`, `KeyboardView.onSuggestion`, `KeyboardView.recents`, `KeyboardView.shiftMode`, `KeyboardView.shifted`, `KeyboardView.spaceHint`, `KeyboardView.suggestions`
+- `KeyboardGeometry.kt` — `object KeyboardGeometry`; `class CellLayoutKey` — fun `KeyboardGeometry.contentTopPx`, `KeyboardGeometry.totalHeightPx` — val/var `CellLayoutKey.affixKeys`, `CellLayoutKey.height`, `CellLayoutKey.keysVersion`, `CellLayoutKey.pageOrdinal`, `CellLayoutKey.width`
+- `KeyboardView.kt` — `class RenderKey`; `enum class FunctionKey`; `enum class InitialPage`; `class KeyboardView` — fun `KeyboardView.applyAppearance`, `KeyboardView.armShift`, `KeyboardView.consumeShift`, `KeyboardView.onAttachedToWindow`, `KeyboardView.onDetachedFromWindow`, `KeyboardView.onDraw`, `KeyboardView.onMeasure`, `KeyboardView.onTouchEvent`, `KeyboardView.resetPage` — val/var `KeyboardView.accentLangs`, `KeyboardView.affixKeys`, `KeyboardView.capsLocked`, `KeyboardView.hapticsEnabled`, `KeyboardView.heightScale`, `KeyboardView.keyOutlines`, `KeyboardView.keys`, `KeyboardView.onAccentKey`, `KeyboardView.onCharKey`, `KeyboardView.onEmoji`, `KeyboardView.onFunctionKey`, `KeyboardView.onGesture`, `KeyboardView.onKeyTouch`, `KeyboardView.onSuggestion`, `KeyboardView.recents`, `KeyboardView.shiftMode`, `KeyboardView.shifted`, `KeyboardView.spaceHint`, `KeyboardView.suggestions`
 - `ShiftKey.kt` — `enum class ShiftMode`; `object ShiftKey` — fun `ShiftKey.afterAutoCaps`, `ShiftKey.afterLetter`, `ShiftKey.onTap` — val/var `ShiftKey.DOUBLE_TAP_MS`
-- **Tests:** 5 file(s) — `AccentSessionTest.kt`, `AccentsTest.kt`, `KeyRepeatTest.kt`, `KeyboardGeometryTest.kt`, `ShiftKeyTest.kt`
+- **Tests:** 6 file(s) — `AccentSessionTest.kt`, `AccentsTest.kt`, `DialpadTest.kt`, `KeyRepeatTest.kt`, `KeyboardGeometryTest.kt`, `ShiftKeyTest.kt`
 
 ### :onboarding
 
@@ -455,6 +456,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `CaseMatch.matchCase` | kotlin fun — `:ime-service` |
 | `CaseMatch.matchLeading` | kotlin fun — `:ime-service` |
 | `CellLayoutKey` | kotlin class — `:keyboard-view` |
+| `CellLayoutKey.affixKeys` | kotlin val/var — `:keyboard-view` |
 | `CellLayoutKey.height` | kotlin val/var — `:keyboard-view` |
 | `CellLayoutKey.keysVersion` | kotlin val/var — `:keyboard-view` |
 | `CellLayoutKey.pageOrdinal` | kotlin val/var — `:keyboard-view` |
@@ -521,6 +523,9 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `DiagnosticEvent::code` | method — `featherkey-diagnostics` |
 | `Diagnostics` | struct — `featherkey-diagnostics` |
 | `DiagnosticsError` | enum — `featherkey-diagnostics` |
+| `DialKey` | kotlin class — `:keyboard-view` |
+| `Dialpad` | kotlin object — `:keyboard-view` |
+| `Dialpad.ROWS` | kotlin val/var — `:keyboard-view` |
 | `Dictionary` | struct — `featherkey-dictionary` |
 | `Dictionary::contains` | method — `featherkey-dictionary` |
 | `Dictionary::fold_prefix` | method — `featherkey-dictionary` |
@@ -620,6 +625,9 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `FfiTapOffset` | struct — `featherkey-core::ffi` *(internal)* |
 | `FfiTransition` | struct — `featherkey-core::ffi` *(internal)* |
 | `FfiWordFreq` | struct — `featherkey-core::ffi` *(internal)* |
+| `FieldLayout` | kotlin object — `:ime-service` |
+| `FieldLayout.affixKeys` | kotlin fun — `:ime-service` |
+| `FieldLayout.initialPage` | kotlin fun — `:ime-service` |
 | `FieldSensitivity` | kotlin fun interface — `:ffi-bridge` |
 | `FieldSensitivity.isSensitive` | kotlin fun — `:ffi-bridge` |
 | `FLOOR` | const — `featherkey-language-momentum`; const — `featherkey-tap-sequence` |
@@ -639,6 +647,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `HEAD_START` | const — `featherkey-language-momentum` |
 | `hypotheses` | fn — `featherkey-tap-sequence::beam` |
 | `Hypothesis` | struct — `featherkey-tap-sequence::beam` |
+| `InitialPage` | kotlin enum class — `:keyboard-view` |
 | `InputDecoder` | trait — `featherkey-input-decoder` |
 | `InputDecoder::decode` | method — `featherkey-input-decoder` |
 | `Key` | struct — `featherkey-layout-engine` |
@@ -693,6 +702,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `KeyboardLanguage` | kotlin class — `:platform-services` |
 | `KeyboardView` | kotlin class — `:keyboard-view` |
 | `KeyboardView.accentLangs` | kotlin val/var — `:keyboard-view` |
+| `KeyboardView.affixKeys` | kotlin val/var — `:keyboard-view` |
 | `KeyboardView.applyAppearance` | kotlin fun — `:keyboard-view` |
 | `KeyboardView.armShift` | kotlin fun — `:keyboard-view` |
 | `KeyboardView.capsLocked` | kotlin val/var — `:keyboard-view` |

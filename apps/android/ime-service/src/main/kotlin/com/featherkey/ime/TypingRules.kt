@@ -11,6 +11,7 @@ package com.featherkey.ime
 
 import android.text.InputType
 import android.view.inputmethod.EditorInfo
+import com.featherkey.keyboard.InitialPage
 
 /** Double-space → ". " (Gboard/iOS convention). */
 object PunctuationRules {
@@ -57,6 +58,38 @@ object AutoCaps {
             '\n' -> true
             ' ' -> before.length >= 2 && before[before.length - 2].let { it == '.' || it == '!' || it == '?' }
             else -> false
+        }
+    }
+}
+
+/** Which initial layout a field should present, from its inputType. Pure so it
+ *  unit-tests off-device like its siblings above. */
+object FieldLayout {
+    /** Which page a field should open on, from its inputType. Number and phone
+     *  fields get the telephone dialpad; date/time keeps the 123 numbers page (it
+     *  needs / : - separators the dialpad lacks); everything else opens on letters.
+     *  Covers numeric-PIN password fields (TYPE_CLASS_NUMBER → dialpad). */
+    fun initialPage(inputType: Int): InitialPage =
+        when (inputType and InputType.TYPE_MASK_CLASS) {
+            InputType.TYPE_CLASS_NUMBER,
+            InputType.TYPE_CLASS_PHONE -> InitialPage.DIALPAD
+            InputType.TYPE_CLASS_DATETIME -> InitialPage.NUMBERS
+            else -> InitialPage.LETTERS
+        }
+
+    /** Punctuation keys to flank the space bar on the letter page for this field:
+     *  [leftOfSpace, rightOfSpace], or empty for fields that need none. Email
+     *  addresses always carry "@" and "."; URLs carry "." and "/". Only text-class
+     *  fields qualify (number/symbol pages already carry these characters). */
+    fun affixKeys(inputType: Int): List<String> {
+        if (inputType and InputType.TYPE_MASK_CLASS != InputType.TYPE_CLASS_TEXT) {
+            return emptyList()
+        }
+        return when (inputType and InputType.TYPE_MASK_VARIATION) {
+            InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+            InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS -> listOf("@", ".")
+            InputType.TYPE_TEXT_VARIATION_URI -> listOf(".", "/")
+            else -> emptyList()
         }
     }
 }

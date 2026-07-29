@@ -7,7 +7,7 @@ package com.featherkey.keyboard
  * suggestion open/close (the host app stops shifting).
  */
 object KeyboardGeometry {
-    /** Total keyboard height in px: three letter rows + function row + bottom bar
+    /** Total keyboard height in px: content rows + function row + bottom bar
      *  + system inset, plus a reserved suggestion band ([stripPx]) when
      *  [stripReserved]. Deliberately has no `suggestions` parameter — the height
      *  cannot depend on strip contents. */
@@ -18,7 +18,8 @@ object KeyboardGeometry {
         barPx: Float,
         insetPx: Float,
         stripPx: Float,
-    ): Float = (if (stripReserved) stripPx else 0f) + rowPx * 3 + funcPx + barPx + insetPx
+        contentRows: Int = 3,
+    ): Float = (if (stripReserved) stripPx else 0f) + rowPx * contentRows + funcPx + barPx + insetPx
 
     /** The y-offset where the key grid starts: below a reserved strip band, else 0. */
     fun contentTopPx(stripReserved: Boolean, stripPx: Float): Float =
@@ -36,4 +37,5 @@ data class CellLayoutKey(
     val height: Int,
     val pageOrdinal: Int,
     val keysVersion: Int,
+    val affixKeys: List<String> = emptyList(),
 )

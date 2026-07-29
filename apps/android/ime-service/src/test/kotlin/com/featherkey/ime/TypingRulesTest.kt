@@ -2,6 +2,7 @@ package com.featherkey.ime
 
 import android.text.InputType
 import android.view.inputmethod.EditorInfo
+import com.featherkey.keyboard.InitialPage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -205,5 +206,44 @@ class TypingRulesTest {
     @Test fun backspace_on_empty_or_null_deletes_nothing() {
         assertEquals(0, GraphemeDeletion.lastClusterLength(""))
         assertEquals(0, GraphemeDeletion.lastClusterLength(null))
+    }
+
+    // --- Context-aware initial layout (FieldLayout) ---------------------------
+
+    private val phone = InputType.TYPE_CLASS_PHONE
+    private val datetime = InputType.TYPE_CLASS_DATETIME
+    private val number = InputType.TYPE_CLASS_NUMBER
+    private val numberPin = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+    private val uri = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+    private val webEmail = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS
+
+    @Test fun number_and_phone_fields_open_on_the_dialpad() {
+        assertEquals(InitialPage.DIALPAD, FieldLayout.initialPage(number))
+        assertEquals(InitialPage.DIALPAD, FieldLayout.initialPage(phone))
+        assertEquals(InitialPage.DIALPAD, FieldLayout.initialPage(numberPin)) // numeric PIN → dialpad
+    }
+
+    @Test fun datetime_fields_keep_the_123_numbers_page() {
+        assertEquals(InitialPage.NUMBERS, FieldLayout.initialPage(datetime))
+    }
+
+    @Test fun text_family_fields_open_on_letters() {
+        assertEquals(InitialPage.LETTERS, FieldLayout.initialPage(text))
+        assertEquals(InitialPage.LETTERS, FieldLayout.initialPage(email))
+        assertEquals(InitialPage.LETTERS, FieldLayout.initialPage(uri))
+        assertEquals(InitialPage.LETTERS, FieldLayout.initialPage(0))
+    }
+
+    @Test fun email_and_url_fields_get_affix_keys() {
+        assertEquals(listOf("@", "."), FieldLayout.affixKeys(email))
+        assertEquals(listOf("@", "."), FieldLayout.affixKeys(webEmail))
+        assertEquals(listOf(".", "/"), FieldLayout.affixKeys(uri))
+    }
+
+    @Test fun ordinary_and_non_text_fields_get_no_affix_keys() {
+        assertTrue(FieldLayout.affixKeys(text).isEmpty())
+        assertTrue(FieldLayout.affixKeys(password).isEmpty())
+        assertTrue(FieldLayout.affixKeys(number).isEmpty()) // numeric class, not text
+        assertTrue(FieldLayout.affixKeys(0).isEmpty())
     }
 }
