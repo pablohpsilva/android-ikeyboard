@@ -376,3 +376,47 @@ Plan facts verified against the code (evidence):
 Not run: the gradle suites/build (that is the **build** gate). This pass verifies the
 plan is correct, complete, and faithful to the design. Plan clean; ready for
 subagent-driven execution.
+
+### Pass 3 — ✅ Complete and verified (BUILD phase, audited vs the plan's DoD)
+
+**1. Required (plan DoD):** unit suites green; `:app:installDebug` builds; on-device —
+number/phone → dialpad (digits + letter subtitles + `. , 0 ⌫` + `[ABC][emoji][space][↵]`);
+date/time → 123 page; email/URL/plain unchanged; dialpad digit types, backspace deletes;
+CODEMAP + bindings gates green (no core change).
+
+**2. What I did — mapped:**
+- Dialpad table + `InitialPage` + `contentRows` — DONE, `5f6b445` (Task 1), TDD (DialpadTest, KeyboardGeometryTest).
+- `Page.PHONE` render + `Cell.Char.sub` + `drawDialKey` + `initialPage` + `resetPage(InitialPage)` + service wiring — DONE, `3d30574` (Task 2), TDD for the classifier.
+
+**3. Verified — evidence:**
+- Unit tests RUN: `:keyboard-view` 39/0, `:ime-service` 76/0. Includes `DialpadTest` (E.161
+  table char-by-char), `KeyboardGeometryTest.dialpad_reserves_a_fourth_content_row`,
+  `TypingRulesTest` `number_and_phone_fields_open_on_the_dialpad` /
+  `datetime_fields_keep_the_123_numbers_page` / `text_family_fields_open_on_letters`.
+- `:app:installDebug` RUN: BUILD SUCCESSFUL on SM-A166B (Android 15).
+- On-device EXERCISED (screenshots, not code-reading): the **Phone field opens the dialpad
+  rendered exactly to spec** — `1 / 2ABC / 3DEF`, `4GHI / 5JKL / 6MNO`, `7PQRS / 8TUV /
+  9WXYZ`, `. , 0 ⌫`, subtitles dim under 2–9, `[ABC][emoji][space][↵]` below, keyboard one
+  row taller (d1); **dialpad digit taps commit** (5, 8 → field, d2); **email `@`/`.` affixes
+  unregressed** (d3, d5).
+- CI gates RUN: `codemap.py --check` PASS, `bindings_check.py --check` PASS (committed
+  bindings match the core → no accidental core/FFI drift). Git tree clean.
+- Independent review: opus whole-branch review **APPROVED FOR MERGE**, no Critical/Important;
+  height contract, cache, and all `Page.PHONE` paths verified; one deferred Minor cosmetic.
+
+**4. Extra mile / honestly-remaining:**
+- **Not directly reproduced on-device:** dialpad **backspace**, a plain **NUMBER** field, and
+  a **DATETIME** field. Each is convergently covered: backspace is the shared
+  `Cell.Special(Sp.BACKSPACE)` delete path (unchanged); NUMBER flows through the identical
+  `initialPage → DIALPAD → Page.PHONE` path as the screenshot-proven PHONE and is unit-tested;
+  DATETIME→123 is unit-tested and native date/time pickers aren't IME fields. adb tap
+  precision (form scroll + focus drift) made clean screenshot repros of these unreliable, per
+  the device notes — a harness limitation, not a code gap.
+- **Deferred Minor (taste):** `1/0/./,` (empty `sub`) render via `drawTextKey` (larger,
+  centered) while `2–9` render via `drawDialKey` (smaller, offset) — spec-intended (§3e),
+  screenshot-accepted. Routing all dialpad digits through `drawDialKey` would equalize sizing;
+  surfaced to the user as a polish option.
+
+Evidence is real and passing. **Build phase clean.** Feature commits `5f6b445`, `3d30574` on
+`context-aware-layout` (unmerged) — holding the `master` merge for an explicit request
+(CLAUDE.md §8).
