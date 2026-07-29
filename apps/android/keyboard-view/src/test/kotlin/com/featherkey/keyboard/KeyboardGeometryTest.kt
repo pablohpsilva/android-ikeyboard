@@ -34,5 +34,10 @@ class KeyboardGeometryTest {
         assertNotEquals(base, CellLayoutKey(1080, 901, 0, 3)) // height
         assertNotEquals(base, CellLayoutKey(1080, 900, 1, 3)) // page
         assertNotEquals(base, CellLayoutKey(1080, 900, 0, 4)) // keys version (language switch)
+        assertNotEquals(base, CellLayoutKey(1080, 900, 0, 3, listOf("@", "."))) // affix keys
+        assertEquals(
+            CellLayoutKey(1080, 900, 0, 3, listOf("@", ".")),
+            CellLayoutKey(1080, 900, 0, 3, listOf("@", ".")),
+        ) // equal affixes still hit the cache
     }
 }

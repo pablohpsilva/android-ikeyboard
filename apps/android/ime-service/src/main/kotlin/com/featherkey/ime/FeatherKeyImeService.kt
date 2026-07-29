@@ -233,6 +233,7 @@ class FeatherKeyImeService : InputMethodService() {
         editorAction = editorImeOptions and EditorInfo.IME_MASK_ACTION
         keyboard?.suggestions = emptyList()
         keyboard?.resetPage(FieldLayout.opensNumeric(editorInputType))
+        keyboard?.affixKeys = FieldLayout.affixKeys(editorInputType)
         // Pick up any language or appearance changes made in settings since the
         // last field (both are read synchronously and take effect from here on).
         applyLanguages(langPrefs.activeTags())

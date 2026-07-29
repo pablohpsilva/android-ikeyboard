@@ -36,4 +36,5 @@ data class CellLayoutKey(
     val height: Int,
     val pageOrdinal: Int,
     val keysVersion: Int,
+    val affixKeys: List<String> = emptyList(),
 )

@@ -72,6 +72,11 @@ class KeyboardView @JvmOverloads constructor(
     var keys: List<RenderKey> = emptyList()
         set(value) { field = value; keysVersion++; requestLayout(); invalidate() }
 
+    /** Punctuation keys to flank the space bar on the letter page (email/URL
+     *  fields). Set per field by the IME; empty for ordinary fields. */
+    var affixKeys: List<String> = emptyList()
+        set(value) { if (field != value) { field = value; requestLayout(); invalidate() } }
+
     /**
      * Predictive suggestions shown in the reserved strip. The strip band is a
      * constant height while a standard page is shown (see [stripBand]): its
@@ -332,7 +337,7 @@ class KeyboardView @JvmOverloads constructor(
     private var cachedKey: CellLayoutKey? = null
 
     private fun layoutCells(): List<Cell> {
-        val key = CellLayoutKey(width, height, page.ordinal, keysVersion)
+        val key = CellLayoutKey(width, height, page.ordinal, keysVersion, affixKeys)
         val hit = cachedCells
         if (hit != null && key == cachedKey) return hit
         val built = buildCells(width, height)
@@ -451,9 +456,12 @@ class KeyboardView @JvmOverloads constructor(
             Page.EMOJI -> Unit // handled by the early return above; builds no cells
         }
 
-        // Function row: [123|ABC] [emoji] [ space ] [ return ]. The emoji key sits
-        // between the page-switch key and the space bar (iOS-style), so the emoji
-        // page is reachable from every standard page; the space bar takes the rest.
+        // Function row: [123|ABC] [emoji] [affix?] [ space ] [affix?] [ return ].
+        // The emoji key sits between the page-switch key and the space bar
+        // (iOS-style). On the letter page, email/URL fields insert one affix key on
+        // each side of the space bar (email → "@" | space | "." ; URL → "." | space
+        // | "/"); the space bar shrinks to fit. Other pages carry these characters
+        // already, so no affixes are added there.
         run {
             val kt = top + rowGap / 2f; val kb = top + funcRowHeight - rowGap / 2f
             val fSideW = baseKeyW * 2f
@@ -464,7 +472,17 @@ class KeyboardView @JvmOverloads constructor(
             val emojiLeft = sideMargin + fSideW + keyGap
             val emojiW = baseKeyW * 1.2f
             out += Cell.Special(RectF(emojiLeft, kt, emojiLeft + emojiW, kb), Sp.TO_EMOJI)
-            out += Cell.Special(RectF(emojiLeft + emojiW + keyGap, kt, retLeft - keyGap, kb), Sp.SPACE)
+
+            var spaceLeft = emojiLeft + emojiW + keyGap
+            var spaceRight = retLeft - keyGap
+            if (page == Page.ALPHA && affixKeys.size == 2) {
+                val aw = baseKeyW
+                out += Cell.Char(RectF(spaceLeft, kt, spaceLeft + aw, kb), affixKeys[0])
+                spaceLeft += aw + keyGap
+                out += Cell.Char(RectF(spaceRight - aw, kt, spaceRight, kb), affixKeys[1])
+                spaceRight -= aw + keyGap
+            }
+            out += Cell.Special(RectF(spaceLeft, kt, spaceRight, kb), Sp.SPACE)
             top += funcRowHeight
         }
 
