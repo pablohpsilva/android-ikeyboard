@@ -37,6 +37,21 @@ class KeyboardGeometryTest {
         assertEquals(three + 52f, four, 0.001f) // exactly one extra row
     }
 
+    @Test fun dialpad_has_no_function_row() {
+        // Fully-numeric dialpad: 4 content rows, NO shared function row (funcPx = 0).
+        val dialpad = KeyboardGeometry.totalHeightPx(
+            stripReserved = true, rowPx = 52f, funcPx = 0f, barPx = 46f, insetPx = 10f, stripPx = 42f,
+            contentRows = 4,
+        )
+        assertEquals(42f + 52f * 4 + 46f + 10f, dialpad, 0.001f) // strip + 4 rows + bar + inset, no func row
+        // And it is exactly one function-row shorter than a dialpad that still had one:
+        val withFuncRow = KeyboardGeometry.totalHeightPx(
+            stripReserved = true, rowPx = 52f, funcPx = 54f, barPx = 46f, insetPx = 10f, stripPx = 42f,
+            contentRows = 4,
+        )
+        assertEquals(withFuncRow - 54f, dialpad, 0.001f)
+    }
+
     @Test fun memo_key_is_equal_for_identical_inputs_and_differs_per_field() {
         val base = CellLayoutKey(width = 1080, height = 900, pageOrdinal = 0, keysVersion = 3)
         assertEquals(base, CellLayoutKey(1080, 900, 0, 3))

@@ -174,6 +174,10 @@ class KeyboardView @JvmOverloads constructor(
     private enum class Page { ALPHA, NUMBERS, SYMBOLS, EMOJI, PHONE }
     private var page = Page.ALPHA
 
+    // The dialpad (numeric-only fields) is fully numeric: no shared
+    // [ABC][emoji][space][return] row. Every other page keeps it.
+    private val showsFunctionRow: Boolean get() = page != Page.PHONE
+
     // --- Emoji-page state (own draw + scroll path, independent of the cell grid). ---
     /** Active emoji tab: 0 = recents, 1..N = [EmojiData.categories] in order. */
     private var emojiTab = 0
@@ -357,7 +361,7 @@ class KeyboardView @JvmOverloads constructor(
         val stripReserved = page != Page.EMOJI
         val h = KeyboardGeometry.totalHeightPx(
             stripReserved = stripReserved,
-            rowPx = rowHeight, funcPx = funcRowHeight, barPx = bottomBarHeight,
+            rowPx = rowHeight, funcPx = if (showsFunctionRow) funcRowHeight else 0f, barPx = bottomBarHeight,
             insetPx = bottomInset.toFloat(), stripPx = stripBand,
             contentRows = if (page == Page.PHONE) 4 else 3,
         )
@@ -486,8 +490,9 @@ class KeyboardView @JvmOverloads constructor(
         // (iOS-style). On the letter page, email/URL fields insert one affix key on
         // each side of the space bar (email → "@" | space | "." ; URL → "." | space
         // | "/"); the space bar shrinks to fit. Other pages carry these characters
-        // already, so no affixes are added there.
-        run {
+        // already, so no affixes are added there. The dialpad (numeric-only fields)
+        // is fully numeric and omits this row entirely.
+        if (showsFunctionRow) run {
             val kt = top + rowGap / 2f; val kb = top + funcRowHeight - rowGap / 2f
             val fSideW = baseKeyW * 2f
             val leftKind = if (page == Page.ALPHA) Sp.TO_NUMBERS else Sp.TO_ALPHA
