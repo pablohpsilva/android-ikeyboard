@@ -65,6 +65,21 @@ jobs:
         # requirement (SEDD BDD mandate). Specs cannot drift from the BRD.
         run: python3 tools/bdd_check.py
 
+      - name: Tooling unit tests
+        # The code index is only trustworthy if its extraction rules are. These
+        # pin the cases that silently invented or dropped public API: `const fn`
+        # vs `const`, `fun interface`, and locals inside a top-level function.
+        run: python3 -m unittest discover -s tools/tests
+
+      - name: CODEMAP freshness
+        # CODEMAP.md is the generated index that design/planning consult before
+        # writing anything, so that existing code is extended rather than
+        # duplicated (CLAUDE.md §2). An index that may be stale is worse than no
+        # index — it asserts absence that is not real. This makes staleness a red
+        # build. The script resolves the repo root from its own path, so it scans
+        # both core/ and apps/android/ regardless of the working directory.
+        run: python3 tools/codemap.py --check
+
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 

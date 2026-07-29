@@ -14,6 +14,9 @@ on top of these.
 | [`BUSINESS_REQUIREMENTS.md`](./BUSINESS_REQUIREMENTS.md) | **Source of truth.** What & why: BR-1…67, objectives, problems. |
 | [`SOFTWARE_ENGINEERING.md`](./SOFTWARE_ENGINEERING.md) | How: stack, module decomposition, ADRs, traceability. |
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | Modular/SOLID/TDD/BDD rules; Ports & Adapters; fitness functions. |
+| [`IMPLEMENTATION_PLAN.md`](./IMPLEMENTATION_PLAN.md) | Build order, the execution protocol, and the Definition of Done. |
+| [`CLAUDE.md`](./CLAUDE.md) | **How work is done here.** Design→plan→build, each gated; TDD/BDD first. |
+| [`CODEMAP.md`](./CODEMAP.md) | *Generated* index of every crate, module, and public symbol — grep it before writing anything. |
 
 ## Repository layout
 
