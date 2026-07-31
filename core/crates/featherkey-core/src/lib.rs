@@ -63,6 +63,7 @@ use featherkey_locale_manager::LangId;
 use featherkey_neural_ranker::NeuralRanker;
 use featherkey_personalization::Personalization;
 
+use crate::correct::LastCorrection;
 use crate::packs::{build_packs, primary_tag, Pack};
 use crate::rank::PRIOR_COEFFS;
 use crate::rank_features::RankSnapshot;
@@ -142,15 +143,15 @@ pub struct FeatherKeyCore {
     /// survives language switches; scores the suggestion strip in
     /// [`rank_suggestions`](Self::rank_suggestions).
     neural_ranker: NeuralRanker,
-    /// The tiny per-user autocorrect gate, initialised to its cold-start prior
-    /// and persisted under `AutocorrectGate`. Held here so it survives language
-    /// switches; `pub(crate)` so the autocorrect use-case (Task 9) and its
-    /// observe call can reach it directly, like `neural_ranker`.
+    /// The tiny per-user autocorrect gate (cold-start prior, persisted under
+    /// `AutocorrectGate`); `pub(crate)` so the correction use-case reaches it.
     pub(crate) autocorrect_gate: AutocorrectGate,
     /// The most recent ranked query's shown set (words + the features that ranked
     /// them), bounded to one snapshot. Written by every `rank_suggestions`; read
     /// by the pairwise trainer (reinforce-from-pick) in `learn.rs`.
     last_ranked: Option<RankSnapshot>,
+    /// The most recent gated correction decision, read by the gate trainer.
+    last_correction: Option<LastCorrection>,
     /// Active languages, each with its validated lexicon, in preference order.
     packs: Vec<Pack>,
     sensitivity: SensitivityPolicy,
@@ -196,6 +197,7 @@ impl FeatherKeyCore {
             neural_ranker: NeuralRanker::from_prior(&PRIOR_COEFFS),
             autocorrect_gate: AutocorrectGate::from_prior(),
             last_ranked: None,
+            last_correction: None,
             packs,
             sensitivity: SensitivityPolicy::new(),
             momentum: Momentum::new(&primary, &tags),

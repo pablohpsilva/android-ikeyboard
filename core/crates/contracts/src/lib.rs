@@ -163,6 +163,11 @@ pub struct Correction {
     pub alternatives: Vec<String>,
     /// Whether the primary differs from the typed token.
     pub applied: bool,
+    /// When a gate withheld an otherwise-available correction (`applied ==
+    /// false` but a winner existed), the winner it declined to apply — carried
+    /// to the shell for the counterfactual learning signal. `None` when nothing
+    /// was withheld (a correction applied, or there was no candidate to gate).
+    pub withheld: Option<String>,
 }
 
 /// What the **shell** knows about a token that the core cannot see: the device
@@ -344,6 +349,7 @@ mod tests {
                 primary: token.text.clone(),
                 alternatives: Vec::new(),
                 applied: false,
+                withheld: None,
             }
         }
     }
@@ -429,6 +435,7 @@ mod tests {
             primary: String::from("x"),
             alternatives: alloc::vec![String::from("y")],
             applied: true,
+            withheld: None,
         };
         assert_eq!(cor, cor.clone());
         assert_ne!(
@@ -436,7 +443,8 @@ mod tests {
             Correction {
                 primary: String::from("x"),
                 alternatives: Vec::new(),
-                applied: true
+                applied: true,
+                withheld: None
             }
         );
 

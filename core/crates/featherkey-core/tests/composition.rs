@@ -77,7 +77,7 @@ fn suggest_on_unknown_prefix_is_empty() {
 
 #[test]
 fn correct_never_clobbers_a_known_word() {
-    let fk = core();
+    let mut fk = core();
     let c = fk.choose_correction("cat", &[], vec![]).unwrap();
     assert_eq!(c.primary, "cat");
     assert!(!c.applied);
@@ -86,7 +86,7 @@ fn correct_never_clobbers_a_known_word() {
 
 #[test]
 fn correct_fixes_a_non_word() {
-    let fk = core();
+    let mut fk = core();
     // "caz" is one substitution from "cat".
     let c = fk.choose_correction("caz", &[], vec![]).unwrap();
     assert!(c.applied);

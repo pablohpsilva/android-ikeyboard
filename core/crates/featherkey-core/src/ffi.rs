@@ -103,7 +103,7 @@ impl KeyboardCore {
         prefix: String,
     ) -> Result<FfiCorrection, FfiError> {
         let _ = (&preceding, &prefix); // unused; names frozen for the bindings
-        let core = self.lock();
+        let mut core = self.lock();
         let c = core.choose_correction(&text, &[], Vec::new())?;
         Ok(FfiCorrection {
             primary: c.primary,

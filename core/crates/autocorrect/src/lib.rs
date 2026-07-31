@@ -125,6 +125,7 @@ fn unchanged(word: &str) -> Correction {
         primary: word.to_owned(),
         alternatives: Vec::new(),
         applied: false,
+        withheld: None,
     }
 }
 
@@ -173,14 +174,14 @@ impl NoClobberCorrector {
         } else {
             Vec::new()
         };
+        // `applied == (winner != word)`, so when nothing is applied `winner`
+        // already equals the typed word — one clone serves both cases. `assess`
+        // /`correct` never withhold; the composition-root gate is what does.
         let correction = Correction {
-            primary: if applied {
-                winner.clone()
-            } else {
-                word.to_owned()
-            },
+            primary: winner.clone(),
             alternatives,
             applied,
+            withheld: None,
         };
         let available = applied.then(|| {
             rank::available_correction(
