@@ -88,6 +88,9 @@ class FeatherKeyImeService : InputMethodService() {
     private var currentTags: List<String> = emptyList()
     /** Frequency-ranked vocabulary for suggestions + swipe (loaded off the input path). */
     @Volatile private var vocab: Vocabulary = Vocabulary.empty()
+    /** Swipe candidates bucketed by first key, rebuilt with [vocab]; scanned per
+     *  gesture instead of re-deriving every word's key path each swipe. */
+    @Volatile private var gestureIndex: GestureDecoder.Index = GestureDecoder.Index.EMPTY
     /** The in-flight [vocab] load, joined by [ensureVocabReady] on a cold-start gesture. */
     private var vocabJob: Job? = null
     /**
@@ -341,6 +344,7 @@ class FeatherKeyImeService : InputMethodService() {
         vocabJob?.cancel()
         vocabJob = ioScope.launch {
             val loaded = Vocabulary.load(applicationContext, tags)
+            gestureIndex = GestureDecoder.Index.build(loaded.words)
             vocab = loaded
             // On a cold start the strip may be empty for the word already being
             // typed (the load is async); refresh it now that the data is ready.
@@ -376,7 +380,7 @@ class FeatherKeyImeService : InputMethodService() {
         val shifted = shiftedCenters(centers)
         val learned = runCatching { bridge?.learnedFrequencies() }.getOrNull()
             ?.associate { it.word to it.freq.toInt() } ?: emptyMap()
-        val words = GestureDecoder.decode(pathPts, shifted, vocab.words, vocab::rankOf, learned, limit = 4)
+        val words = GestureDecoder.decode(pathPts, shifted, gestureIndex, vocab::rankOf, learned, limit = 4)
         if (words.isEmpty()) return
         // Tag each decoded word by the languages that recognise it (fallback: the
         // primary language) and let the core ranker blend in language momentum.

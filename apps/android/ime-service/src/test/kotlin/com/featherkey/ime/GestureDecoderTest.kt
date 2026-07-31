@@ -46,4 +46,36 @@ class GestureDecoderTest {
     @Test fun a_plain_word_is_unchanged() {
         assertEquals(listOf('h', 'e', 'l', 'l', 'o'), GestureDecoder.keyPath("hello", hasLetterKey))
     }
+
+    // --- Index: the precomputed, first-key-bucketed candidate set decode scans ---
+
+    @Test fun index_buckets_words_by_their_first_key() {
+        val idx = GestureDecoder.Index.build(listOf("cat", "car", "dog", "café"))
+        // "cat"/"car"/"café" all start on 'c'; "dog" on 'd'.
+        assertEquals(setOf("cat", "car", "café"), idx.wordsForFirstKey('c').toSet())
+        assertEquals(setOf("dog"), idx.wordsForFirstKey('d').toSet())
+        assertEquals(emptySet<String>(), idx.wordsForFirstKey('z').toSet())
+    }
+
+    @Test fun index_keys_by_folded_first_letter_not_the_raw_character() {
+        // "über" folds to u-b-e-r, so it lives in the 'u' bucket, not 'ü'.
+        val idx = GestureDecoder.Index.build(listOf("über"))
+        assertEquals(setOf("über"), idx.wordsForFirstKey('u').toSet())
+        assertEquals(emptySet<String>(), idx.wordsForFirstKey('ü').toSet())
+    }
+
+    @Test fun index_records_the_last_typeable_key_dropping_a_trailing_apostrophe() {
+        // "goin'" ends on 'n' (apostrophe has no key); the index's last-key prune
+        // must see 'n', not the apostrophe.
+        val idx = GestureDecoder.Index.build(listOf("goin'"))
+        assertEquals('n', idx.lastKeyOf("goin'"))
+    }
+
+    @Test fun index_skips_words_with_fewer_than_two_typeable_keys() {
+        // A single-letter word, and a word whose only key survives folding, cannot
+        // be a gesture (need at least two keys to trace a path).
+        val idx = GestureDecoder.Index.build(listOf("a", "I", "hi"))
+        assertEquals(emptySet<String>(), idx.wordsForFirstKey('a').toSet())
+        assertEquals(setOf("hi"), idx.wordsForFirstKey('h').toSet())
+    }
 }

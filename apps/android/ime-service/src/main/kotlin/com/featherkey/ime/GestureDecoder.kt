@@ -54,57 +54,144 @@ object GestureDecoder {
     private const val FREQ_MIN = 0.70f        // most-common dictionary words
     private const val FREQ_SPAN = 8000f       // rank where the frequency boost fades out
 
-    /** Best-matching words for [path], most likely first (empty if not a gesture). */
+    /**
+     * The swipe candidate set, precomputed once per vocabulary load and reused by
+     * every [decode]. Words are bucketed by their first typeable key and carry
+     * their last typeable key, so a gesture is pruned to just the words that begin
+     * near where the finger started (and end near where it lifted) *without*
+     * re-deriving every word's key path on every gesture — the per-word work that
+     * made swipe over a large multi-language vocabulary take hundreds of ms.
+     *
+     * The candidate set is identical to the old whole-vocabulary scan: a word was
+     * (and is) scored exactly when its first key is within the prune radius of the
+     * gesture start and its last key within the radius of the end. Build off the
+     * UI thread (the vocabulary already loads asynchronously).
+     */
+    class Index private constructor(
+        private val byFirstKey: Map<Char, List<Entry>>,
+    ) {
+        /** One swipeable word: its first key is the bucket it lives in; [last] is
+         *  its final typeable key (for the end-of-gesture prune). */
+        internal class Entry(val word: String, val last: Char)
+
+        internal fun bucket(firstKey: Char): List<Entry> = byFirstKey[firstKey] ?: emptyList()
+
+        /** Test seam: the words bucketed under [firstKey]. */
+        fun wordsForFirstKey(firstKey: Char): List<String> = bucket(firstKey).map { it.word }
+
+        /** Test seam: the recorded last key for [word], or null if it was skipped. */
+        fun lastKeyOf(word: String): Char? =
+            byFirstKey.values.asSequence().flatten().find { it.word == word }?.last
+
+        companion object {
+            /** An empty index, used until the real vocabulary finishes loading. */
+            val EMPTY = Index(emptyMap())
+
+            /**
+             * Bucket [words] by first typeable key. A word's keys are its letters
+             * folded to their base key ('é'→'e') with non-key characters (an
+             * apostrophe) dropped, exactly as [keyPath] derives them at decode
+             * time against a standard a–z letter layout. Words with fewer than two
+             * keys can't be a gesture and are skipped.
+             */
+            fun build(words: List<String>): Index {
+                val buckets = HashMap<Char, MutableList<Entry>>()
+                for (w in words) {
+                    if (w.length < 2) continue
+                    val keys = keyPath(w) { it in 'a'..'z' }
+                    if (keys.size < 2) continue
+                    buckets.getOrPut(keys.first()) { ArrayList() }.add(Entry(w, keys.last()))
+                }
+                return Index(buckets)
+            }
+        }
+    }
+
+    /** The longest key path scored; words with more typeable keys than this are
+     *  skipped (a swipe never traces 48 letters). Bounds the reusable buffers so
+     *  the per-word scoring below allocates nothing on the heap. */
+    private const val MAX_KEYS = 48
+
+    /** Best-matching words for [path], most likely first (empty if not a gesture).
+     *
+     * Hot path: the inner loop scores each surviving candidate into **reused**
+     * float buffers — no `PointF`/list allocation per word — because a broad
+     * gesture can leave thousands of candidates after pruning, and the old
+     * per-word `resample`/`normalize` allocations dominated the cost. The maths
+     * (arc-length resample to [SAMPLES] points, centre+scale normalise, location
+     * + shape distance, frequency/learning discount) is unchanged. */
     fun decode(
         path: List<PointF>,
         centers: Map<Char, PointF>,
-        words: List<String>,
+        index: Index,
         rankOf: (String) -> Int,
         learned: Map<String, Int>,
         limit: Int = 4,
     ): List<String> {
-        if (path.size < 3 || centers.isEmpty() || words.isEmpty()) return emptyList()
-        val pts = resample(path, SAMPLES) ?: return emptyList()
+        if (path.size < 3 || centers.isEmpty()) return emptyList()
         val step = avgKeyStep(centers)
         val pruneR = step * 1.7f
-        val start = pts.first()
-        val end = pts.last()
-        val normPts = normalize(pts)
+
+        // The gesture path, resampled once into reused arrays, then normalised.
+        val pathX = FloatArray(path.size) { path[it].x }
+        val pathY = FloatArray(path.size) { path[it].y }
+        val gx = FloatArray(SAMPLES)
+        val gy = FloatArray(SAMPLES)
+        if (!resampleInto(pathX, pathY, path.size, FloatArray(path.size), gx, gy)) return emptyList()
+        val ngx = FloatArray(SAMPLES)
+        val ngy = FloatArray(SAMPLES)
+        normalizeInto(gx, gy, SAMPLES, ngx, ngy)
+        val startX = gx[0]; val startY = gy[0]
+        val endX = gx[SAMPLES - 1]; val endY = gy[SAMPLES - 1]
+
+        // Per-candidate scratch, reused across every word.
+        val polyX = FloatArray(MAX_KEYS)
+        val polyY = FloatArray(MAX_KEYS)
+        val cum = FloatArray(MAX_KEYS)
+        val ix = FloatArray(SAMPLES); val iy = FloatArray(SAMPLES)
+        val nix = FloatArray(SAMPLES); val niy = FloatArray(SAMPLES)
 
         val scored = ArrayList<Pair<String, Float>>()
-        val poly = ArrayList<PointF>()
-        for (w in words) {
-            if (w.length < 2) continue
-            // The keys this word is glided through: accents folded to their base
-            // key ('é'→'e'), apostrophes/other non-key characters dropped. A word
-            // with fewer than two typeable letters can't be a gesture.
-            val keys = keyPath(w) { centers.containsKey(it) }
-            if (keys.size < 2) continue
-            val firstC = centers.getValue(keys.first())
-            val lastC = centers.getValue(keys.last())
-            if (dist(start, firstC) > pruneR || dist(end, lastC) > pruneR) continue
-            poly.clear()
-            for (k in keys) poly.add(centers.getValue(k))
-            val ideal = resample(poly, SAMPLES) ?: continue
-            var loc = 0f
-            var shape = 0f
-            val normIdeal = normalize(ideal)
-            for (i in 0 until SAMPLES) {
-                loc += dist(pts[i], ideal[i])
-                shape += dist(normPts[i], normIdeal[i])
-            }
-            loc /= SAMPLES
-            shape /= SAMPLES
-            var score = loc + SHAPE_WEIGHT * step * shape
-            score *= when {
-                learned.containsKey(w) -> LEARNED_BOOST
-                else -> {
-                    val r = rankOf(w)
-                    if (r >= Int.MAX_VALUE) 1f
-                    else FREQ_MIN + (1f - FREQ_MIN) * minOf(1f, r / FREQ_SPAN)
+        // Only words whose first key lies within the prune radius of the gesture
+        // start can match, so scan just those buckets rather than every word. The
+        // end-key prune and the per-key centre lookups below reproduce the old
+        // whole-vocabulary scan's accept condition exactly.
+        for ((firstKey, firstC) in centers) {
+            if (hypot(startX - firstC.x, startY - firstC.y) > pruneR) continue
+            for (e in index.bucket(firstKey)) {
+                val lastC = centers[e.last] ?: continue
+                if (hypot(endX - lastC.x, endY - lastC.y) > pruneR) continue
+                // Fold the word's characters straight into the poly buffer: accents
+                // fold to their base key ('é'→'e'), non-key characters (apostrophe)
+                // are dropped — exactly [keyPath], but without allocating a list.
+                var n = 0
+                for (ch in e.word) {
+                    val c = centers[Diacritics.foldChar(ch)] ?: continue
+                    if (n >= MAX_KEYS) { n = -1; break }
+                    polyX[n] = c.x; polyY[n] = c.y; n++
                 }
+                if (n < 2) continue
+                if (!resampleInto(polyX, polyY, n, cum, ix, iy)) continue
+                normalizeInto(ix, iy, SAMPLES, nix, niy)
+                var loc = 0f
+                var shape = 0f
+                for (i in 0 until SAMPLES) {
+                    loc += hypot(gx[i] - ix[i], gy[i] - iy[i])
+                    shape += hypot(ngx[i] - nix[i], ngy[i] - niy[i])
+                }
+                loc /= SAMPLES
+                shape /= SAMPLES
+                var score = loc + SHAPE_WEIGHT * step * shape
+                score *= when {
+                    learned.containsKey(e.word) -> LEARNED_BOOST
+                    else -> {
+                        val r = rankOf(e.word)
+                        if (r >= Int.MAX_VALUE) 1f
+                        else FREQ_MIN + (1f - FREQ_MIN) * minOf(1f, r / FREQ_SPAN)
+                    }
+                }
+                scored.add(e.word to score)
             }
-            scored.add(w to score)
         }
         scored.sortBy { it.second }
         val out = ArrayList<String>(limit)
@@ -115,43 +202,60 @@ object GestureDecoder {
         return out
     }
 
-    private fun resample(pts: List<PointF>, n: Int): List<PointF>? {
-        if (pts.size < 2) return null
-        val cum = FloatArray(pts.size)
+    /** Arc-length resample the polyline in `xs`/`ys[0 until n]` to [SAMPLES] evenly
+     *  spaced points, written into `outX`/`outY`. `cum` (length ≥ n) is scratch for
+     *  the cumulative lengths. Returns false for a degenerate (zero-length) path. */
+    private fun resampleInto(
+        xs: FloatArray,
+        ys: FloatArray,
+        n: Int,
+        cum: FloatArray,
+        outX: FloatArray,
+        outY: FloatArray,
+    ): Boolean {
+        if (n < 2) return false
+        cum[0] = 0f
         var total = 0f
-        for (i in 1 until pts.size) {
-            total += dist(pts[i - 1], pts[i])
+        for (i in 1 until n) {
+            total += hypot(xs[i] - xs[i - 1], ys[i] - ys[i - 1])
             cum[i] = total
         }
-        if (total <= 1e-3f) return null
-        val out = ArrayList<PointF>(n)
-        out.add(PointF(pts.first().x, pts.first().y))
-        val stepLen = total / (n - 1)
+        if (total <= 1e-3f) return false
+        outX[0] = xs[0]; outY[0] = ys[0]
+        val stepLen = total / (SAMPLES - 1)
         var seg = 1
-        for (k in 1 until n - 1) {
+        for (k in 1 until SAMPLES - 1) {
             val target = stepLen * k
-            while (seg < pts.size - 1 && cum[seg] < target) seg++
+            while (seg < n - 1 && cum[seg] < target) seg++
             val segStart = cum[seg - 1]
             val segEnd = cum[seg]
             val t = if (segEnd > segStart) (target - segStart) / (segEnd - segStart) else 0f
-            val a = pts[seg - 1]
-            val b = pts[seg]
-            out.add(PointF(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t))
+            outX[k] = xs[seg - 1] + (xs[seg] - xs[seg - 1]) * t
+            outY[k] = ys[seg - 1] + (ys[seg] - ys[seg - 1]) * t
         }
-        out.add(PointF(pts.last().x, pts.last().y))
-        return out
+        outX[SAMPLES - 1] = xs[n - 1]; outY[SAMPLES - 1] = ys[n - 1]
+        return true
     }
 
-    private fun normalize(pts: List<PointF>): List<PointF> {
+    /** Centre and scale-normalise the `n` points in `xs`/`ys` into `outX`/`outY`
+     *  (subtract the centroid, divide by RMS radius), so an offset or larger/
+     *  smaller path of the same shape matches. */
+    private fun normalizeInto(
+        xs: FloatArray,
+        ys: FloatArray,
+        n: Int,
+        outX: FloatArray,
+        outY: FloatArray,
+    ) {
         var cx = 0f
         var cy = 0f
-        for (p in pts) { cx += p.x; cy += p.y }
-        cx /= pts.size; cy /= pts.size
+        for (i in 0 until n) { cx += xs[i]; cy += ys[i] }
+        cx /= n; cy /= n
         var rms = 0f
-        for (p in pts) { val dx = p.x - cx; val dy = p.y - cy; rms += dx * dx + dy * dy }
-        rms = sqrt(rms / pts.size)
+        for (i in 0 until n) { val dx = xs[i] - cx; val dy = ys[i] - cy; rms += dx * dx + dy * dy }
+        rms = sqrt(rms / n)
         if (rms < 1e-3f) rms = 1f
-        return pts.map { PointF((it.x - cx) / rms, (it.y - cy) / rms) }
+        for (i in 0 until n) { outX[i] = (xs[i] - cx) / rms; outY[i] = (ys[i] - cy) / rms }
     }
 
     /** Average nearest-neighbour distance between key centres (~one key pitch). */
