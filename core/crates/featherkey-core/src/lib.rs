@@ -16,8 +16,7 @@
 //! actual `#[uniffi::export]` scaffolding and Kotlin-binding generation are
 //! applied in Wave 5 (ADR-18): the workspace forbids `unsafe`, which UniFFI's
 //! generated scaffolding requires, and binding generation needs the Android NDK.
-//! Keeping the surface FFI-shaped now means Wave 5 annotates, it does not
-//! redesign.
+//! Keeping the surface FFI-shaped now means Wave 5 annotates, it does not redesign.
 //!
 //! # E-2 — sensitive-context ordering (BR-26)
 //! Every learning entry point ([`FeatherKeyCore::learn_word`],
@@ -40,7 +39,8 @@ mod ffi;
 #[cfg(feature = "uniffi")]
 uniffi::setup_scaffolding!();
 
-pub use crate::{correct::AutocorrectOutcome, error::FeatherKeyError};
+pub use crate::correct::AutocorrectOutcome;
+pub use crate::error::FeatherKeyError;
 
 // Re-exported so the shell depends only on this façade, never on the internal
 // crates directly (SEDD §3.6, EP-3 boundary).

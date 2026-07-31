@@ -91,11 +91,14 @@ fn repeatedly_reverting_one_correction_suppresses_it() {
 }
 
 #[test]
-fn a_known_word_is_never_clobbered_no_matter_how_eager_the_gate_has_become() {
+fn a_known_word_is_never_clobbered_regardless_of_gate_state() {
     let mut fk = core();
-    // Train the gate hard toward "apply": the gate is a single per-user MLP
-    // shared across every decision, so a long run of confirming (Reached)
-    // outcomes on an unrelated correction makes it about as eager as it can get.
+    // Drive the gate through a long run of confirming (Reached) outcomes on an
+    // unrelated correction first. This is deliberately a no-op for the
+    // assertion below (a known word never reaches the gate at all — see next
+    // comment) — it is here to make that structural fact explicit rather than
+    // leave it implicit at the untrained cold-start prior, and to guard
+    // against a future regression that made the veto gate-state-dependent.
     for _ in 0..200 {
         let _ = fk.choose_correction("xat", &[], vec![]).expect("ok");
         fk.observe_autocorrect_outcome(AutocorrectOutcome::Reached, &Ordinary);
@@ -103,11 +106,11 @@ fn a_known_word_is_never_clobbered_no_matter_how_eager_the_gate_has_become() {
     // "cat" IS the intended word: the no-clobber veto (BR-12) is absolute and
     // runs before the gate is even consulted (`choose_correction` returns the
     // no-clobber outcome verbatim whenever `assessment.available` is `None`),
-    // so no amount of gate training can make this apply.
+    // so the gate's trained state above can have no bearing on this outcome.
     let got = fk.choose_correction("cat", &[], vec![]).expect("ok");
     assert!(
         !got.applied,
-        "a word the user clearly intended must never be corrected, however eager the gate is"
+        "a word the user clearly intended must never be corrected, regardless of gate state"
     );
     assert_eq!(got.primary, "cat");
 }

@@ -148,7 +148,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Serves:** BR-5, BR-7, BR-8, BR-10, BR-12, BR-16, BR-26
 - **Traits (ports):** `SensitiveField` *(internal)*
 - **Structs:** `DecodeResult`, `FeatherKeyCore`, `FfiCandidate` *(internal)*, `FfiCorrection` *(internal)*, `FfiDecode` *(internal)*, `FfiKey` *(internal)*, `FfiRankCandidate` *(internal)*, `FfiRanked` *(internal)*, `FfiSuggestion` *(internal)*, `FfiTapOffset` *(internal)*, `FfiTransition` *(internal)*, `FfiWordFreq` *(internal)*, `KeyCandidate`, `KeyboardCore` *(internal)*, `LanguagePack` *(internal)*, `LayoutKey`
-- **Enums:** `AutocorrectOutcome` *(internal)*, `FeatherKeyError` *(internal)*, `FfiAutocorrectOutcome` *(internal)*, `FfiError` *(internal)*, `FfiLatinLayout` *(internal)*, `FfiSource` *(internal)*
+- **Enums:** `AutocorrectOutcome`, `FeatherKeyError`, `FfiAutocorrectOutcome` *(internal)*, `FfiError` *(internal)*, `FfiLatinLayout` *(internal)*, `FfiSource` *(internal)*
 - **Free functions:** `map_latin` *(internal)*
 - **Methods:** `FeatherKeyCore::active_languages`, `FeatherKeyCore::add_to_dictionary`, `FeatherKeyCore::buffered_taps`, `FeatherKeyCore::choose_correction`, `FeatherKeyCore::context_next_words`, `FeatherKeyCore::correction_pref_count`, `FeatherKeyCore::correction_unwanted_count`, `FeatherKeyCore::decode`, `FeatherKeyCore::import_context`, `FeatherKeyCore::import_frequencies`, `FeatherKeyCore::knows_word`, `FeatherKeyCore::language_weight`, `FeatherKeyCore::layout_keys`, `FeatherKeyCore::learn_word`, `FeatherKeyCore::learned_frequencies`, `FeatherKeyCore::new`, `FeatherKeyCore::observe_autocorrect_outcome`, `FeatherKeyCore::observe_delete_retype`, `FeatherKeyCore::observe_language`, `FeatherKeyCore::observe_strip_pick`, `FeatherKeyCore::observe_tap`, `FeatherKeyCore::persist`, `FeatherKeyCore::rank_candidates`, `FeatherKeyCore::rank_suggestions`, `FeatherKeyCore::restore`, `FeatherKeyCore::set_active_languages`, `FeatherKeyCore::set_latin_layout`, `FeatherKeyCore::set_layout`, `FeatherKeyCore::suggest`, `FeatherKeyCore::tap_offsets`, `FeatherKeyCore::use_alpha_layout`, `FeatherKeyCore::use_numeric_layout`, `FeatherKeyCore::use_symbols_layout`, `FeatherKeyCore::word_frequency`, `KeyboardCore::active_languages` *(internal)*, `KeyboardCore::add_to_dictionary` *(internal)*, `KeyboardCore::choose_correction` *(internal)*, `KeyboardCore::correct` *(internal)*, `KeyboardCore::decode` *(internal)*, `KeyboardCore::import_context` *(internal)*, `KeyboardCore::import_frequencies` *(internal)*, `KeyboardCore::layout_keys` *(internal)*, `KeyboardCore::learn_word` *(internal)*, `KeyboardCore::learned_frequencies` *(internal)*, `KeyboardCore::observe_autocorrect_outcome` *(internal)*, `KeyboardCore::observe_delete_retype` *(internal)*, `KeyboardCore::observe_language` *(internal)*, `KeyboardCore::observe_strip_pick` *(internal)*, `KeyboardCore::observe_tap` *(internal)*, `KeyboardCore::open` *(internal)*, `KeyboardCore::persist` *(internal)*, `KeyboardCore::rank` *(internal)*, `KeyboardCore::rank_suggestions` *(internal)*, `KeyboardCore::set_active_languages` *(internal)*, `KeyboardCore::set_latin_layout` *(internal)*, `KeyboardCore::suggest` *(internal)*, `KeyboardCore::tap_offsets` *(internal)*, `KeyboardCore::use_alpha_layout` *(internal)*, `KeyboardCore::use_numeric_layout` *(internal)*, `KeyboardCore::use_symbols_layout` *(internal)*, `SensitiveField::is_sensitive` *(internal)*
 - **Integration tests:** `tests/autocorrect_gate.rs`, `tests/composition.rs`, `tests/e2_sensitive_ordering.rs`, `tests/neural_learning.rs`, `tests/neural_persistence.rs`, `tests/w6b_ranking_reflects_learning.rs`
@@ -487,7 +487,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `AutocorrectGate::persist` | method — `featherkey-autocorrect-gate` |
 | `AutocorrectGate::reinforce` | method — `featherkey-autocorrect-gate` |
 | `AutocorrectGate::residual` | method — `featherkey-autocorrect-gate` |
-| `AutocorrectOutcome` | enum — `featherkey-core::correct` *(internal)*; kotlin enum class — `:ffi-bridge` |
+| `AutocorrectOutcome` | enum — `featherkey-core::correct`; kotlin enum class — `:ffi-bridge` |
 | `AvailableCorrection` | struct — `featherkey-autocorrect::rank` |
 | `BEAM` | const — `featherkey-tap-sequence` |
 | `BRANCH` | const — `featherkey-tap-sequence` |
@@ -658,7 +658,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `FeatherKeyCore::use_numeric_layout` | method — `featherkey-core` |
 | `FeatherKeyCore::use_symbols_layout` | method — `featherkey-core` |
 | `FeatherKeyCore::word_frequency` | method — `featherkey-core` |
-| `FeatherKeyError` | enum — `featherkey-core::error` *(internal)* |
+| `FeatherKeyError` | enum — `featherkey-core::error` |
 | `FeatherKeyImeService` | kotlin class — `:ime-service` |
 | `FeatherKeyImeService.onCreate` | kotlin fun — `:ime-service` |
 | `FeatherKeyImeService.onCreateInputView` | kotlin fun — `:ime-service` |
