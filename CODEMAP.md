@@ -97,9 +97,9 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **One job:** Decide a correction for a typed token, never clobbering a word the user clearly intended (no-clobber policy, BR-12).
 - **Depends on:** `featherkey-candidate-ranker`, `featherkey-contracts`, `featherkey-dictionary`, `featherkey-language-momentum`, `featherkey-locale-manager`, `featherkey-personalization`
 - **Serves:** BR-12, BR-15, BR-18, BR-45
-- **Structs:** `LexiconPack`, `NoClobberCorrector`
+- **Structs:** `AvailableCorrection`, `CorrectionAssessment`, `LexiconPack`, `NoClobberCorrector`
 - **Constants:** `CORE_FUZZY_PRIOR`
-- **Methods:** `NoClobberCorrector::new`
+- **Methods:** `NoClobberCorrector::assess`, `NoClobberCorrector::new`
 - **Integration tests:** `tests/live_policy.rs`, `tests/no_clobber.rs`
 
 ### featherkey-autocorrect-gate
@@ -486,6 +486,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `AutocorrectGate::persist` | method — `featherkey-autocorrect-gate` |
 | `AutocorrectGate::reinforce` | method — `featherkey-autocorrect-gate` |
 | `AutocorrectGate::residual` | method — `featherkey-autocorrect-gate` |
+| `AvailableCorrection` | struct — `featherkey-autocorrect::rank` |
 | `BEAM` | const — `featherkey-tap-sequence` |
 | `BRANCH` | const — `featherkey-tap-sequence` |
 | `C::capacity` | method — `featherkey-diagnostics` |
@@ -528,6 +529,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `CORE_FUZZY_PRIOR` | const — `featherkey-autocorrect::rank` |
 | `CoreError` | enum — `featherkey-kernel` |
 | `Correction` | struct — `featherkey-contracts` |
+| `CorrectionAssessment` | struct — `featherkey-autocorrect::rank` |
 | `CorrectionDetector` | kotlin class — `:ime-service` |
 | `CorrectionDetector.onAutocorrect` | kotlin fun — `:ime-service` |
 | `CorrectionDetector.onBackspaceUndo` | kotlin fun — `:ime-service` |
@@ -891,6 +893,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `NeuralRanker::score` | method — `featherkey-neural-ranker` |
 | `NnError` | enum — `featherkey-nn::error` |
 | `NoClobberCorrector` | struct — `featherkey-autocorrect` |
+| `NoClobberCorrector::assess` | method — `featherkey-autocorrect` |
 | `NoClobberCorrector::new` | method — `featherkey-autocorrect` |
 | `OnboardingFlow` | kotlin fun — `:onboarding` |
 | `Personalization` | struct — `featherkey-personalization` |

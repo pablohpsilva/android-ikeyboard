@@ -17,7 +17,7 @@
 
 use std::collections::HashMap;
 
-use featherkey_contracts::{Candidate, Source};
+use featherkey_contracts::{Candidate, Correction, Source};
 use featherkey_dictionary::Dictionary;
 use featherkey_language_momentum::Momentum;
 
@@ -107,6 +107,99 @@ pub(crate) fn score_with_sticky(
         .collect();
     scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     scored
+}
+
+/// Plain Levenshtein distance between `typed` and `winner`, capped at the
+/// longer string's length (so it can never exceed a trivial delete-then-insert
+/// bound). Used only to report the winner's edit distance to the caller
+/// (`AvailableCorrection::edit_distance`) — it plays no role in candidate
+/// generation or scoring, which stay [`Dictionary::fuzzy`]'s edit-distance-1
+/// neighbours. Operates on Unicode scalar values (`char`), not bytes, and is
+/// total: no panic for any pair of strings, including empty ones.
+pub(crate) fn edit_distance(typed: &str, winner: &str) -> u32 {
+    let a: Vec<char> = typed.chars().collect();
+    let b: Vec<char> = winner.chars().collect();
+    let cap = a.len().max(b.len());
+    if a.is_empty() {
+        return b.len() as u32;
+    }
+    if b.is_empty() {
+        return a.len() as u32;
+    }
+    // Classic O(n*m) DP; lexicon words are short (a handful of chars), so this
+    // is cheap and needs no space optimisation.
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut curr = vec![0usize; b.len() + 1];
+    for (i, ca) in a.iter().enumerate() {
+        curr[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let cost = usize::from(ca != cb);
+            curr[j + 1] = (prev[j + 1] + 1).min(curr[j] + 1).min(prev[j] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    (prev[b.len()].min(cap)) as u32
+}
+
+/// The result of `NoClobberCorrector::assess`: today's [`Correction`] outcome
+/// alongside — when today's policy *would* apply a correction — the winning
+/// candidate's own confidence, so a caller (the autocorrect gate) can decide
+/// whether to actually apply it without re-deriving the winner.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CorrectionAssessment {
+    /// The exact outcome `correct` returns today; unchanged by this type's
+    /// existence (`correct` delegates to `assess().correction`).
+    pub correction: Correction,
+    /// `Some` only when a real correction winner exists — i.e. the token was
+    /// not vetoed (`NoClobberCorrector::is_intended`) and at least one
+    /// candidate survived and differs from the typed word. `None` for a
+    /// vetoed or no-candidate token: there is nothing for a gate to weigh.
+    pub available: Option<AvailableCorrection>,
+}
+
+/// The winning candidate's own detail, surfaced for a gate to weigh — not used
+/// by `correct` itself, which still applies the winner unconditionally.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AvailableCorrection {
+    /// The candidate `correct` would apply.
+    pub winner: String,
+    /// The winner's own ranked score (`scored[0].1`, sticky-fix bonus and
+    /// momentum included) — higher is more confident, but the scale is the
+    /// ranker's own and not normalised to `[0, 1]`.
+    pub winner_confidence: f64,
+    /// Plain (capped) Levenshtein distance between the typed word and the
+    /// winner.
+    pub edit_distance: u32,
+    /// The language the winner came from.
+    pub winner_lang: String,
+    /// The winner's bundled frequency rank in its own language's pack
+    /// (`0` = commonest), or `None` when the winner has no such pack — e.g. it
+    /// came solely from the device's own candidates.
+    pub winner_dict_rank: Option<u32>,
+}
+
+/// Build the [`AvailableCorrection`] detail for a winning candidate: its edit
+/// distance from the typed word, and its bundled rank looked up from its own
+/// language's pack (`None` when the winner has no such pack, e.g. it came
+/// solely from the device's own candidates).
+pub(crate) fn available_correction(
+    packs: &[LexiconPack],
+    typed: &str,
+    winner: &str,
+    winner_lang: String,
+    winner_confidence: f64,
+) -> AvailableCorrection {
+    let winner_dict_rank = packs
+        .iter()
+        .find(|p| p.lang == winner_lang)
+        .and_then(|p| p.rank.get(winner).copied());
+    AvailableCorrection {
+        winner: winner.to_owned(),
+        winner_confidence,
+        edit_distance: edit_distance(typed, winner),
+        winner_lang,
+        winner_dict_rank,
+    }
 }
 
 /// The up-to-two best alternatives after the winner, as **distinct** words: a
