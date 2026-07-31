@@ -110,7 +110,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Serves:** BR-12, BR-13, BR-15, BR-22, BR-26, BR-46
 - **Structs:** `AutocorrectGate`, `GateFeatures`
 - **Constants:** `GATE_LR`, `INPUTS`, `RESIDUAL_BOUND`
-- **Methods:** `AutocorrectGate::from_prior`, `AutocorrectGate::reinforce`, `AutocorrectGate::residual`, `GateFeatures::to_array`
+- **Methods:** `AutocorrectGate::from_prior`, `AutocorrectGate::load`, `AutocorrectGate::persist`, `AutocorrectGate::reinforce`, `AutocorrectGate::residual`, `GateFeatures::to_array`
 
 ### featherkey-candidate-ranker
 
@@ -482,6 +482,8 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `AutoCorrect::correct` | method — `featherkey-contracts` |
 | `AutocorrectGate` | struct — `featherkey-autocorrect-gate` |
 | `AutocorrectGate::from_prior` | method — `featherkey-autocorrect-gate` |
+| `AutocorrectGate::load` | method — `featherkey-autocorrect-gate` |
+| `AutocorrectGate::persist` | method — `featherkey-autocorrect-gate` |
 | `AutocorrectGate::reinforce` | method — `featherkey-autocorrect-gate` |
 | `AutocorrectGate::residual` | method — `featherkey-autocorrect-gate` |
 | `BEAM` | const — `featherkey-tap-sequence` |

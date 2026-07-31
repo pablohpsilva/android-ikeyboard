@@ -1,5 +1,7 @@
 //! Tiny per-user neural gate: decide whether to trust an autocorrect.
 
+mod persist;
+
 use featherkey_nn::Mlp;
 
 /// Number of feature slots the gate consumes.
