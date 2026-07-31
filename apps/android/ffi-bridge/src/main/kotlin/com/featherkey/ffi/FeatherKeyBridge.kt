@@ -12,6 +12,7 @@ package com.featherkey.ffi
  * against a stable, non-generated surface.
  */
 
+import com.featherkey.ffi.generated.FfiAutocorrectOutcome
 import com.featherkey.ffi.generated.FfiCorrection
 import com.featherkey.ffi.generated.FfiDecode
 import com.featherkey.ffi.generated.FfiLatinLayout
@@ -43,6 +44,10 @@ enum class LayoutPage { ALPHA, NUMERIC, SYMBOLS }
 
 /** The Latin key arrangement, or AUTO (per-language default). */
 enum class LatinLayout { AUTO, QWERTY, QWERTZ, AZERTY }
+
+/** The real-world outcome of the last gated autocorrect, fed back to the core's
+ *  neural gate as a training signal (mirrors the core's `AutocorrectOutcome`). */
+enum class AutocorrectOutcome { REVERTED, KEPT, REACHED }
 
 /** The current field's sensitivity, supplied by the IME from `EditorInfo`. */
 fun interface FieldSensitivity {
@@ -116,6 +121,19 @@ class FeatherKeyBridge private constructor(private val core: KeyboardCore) : Aut
     /** Note a delete-then-retype of [word] (gated by field sensitivity in the core). */
     fun observeDeleteRetype(word: String, field: FieldSensitivity) =
         core.observeDeleteRetype(word, field.asForeign())
+
+    /** Train the neural autocorrect gate on the [outcome] of the last gated
+     *  correction (reverted / kept / manually reached) — gated by field
+     *  sensitivity in the core (E-2 / BR-26). */
+    fun observeAutocorrectOutcome(outcome: AutocorrectOutcome, field: FieldSensitivity) =
+        core.observeAutocorrectOutcome(
+            when (outcome) {
+                AutocorrectOutcome.REVERTED -> FfiAutocorrectOutcome.REVERTED
+                AutocorrectOutcome.KEPT -> FfiAutocorrectOutcome.KEPT
+                AutocorrectOutcome.REACHED -> FfiAutocorrectOutcome.REACHED
+            },
+            field.asForeign(),
+        )
 
     /** Import legacy bigram transitions into the core's context model (migration). */
     fun importContext(transitions: List<FfiTransition>) = core.importContext(transitions)

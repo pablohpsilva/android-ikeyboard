@@ -788,6 +788,8 @@ internal open class UniffiVTableCallbackInterfaceSensitiveField(
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -834,6 +836,8 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_featherkey_core_fn_method_keyboardcore_learned_frequencies(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_featherkey_core_fn_method_keyboardcore_observe_autocorrect_outcome(`ptr`: Pointer,`outcome`: RustBuffer.ByValue,`field`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun uniffi_featherkey_core_fn_method_keyboardcore_observe_delete_retype(`ptr`: Pointer,`word`: RustBuffer.ByValue,`field`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_featherkey_core_fn_method_keyboardcore_observe_language(`ptr`: Pointer,`recognizers`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1002,6 +1006,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_learned_frequencies(
     ): Short
+    fun uniffi_featherkey_core_checksum_method_keyboardcore_observe_autocorrect_outcome(
+    ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_observe_delete_retype(
     ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_observe_language(
@@ -1079,6 +1085,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_learned_frequencies() != 45129.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_observe_autocorrect_outcome() != 6732.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_observe_delete_retype() != 62189.toShort()) {
@@ -1549,6 +1558,14 @@ public interface KeyboardCoreInterface {
     fun `learnedFrequencies`(): List<FfiWordFreq>
     
     /**
+     * Train the neural autocorrect gate on the real-world `outcome` of the
+     * last gated correction — unless `field` is sensitive (E-2 / BR-26), in
+     * which case the gate is left untouched. A no-op if no correction has
+     * been decided yet (core-side, mirrored from `observe_strip_pick`).
+     */
+    fun `observeAutocorrectOutcome`(`outcome`: FfiAutocorrectOutcome, `field`: SensitiveField)
+    
+    /**
      * Record a delete-and-retype demotion for `word` — unless `field` is sensitive.
      */
     fun `observeDeleteRetype`(`word`: kotlin.String, `field`: SensitiveField)
@@ -1867,6 +1884,23 @@ open class KeyboardCore: Disposable, AutoCloseable, KeyboardCoreInterface {
     }
     )
     }
+    
+
+    
+    /**
+     * Train the neural autocorrect gate on the real-world `outcome` of the
+     * last gated correction — unless `field` is sensitive (E-2 / BR-26), in
+     * which case the gate is left untouched. A no-op if no correction has
+     * been decided yet (core-side, mirrored from `observe_strip_pick`).
+     */override fun `observeAutocorrectOutcome`(`outcome`: FfiAutocorrectOutcome, `field`: SensitiveField)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_featherkey_core_fn_method_keyboardcore_observe_autocorrect_outcome(
+        it, FfiConverterTypeFfiAutocorrectOutcome.lower(`outcome`),FfiConverterTypeSensitiveField.lower(`field`),_status)
+}
+    }
+    
     
 
     
@@ -2482,7 +2516,16 @@ public object FfiConverterTypeFfiCandidate: FfiConverterRustBuffer<FfiCandidate>
 data class FfiCorrection (
     var `primary`: kotlin.String, 
     var `alternatives`: List<kotlin.String>, 
-    var `applied`: kotlin.Boolean
+    var `applied`: kotlin.Boolean, 
+    /**
+     * When the neural gate withheld an otherwise-available correction
+     * (`applied == false` but a winner existed), the winner it declined to
+     * apply — mirrors [`featherkey_contracts::Correction::withheld`]. `None`
+     * when nothing was withheld (a correction applied, or there was no
+     * candidate to gate). The shell surfaces this as the counterfactual
+     * "reached" signal for `observe_autocorrect_outcome`.
+     */
+    var `withheld`: kotlin.String?
 ) {
     
     companion object
@@ -2497,19 +2540,22 @@ public object FfiConverterTypeFfiCorrection: FfiConverterRustBuffer<FfiCorrectio
             FfiConverterString.read(buf),
             FfiConverterSequenceString.read(buf),
             FfiConverterBoolean.read(buf),
+            FfiConverterOptionalString.read(buf),
         )
     }
 
     override fun allocationSize(value: FfiCorrection) = (
             FfiConverterString.allocationSize(value.`primary`) +
             FfiConverterSequenceString.allocationSize(value.`alternatives`) +
-            FfiConverterBoolean.allocationSize(value.`applied`)
+            FfiConverterBoolean.allocationSize(value.`applied`) +
+            FfiConverterOptionalString.allocationSize(value.`withheld`)
     )
 
     override fun write(value: FfiCorrection, buf: ByteBuffer) {
             FfiConverterString.write(value.`primary`, buf)
             FfiConverterSequenceString.write(value.`alternatives`, buf)
             FfiConverterBoolean.write(value.`applied`, buf)
+            FfiConverterOptionalString.write(value.`withheld`, buf)
     }
 }
 
@@ -2864,6 +2910,50 @@ public object FfiConverterTypeLanguagePack: FfiConverterRustBuffer<LanguagePack>
             FfiConverterSequenceString.write(value.`words`, buf)
     }
 }
+
+
+
+/**
+ * The real-world outcome of the last gated correction (Task 9's training
+ * signal), marshalled across the FFI. Mirrors [`AutocorrectOutcome`] 1:1.
+ */
+
+enum class FfiAutocorrectOutcome {
+    
+    /**
+     * The user reverted/undid it: push the gate toward "withhold".
+     */
+    REVERTED,
+    /**
+     * The user kept it, with no strong signal either way.
+     */
+    KEPT,
+    /**
+     * The user typed on past it cleanly: a confirming signal.
+     */
+    REACHED;
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiAutocorrectOutcome: FfiConverterRustBuffer<FfiAutocorrectOutcome> {
+    override fun read(buf: ByteBuffer) = try {
+        FfiAutocorrectOutcome.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: FfiAutocorrectOutcome) = 4UL
+
+    override fun write(value: FfiAutocorrectOutcome, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
 
 
 

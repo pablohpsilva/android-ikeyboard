@@ -370,12 +370,12 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 ### :ffi-bridge
 
 - **Path:** `apps/android/ffi-bridge`
-- `FeatherKeyBridge.kt` — `class Language`; `class LayoutKeyDto`; `enum class LayoutPage`; `enum class LatinLayout`; `fun interface FieldSensitivity`; `class FeatherKeyBridge` — fun `FeatherKeyBridge.activeLanguages`, `FeatherKeyBridge.addToDictionary`, `FeatherKeyBridge.chooseCorrection`, `FeatherKeyBridge.close`, `FeatherKeyBridge.decode`, `FeatherKeyBridge.importContext`, `FeatherKeyBridge.importFrequencies`, `FeatherKeyBridge.layoutKeys`, `FeatherKeyBridge.learnWord`, `FeatherKeyBridge.learnedFrequencies`, `FeatherKeyBridge.observeDeleteRetype`, `FeatherKeyBridge.observeLanguage`, `FeatherKeyBridge.observeStripPick`, `FeatherKeyBridge.observeTap`, `FeatherKeyBridge.open`, `FeatherKeyBridge.persist`, `FeatherKeyBridge.rank`, `FeatherKeyBridge.rankSuggestions`, `FeatherKeyBridge.setActiveLanguages`, `FeatherKeyBridge.setLatinLayout`, `FeatherKeyBridge.setPage`, `FeatherKeyBridge.suggest`, `FeatherKeyBridge.tapOffsets`, `FieldSensitivity.isSensitive` — val/var `LayoutKeyDto.height`, `LayoutKeyDto.label`, `LayoutKeyDto.width`, `LayoutKeyDto.x`, `LayoutKeyDto.y`
+- `FeatherKeyBridge.kt` — `class Language`; `class LayoutKeyDto`; `enum class LayoutPage`; `enum class LatinLayout`; `enum class AutocorrectOutcome`; `fun interface FieldSensitivity`; `class FeatherKeyBridge` — fun `FeatherKeyBridge.activeLanguages`, `FeatherKeyBridge.addToDictionary`, `FeatherKeyBridge.chooseCorrection`, `FeatherKeyBridge.close`, `FeatherKeyBridge.decode`, `FeatherKeyBridge.importContext`, `FeatherKeyBridge.importFrequencies`, `FeatherKeyBridge.layoutKeys`, `FeatherKeyBridge.learnWord`, `FeatherKeyBridge.learnedFrequencies`, `FeatherKeyBridge.observeAutocorrectOutcome`, `FeatherKeyBridge.observeDeleteRetype`, `FeatherKeyBridge.observeLanguage`, `FeatherKeyBridge.observeStripPick`, `FeatherKeyBridge.observeTap`, `FeatherKeyBridge.open`, `FeatherKeyBridge.persist`, `FeatherKeyBridge.rank`, `FeatherKeyBridge.rankSuggestions`, `FeatherKeyBridge.setActiveLanguages`, `FeatherKeyBridge.setLatinLayout`, `FeatherKeyBridge.setPage`, `FeatherKeyBridge.suggest`, `FeatherKeyBridge.tapOffsets`, `FieldSensitivity.isSensitive` — val/var `LayoutKeyDto.height`, `LayoutKeyDto.label`, `LayoutKeyDto.width`, `LayoutKeyDto.x`, `LayoutKeyDto.y`
 
 ### :ime-service
 
 - **Path:** `apps/android/ime-service`
-- `CorrectionDetector.kt` — `class CorrectionSignal`; `class CorrectionDetector` — fun `CorrectionDetector.onAutocorrect`, `CorrectionDetector.onBackspaceUndo`, `CorrectionDetector.onDeleteRetype`, `CorrectionDetector.onSuggestionPicked`, `CorrectionDetector.reset`
+- `CorrectionDetector.kt` — `enum class Outcome`; `class CorrectionSignal`; `class CorrectionDetector` — fun `CorrectionDetector.noteWithheld`, `CorrectionDetector.onAutocorrect`, `CorrectionDetector.onBackspaceUndo`, `CorrectionDetector.onDeleteRetype`, `CorrectionDetector.onManualWord`, `CorrectionDetector.onSuggestionPicked`, `CorrectionDetector.reset`
 - `Diacritics.kt` — `object Diacritics` — fun `Diacritics.fold`, `Diacritics.foldChar`
 - `FeatherKeyImeService.kt` — `class FeatherKeyImeService`; `object Lexicons` — fun `FeatherKeyImeService.onCreate`, `FeatherKeyImeService.onCreateInputView`, `FeatherKeyImeService.onDestroy`, `FeatherKeyImeService.onFinishInput`, `FeatherKeyImeService.onStartInput`, `FeatherKeyImeService.onStartInputView`, `Lexicons.load`
 - `GestureDecoder.kt` — `object GestureDecoder` — fun `GestureDecoder.decode`, `GestureDecoder.keyPath`
@@ -486,7 +486,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `AutocorrectGate::persist` | method — `featherkey-autocorrect-gate` |
 | `AutocorrectGate::reinforce` | method — `featherkey-autocorrect-gate` |
 | `AutocorrectGate::residual` | method — `featherkey-autocorrect-gate` |
-| `AutocorrectOutcome` | enum — `featherkey-core::correct` *(internal)* |
+| `AutocorrectOutcome` | enum — `featherkey-core::correct` *(internal)*; kotlin enum class — `:ffi-bridge` |
 | `AvailableCorrection` | struct — `featherkey-autocorrect::rank` |
 | `BEAM` | const — `featherkey-tap-sequence` |
 | `BRANCH` | const — `featherkey-tap-sequence` |
@@ -532,9 +532,11 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `Correction` | struct — `featherkey-contracts` |
 | `CorrectionAssessment` | struct — `featherkey-autocorrect::rank` |
 | `CorrectionDetector` | kotlin class — `:ime-service` |
+| `CorrectionDetector.noteWithheld` | kotlin fun — `:ime-service` |
 | `CorrectionDetector.onAutocorrect` | kotlin fun — `:ime-service` |
 | `CorrectionDetector.onBackspaceUndo` | kotlin fun — `:ime-service` |
 | `CorrectionDetector.onDeleteRetype` | kotlin fun — `:ime-service` |
+| `CorrectionDetector.onManualWord` | kotlin fun — `:ime-service` |
 | `CorrectionDetector.onSuggestionPicked` | kotlin fun — `:ime-service` |
 | `CorrectionDetector.reset` | kotlin fun — `:ime-service` |
 | `Corrections` | struct — `featherkey-corrections` |
@@ -605,6 +607,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `FeatherKeyBridge.layoutKeys` | kotlin fun — `:ffi-bridge` |
 | `FeatherKeyBridge.learnedFrequencies` | kotlin fun — `:ffi-bridge` |
 | `FeatherKeyBridge.learnWord` | kotlin fun — `:ffi-bridge` |
+| `FeatherKeyBridge.observeAutocorrectOutcome` | kotlin fun — `:ffi-bridge` |
 | `FeatherKeyBridge.observeDeleteRetype` | kotlin fun — `:ffi-bridge` |
 | `FeatherKeyBridge.observeLanguage` | kotlin fun — `:ffi-bridge` |
 | `FeatherKeyBridge.observeStripPick` | kotlin fun — `:ffi-bridge` |
@@ -900,6 +903,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `NoClobberCorrector::assess` | method — `featherkey-autocorrect` |
 | `NoClobberCorrector::new` | method — `featherkey-autocorrect` |
 | `OnboardingFlow` | kotlin fun — `:onboarding` |
+| `Outcome` | kotlin enum class — `:ime-service` |
 | `Personalization` | struct — `featherkey-personalization` |
 | `Personalization::frequencies` | method — `featherkey-personalization` |
 | `Personalization::frequency` | method — `featherkey-personalization` |

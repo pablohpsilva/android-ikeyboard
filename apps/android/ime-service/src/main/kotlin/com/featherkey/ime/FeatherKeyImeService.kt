@@ -28,6 +28,7 @@ import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.widget.Toast
+import com.featherkey.ffi.AutocorrectOutcome
 import com.featherkey.ffi.FeatherKeyBridge
 import com.featherkey.ffi.FieldSensitivity
 import com.featherkey.ffi.Language
@@ -370,7 +371,7 @@ class FeatherKeyImeService : InputMethodService() {
     private fun handleGesture(pathPts: List<PointF>, centers: Map<Char, PointF>) {
         val ic = currentInputConnection ?: return
         atomicSpan = 0 // a fresh gesture; re-armed below only if it commits a word
-        corrections.reset() // a gesture is intervening input: clear the autocorrect
+        clearCorrectionLookback() // a gesture is intervening input: clear the autocorrect
         // revert lookback so a later backspace can't spuriously whitelist a typo,
         // even when this swipe decodes to nothing (early return below).
         ensureBridgeReady() // cold start: the first swipe waits for the core to open
@@ -446,6 +447,28 @@ class FeatherKeyImeService : InputMethodService() {
      *  [learnWord]; the core also gates internally, so this only avoids needless FFI. */
     private fun observeGate(): Boolean = learningEnabled && !field.isSensitive()
 
+    /** Clear the autocorrect revert lookback (the service's per-intervening-edit
+     *  hook, [CorrectionDetector.reset]). When the cleared slot means a correction
+     *  survived to this edit without being reverted, feed the core a KEPT training
+     *  signal (gated like all learning). */
+    private fun clearCorrectionLookback() {
+        val kept = corrections.reset()
+        if (kept != null) emitOutcome(kept)
+    }
+
+    /** Feed the core's neural autocorrect gate the real-world [outcome] of the last
+     *  gated correction, gated exactly like [learnWord] (consent + non-sensitive);
+     *  the core also gates internally, so this only avoids a needless FFI call. */
+    private fun emitOutcome(outcome: Outcome) {
+        if (!observeGate()) return
+        val ffi = when (outcome) {
+            Outcome.REVERTED -> AutocorrectOutcome.REVERTED
+            Outcome.KEPT -> AutocorrectOutcome.KEPT
+            Outcome.REACHED -> AutocorrectOutcome.REACHED
+        }
+        runCatching { bridge?.observeAutocorrectOutcome(ffi, field) }
+    }
+
     /**
      * [centers] re-centred by the core's learned per-key tap offsets (BR-7): the
      * gesture decoder should trace ideal paths through where this user actually
@@ -499,7 +522,7 @@ class FeatherKeyImeService : InputMethodService() {
         // A typed character is an intervening event: it clears the autocorrect
         // revert lookback so a later backspace isn't misread as undoing a correction
         // that happened words ago (CorrectionDetector's one-slot contract).
-        corrections.reset()
+        clearCorrectionLookback()
         pending.append(ch)
         ic.commitText(ch, 1)
         kb?.consumeShift() // spends a one-shot shift; caps lock holds
@@ -542,7 +565,7 @@ class FeatherKeyImeService : InputMethodService() {
         val out = if (kb?.shifted == true) ch.uppercase() else ch
         // An explicit letter pick is an intervening event, like a decoded tap: it
         // clears the autocorrect revert lookback (CorrectionDetector's contract).
-        corrections.reset()
+        clearCorrectionLookback()
         pending.append(out)
         ic.commitText(out, 1)
         kb?.consumeShift() // spends a one-shot shift; caps lock holds
@@ -596,7 +619,7 @@ class FeatherKeyImeService : InputMethodService() {
         ic.commitText(ch, 1)
         pending.clear()
         atomicSpan = 0
-        corrections.reset() // an intervening symbol/number clears the revert lookback
+        clearCorrectionLookback() // an intervening symbol/number clears the revert lookback
         keyboard?.suggestions = emptyList()
     }
 
@@ -613,7 +636,7 @@ class FeatherKeyImeService : InputMethodService() {
         pending.clear()
         atomicSpan = 0
         lastWord = null
-        corrections.reset() // an intervening emoji clears the revert lookback
+        clearCorrectionLookback() // an intervening emoji clears the revert lookback
         keyboard?.suggestions = emptyList()
         keyboard?.recents = emojiRecents.record(emoji)
     }
@@ -710,6 +733,10 @@ class FeatherKeyImeService : InputMethodService() {
         val pick = corrections.onSuggestionPicked(cur.lowercase(), index, out)
         if (pick is CorrectionSignal.LowerRankedPick && observeGate())
             runCatching { bridge?.observeStripPick(pick.prefix, pick.picked, field) }
+        // Picking the exact word a correction was withheld in favour of confirms the
+        // gate should have applied it (the counterfactual REACHED signal).
+        val reached = corrections.onManualWord(out.lowercase())
+        if (reached != null) emitOutcome(reached)
         learnWord(out)
         pending.clear()
         atomicSpan = out.length + 1 // word + its space clears whole on next backspace
@@ -727,7 +754,7 @@ class FeatherKeyImeService : InputMethodService() {
         // lookback up front so an uncorrected commit (or a double-space period) can't
         // leave a stale slot that a later backspace would misread as a revert. When
         // this very boundary IS an autocorrect, onAutocorrect below re-arms it.
-        corrections.reset()
+        clearCorrectionLookback()
         if (word.isEmpty()) {
             // No word in progress: a space right after "<word> " becomes ". ".
             if (maybeDoubleSpacePeriod(ic)) return
@@ -744,6 +771,12 @@ class FeatherKeyImeService : InputMethodService() {
                 // Arm the one-slot revert lookback: an immediate backspace after this
                 // means the user rejected the correction (keep their original word).
                 corrections.onAutocorrect(word, out)
+            } else {
+                // The user's typed word stood uncorrected: if it is the exact word a
+                // correction was earlier WITHHELD in favour of (e.g. deleted a weak
+                // "xat" and retyped "cat"), that reach confirms the gate was too shy.
+                val reached = corrections.onManualWord(word.lowercase())
+                if (reached != null) emitOutcome(reached)
             }
             learnWord(out)
         }
@@ -819,6 +852,10 @@ class FeatherKeyImeService : InputMethodService() {
         if (deviceOn) for ((lang, words) in deviceDict.candidatesByLanguage())
             words.forEachIndexed { i, w -> deviceCands.add(FfiRankCandidate(w, lang, FfiSource.DEVICE, i.toUInt())) }
         val c = runCatching { bridge?.chooseCorrection(word, deviceKnown, deviceCands) }.getOrNull() ?: return null
+        // The gate withheld an otherwise-available correction: remember the word it
+        // would have applied, so a later manual landing on it is a REACHED signal
+        // (the counterfactual that tells the gate it was too cautious).
+        c.withheld?.let { corrections.noteWithheld(it) }
         return if (c.applied && c.primary != word) c.primary else null
     }
 
@@ -842,8 +879,11 @@ class FeatherKeyImeService : InputMethodService() {
         // A backspace immediately after an autocorrect reverts it: the user wants
         // their original word kept, so protect it from being re-corrected.
         val undo = corrections.onBackspaceUndo()
-        if (undo is CorrectionSignal.RevertAfterAutocorrect && observeGate())
+        if (undo is CorrectionSignal.RevertAfterAutocorrect && observeGate()) {
             runCatching { bridge?.addToDictionary(undo.word) }
+            // The user rejected the correction: push the gate toward withholding it.
+            emitOutcome(Outcome.REVERTED)
+        }
         if (pending.isNotEmpty()) {
             // Mid-word: each pending char is a single BMP letter, so char-wise.
             pending.deleteCharAt(pending.length - 1)
@@ -863,7 +903,7 @@ class FeatherKeyImeService : InputMethodService() {
         pending.clear()
         atomicSpan = 0
         lastWord = null // Enter ends the line: start the next with no context
-        corrections.reset() // a newline is an intervening event: drop the revert lookback
+        clearCorrectionLookback() // a newline is an intervening event: drop the revert lookback
     }
 
     /**

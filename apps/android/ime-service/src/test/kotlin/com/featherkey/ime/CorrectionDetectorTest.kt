@@ -101,4 +101,67 @@ class CorrectionDetectorTest {
         d.reset()
         assertNull(d.onBackspaceUndo())
     }
+
+    // --- Kept: a boundary/intervening edit after an unreverted autocorrect ----
+
+    @Test fun an_intervening_edit_after_an_autocorrect_is_a_kept_signal() {
+        val d = CorrectionDetector()
+        d.onAutocorrect(from = "teh", to = "the")
+        // The user typed on / hit a boundary instead of reverting: the correction
+        // survived — reset (the intervening-edit hook) reports it as Kept.
+        assertEquals(Outcome.KEPT, d.reset())
+    }
+
+    @Test fun reset_without_a_pending_autocorrect_reports_nothing() {
+        val d = CorrectionDetector()
+        assertNull(d.reset())
+    }
+
+    @Test fun a_reverted_autocorrect_does_not_also_report_kept() {
+        val d = CorrectionDetector()
+        d.onAutocorrect(from = "teh", to = "the")
+        assertEquals(CorrectionSignal.RevertAfterAutocorrect("teh"), d.onBackspaceUndo())
+        // The slot was consumed by the revert, so a following intervening edit is
+        // not a second (contradictory) Kept signal for the same autocorrect.
+        assertNull(d.reset())
+    }
+
+    @Test fun kept_is_a_one_shot_signal() {
+        val d = CorrectionDetector()
+        d.onAutocorrect(from = "teh", to = "the")
+        assertEquals(Outcome.KEPT, d.reset())
+        assertNull(d.reset())
+    }
+
+    // --- Reached: the user manually lands on a withheld correction -----------
+
+    @Test fun reaching_the_withheld_word_is_a_reached_signal() {
+        val d = CorrectionDetector()
+        d.noteWithheld("cat") // core withheld "cat" for a weak "xat"
+        assertEquals(Outcome.REACHED, d.onManualWord("cat"))
+        d.noteWithheld("cat")
+        assertNull(d.onManualWord("dog")) // different word -> no signal
+    }
+
+    @Test fun a_manual_word_with_no_withheld_note_is_not_reached() {
+        val d = CorrectionDetector()
+        assertNull(d.onManualWord("cat"))
+    }
+
+    @Test fun reached_is_a_one_shot_signal() {
+        val d = CorrectionDetector()
+        d.noteWithheld("cat")
+        assertEquals(Outcome.REACHED, d.onManualWord("cat"))
+        // The counterfactual is consumed: a second landing is not a second signal.
+        assertNull(d.onManualWord("cat"))
+    }
+
+    @Test fun a_non_matching_manual_word_leaves_the_withheld_note_intact() {
+        val d = CorrectionDetector()
+        d.noteWithheld("cat")
+        // The user typed something else first (e.g. deleting the weak word) — the
+        // counterfactual is still pending until they actually reach "cat".
+        assertNull(d.onManualWord("xat"))
+        assertEquals(Outcome.REACHED, d.onManualWord("cat"))
+    }
 }
