@@ -30,14 +30,16 @@ pub enum Namespace {
     /// The user's lexical model — learned words + whitelist, persisted as one
     /// atomic blob (sole writer: `personalization`).
     UserDict,
-    /// Reserved for a future dedicated personal n-gram store; not currently
-    /// written by any crate.
+    /// The on-device next-word (bigram) model (sole writer: `context`).
     PersonalLm,
     /// Clipboard history (sole writer: `clipboard-core`).
     Clipboard,
     /// Per-user correction signals — strip-pick prefs + unwanted words (sole
     /// writer: `corrections`).
     Corrections,
+    /// Per-user neural re-ranker weights (sole writer: `featherkey-neural-ranker`
+    /// via the composition root).
+    RankerModel,
 }
 
 impl Namespace {
@@ -50,6 +52,7 @@ impl Namespace {
             Namespace::PersonalLm => "personal_lm",
             Namespace::Clipboard => "clipboard",
             Namespace::Corrections => "corrections",
+            Namespace::RankerModel => "ranker_model",
         }
     }
 }
@@ -229,6 +232,7 @@ mod tests {
             Namespace::PersonalLm,
             Namespace::Clipboard,
             Namespace::Corrections,
+            Namespace::RankerModel,
         ];
         let keys: Vec<&str> = all.iter().map(|n| n.as_str()).collect();
         assert_eq!(
@@ -238,7 +242,8 @@ mod tests {
                 "user_dict",
                 "personal_lm",
                 "clipboard",
-                "corrections"
+                "corrections",
+                "ranker_model"
             ]
         );
         // Distinct table names — no two namespaces collide in storage.
@@ -247,6 +252,11 @@ mod tests {
                 assert_ne!(a, b);
             }
         }
+    }
+
+    #[test]
+    fn ranker_model_namespace_key_is_stable() {
+        assert_eq!(Namespace::RankerModel.as_str(), "ranker_model");
     }
 
     #[test]
