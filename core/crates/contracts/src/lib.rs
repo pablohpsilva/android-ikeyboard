@@ -40,6 +40,9 @@ pub enum Namespace {
     /// Per-user neural re-ranker weights (sole writer: `featherkey-neural-ranker`
     /// via the composition root).
     RankerModel,
+    /// Neural autocorrect-gate model (sole writer: `featherkey-neural-autocorrect`
+    /// via the composition root).
+    AutocorrectGate,
 }
 
 impl Namespace {
@@ -53,6 +56,7 @@ impl Namespace {
             Namespace::Clipboard => "clipboard",
             Namespace::Corrections => "corrections",
             Namespace::RankerModel => "ranker_model",
+            Namespace::AutocorrectGate => "autocorrect_gate",
         }
     }
 }
@@ -233,6 +237,7 @@ mod tests {
             Namespace::Clipboard,
             Namespace::Corrections,
             Namespace::RankerModel,
+            Namespace::AutocorrectGate,
         ];
         let keys: Vec<&str> = all.iter().map(|n| n.as_str()).collect();
         assert_eq!(
@@ -243,7 +248,8 @@ mod tests {
                 "personal_lm",
                 "clipboard",
                 "corrections",
-                "ranker_model"
+                "ranker_model",
+                "autocorrect_gate"
             ]
         );
         // Distinct table names — no two namespaces collide in storage.
@@ -257,6 +263,11 @@ mod tests {
     #[test]
     fn ranker_model_namespace_key_is_stable() {
         assert_eq!(Namespace::RankerModel.as_str(), "ranker_model");
+    }
+
+    #[test]
+    fn autocorrect_gate_namespace_has_a_stable_key() {
+        assert_eq!(Namespace::AutocorrectGate.as_str(), "autocorrect_gate");
     }
 
     #[test]
