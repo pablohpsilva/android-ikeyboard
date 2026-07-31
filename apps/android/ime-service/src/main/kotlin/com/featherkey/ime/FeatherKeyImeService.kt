@@ -237,7 +237,7 @@ class FeatherKeyImeService : InputMethodService() {
     private fun applyLayout() {
         val choice = layoutPrefs.choice()
         val resolved = if (choice == KeyboardLayoutChoice.AUTO) {
-            PhysicalKeyboardLayout.detect() ?: KeyboardLayoutChoice.AUTO
+            runCatching { PhysicalKeyboardLayout.detect() }.getOrNull() ?: KeyboardLayoutChoice.AUTO
         } else {
             choice
         }

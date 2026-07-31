@@ -1,5 +1,6 @@
 package com.featherkey.platform
 
+import android.os.Build
 import android.view.InputDevice
 import android.view.KeyEvent
 
@@ -25,8 +26,18 @@ object PhysicalKeyboardLayout {
         return null
     }
 
-    /** Probe the first attached, non-virtual alphabetic keyboard. Null if none. */
+    /**
+     * Probe the first attached, non-virtual alphabetic keyboard. Null if none.
+     *
+     * `InputDevice.getKeyCodeForKeyLocation` requires API 33 (Android 13,
+     * TIRAMISU) per the platform API database (`since="33"` in
+     * `api-versions.xml`; confirmed by the lint NewApi check, which reports
+     * "Call requires API level 33"). On pre-33 devices there is no
+     * per-key-location API, so `detect` returns null and AUTO correctly
+     * falls through to the core's selected-language default.
+     */
     fun detect(): KeyboardLayoutChoice? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return null
         for (id in InputDevice.getDeviceIds()) {
             val dev = InputDevice.getDevice(id) ?: continue
             if (dev.isVirtual) continue
