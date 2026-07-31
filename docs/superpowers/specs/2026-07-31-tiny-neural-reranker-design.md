@@ -1,11 +1,25 @@
-# Tiny Neural Re-Ranker + NN Foundation — Design (BR-69)
+# Tiny Neural Re-Ranker + NN Foundation — Design (BR-11)
 
 **Status:** Design phase. Slice 1 of the neural roadmap (foundation + first application).
 **Date:** 2026-07-31
-**Requirement:** **BR-69** (new; add to `BUSINESS_REQUIREMENTS.md`), traces **OBJ-1**
-(typing accuracy that *improves over time*), **OBJ-3** (private by design), **OBJ-7**
-(tiny footprint). Realises **smartness-roadmap Tier-3 item 7** ("tiny on-device model
-for next-word/correction"), starting with the cheapest, lowest-risk application.
+**Requirement:** **BR-11** — *"Prediction quality must improve as the keyboard learns the
+user's vocabulary and habits"* (priority S; traces P-3, P-5, **OBJ-1**). This feature is
+BR-11's first concrete mechanism, and supplies its currently-missing BDD coverage. Supports
+**BR-10** (predictions genuinely relevant) and **BR-9** (view/reset/delete learned data via
+the whole-store purge). No new BR is minted — an earlier draft proposed "BR-69", but BR-11
+already states this requirement (a redundant BR would duplicate it; CLAUDE.md §4 DRY applies to
+requirements too). Realises **smartness-roadmap Tier-3 item 7** and **SEDD ADR-3** (the phased
+prediction engine's "accuracy upgrade" seam), starting with the cheapest, lowest-risk
+application.
+
+**Reconciliation with the reserved `neural-runtime` crate (ADR-3 / ADR-5 / risk R-6):** the
+architecture docs reserve a *future* `neural-runtime` (v1.x) crate for a **heavy, pretrained
+neural language model** run via `tract`/`candle`, feature-gated off for footprint. That is a
+**different animal** from this feature and is **not** what we build here. This slice introduces
+`featherkey-nn`: a *tiny, dependency-free, on-device-**trainable*** substrate. The two are
+complementary and coexist — `featherkey-nn` (now: small, trainable, always-on, re-ranking)
+vs. `neural-runtime` (future app #4: large, pretrained, gated, next-word LM). Naming them
+distinctly avoids conflating the trainable substrate with the heavy-inference runtime.
 
 ---
 
@@ -236,10 +250,10 @@ a post-wipe reload) never regresses today's behaviour.
 - **`featherkey-core`:** commit-sequence → later `rank_suggestions` reflects learning;
   gating no-op in sensitive field / consent off (control test proving the gate bites);
   persist → reload → identical scores; **post-wipe reload → prior** (purge proof).
-- **BDD `@BR-69`** in `core/features/`: *"the strip learns to rank the word I keep choosing
-  higher, and forgets it when I clear my data."*
+- **BDD `@BR-11`** in `core/features/` (BR-11's first scenario): *"the strip learns to rank the
+  word I keep choosing higher, and forgets it when I clear my data."*
 - **Definition of Done** (IMPLEMENTATION_PLAN §3.2): all tests green · coverage ≥ 98% line ·
-  fitness exit 0 (≤500 lines/file, ≤60 lines/fn) · clippy `-D warnings` · `@BR-69` scenario ·
+  fitness exit 0 (≤500 lines/file, ≤60 lines/fn) · clippy `-D warnings` · `@BR-11` scenario ·
   traceability rows · CODEMAP regenerated · no panics on the hot path.
 
 ## 11. Global constraints (bind every task)
@@ -303,9 +317,29 @@ what already exists (CLAUDE.md §2), naming ports/invariants/alternatives.
 
 **Handed to the plan phase (not design gaps — plan-level detail):** concrete `C` + feature
 bounds for the prior; splitting `correction_adjustment` into promote/demote parts
-(behaviour-preserving); bounding the per-prefix training-example cache; adding BR-69 to the BRD
-+ `@BR-69` scenario.
+(behaviour-preserving); bounding the per-prefix training-example cache; adding the first
+`@BR-11` scenario (no BRD edit needed — BR-11 already exists).
 
 **Verdict: ✅ Complete and verified** — design covers every requirement area, is grounded in the
 actual seam code, and the load-bearing invariants (cold-start no-regression, encrypted, purged
 by the existing wipe, gated) are specified. Ready for user review, then the plan phase.
+
+### Pass 2 — ✅ Complete and verified (requirement + architecture reconciliation)
+
+Audited the design against the design docs (BRD → SEDD → ARCH), which Pass 1 had not read.
+Found a real contradiction and resolved it in the artifact (the gate changed something):
+
+- **Redundant BR.** The draft minted "BR-69", but **BR-11** already states this exact
+  requirement ("prediction quality must improve as the keyboard learns the user's habits",
+  priority S, OBJ-1) and has **no existing BDD scenario**. Retraced the feature to
+  **BR-11** (+ BR-10, BR-9); the BDD scenario is now the first `@BR-11`. No BRD edit needed.
+  Evidence: `BUSINESS_REQUIREMENTS.md:205`; `grep @BR-11 core/features/` = none.
+- **`neural-runtime` name clash.** SEDD ADR-3/ADR-5 + risk R-6 reserve a *future* heavy
+  pretrained-LM crate `neural-runtime` (tract/candle, gated off). This slice's tiny trainable
+  substrate is a different animal → kept as `featherkey-nn`, and the header now documents the
+  two as complementary (trainable re-ranker now vs. pretrained LM later = app #4). Contradiction
+  recorded, not resolved silently (CLAUDE.md §7).
+  Evidence: `SOFTWARE_ENGINEERING.md:307` (`neural-runtime … tract/candle`), `IMPLEMENTATION_PLAN.md:226,300`.
+
+**Still verdict ✅** — the reconciliation strengthens the requirement anchor and removes a DRY
+violation; no new gaps opened. Ready for user review + plan phase.
