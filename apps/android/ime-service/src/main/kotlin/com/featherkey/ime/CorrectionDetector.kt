@@ -149,4 +149,22 @@ class CorrectionDetector {
         lastWithheld = null
         withheldFresh = false
     }
+
+    /** Bound the withheld note's reach window: drop it without emitting any
+     *  signal. [onManualWord] already expires a stale note when the very next
+     *  event IS a checked manual word (an uncorrected boundary commit or a
+     *  suggestion pick) — but a swipe, a symbol/emoji, a whole-word
+     *  delete-retype, a newline, or a DIFFERENT word's own autocorrect never
+     *  call [onManualWord] at all, so none of those used to expire the note:
+     *  it could survive across them indefinitely and later fire a false
+     *  [Outcome.REACHED] when the user, unrelatedly, typed the withheld word
+     *  (a stale counterfactual mis-training the gate). The service calls this
+     *  alongside [reset] for exactly those event kinds — never for a plain
+     *  typed character or the same-commit self-check — so a genuine
+     *  same-window delete-and-retype (the [withheldFresh] shield) still
+     *  reaches. Does not touch [pendingAutocorrect]. Idempotent. */
+    fun expireWithheld() {
+        lastWithheld = null
+        withheldFresh = false
+    }
 }

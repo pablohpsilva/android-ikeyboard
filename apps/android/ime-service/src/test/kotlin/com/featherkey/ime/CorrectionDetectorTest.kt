@@ -199,4 +199,52 @@ class CorrectionDetectorTest {
         assertNull(d.onBackspaceUndo())     // no revert leaks into the new field
         assertNull(d.onManualWord("cat"))   // no reach leaks into the new field
     }
+
+    // --- Bounding the withheld note beyond the immediately-following commit --
+    //
+    // onManualWord already expires a stale note when the NEXT event IS a checked
+    // manual word (an uncorrected boundary commit or a suggestion pick — see
+    // a_withheld_note_does_not_fire_reached_after_an_intervening_word above). But
+    // a swipe, a symbol/emoji, a whole-word delete-retype, a newline, or a
+    // DIFFERENT word's own autocorrect never call onManualWord at all, so none of
+    // them used to expire the note — it could survive indefinitely and fire a
+    // stale Reached when the user later, unrelatedly, typed the withheld word.
+    // expireWithheld() is the seam the service routes those events through
+    // (alongside its existing reset()/clearCorrectionLookback call).
+
+    @Test fun expire_withheld_drops_a_stale_note_without_a_signal() {
+        val d = CorrectionDetector()
+        d.noteWithheld("cat") // core withheld "cat" for a weak "xat"
+        assertNull(d.onManualWord("xat")) // same-commit self-check (shielded): note kept
+        // An intervening event that is not a checked manual word (a swipe, a
+        // symbol/emoji, a delete-retype, a newline, another word's own autocorrect)
+        // bounds the note's reach.
+        d.expireWithheld()
+        assertNull(d.onManualWord("cat")) // reached late, unrelated: must NOT be Reached
+    }
+
+    @Test fun expire_withheld_does_not_block_an_immediate_same_window_reach() {
+        val d = CorrectionDetector()
+        d.noteWithheld("cat")
+        assertNull(d.onManualWord("xat")) // same-commit self-check (shielded): note kept
+        // No intervening non-manual-word event happened: the immediately-following
+        // manual landing on "cat" (delete-then-retype in the same window) still
+        // reaches — expireWithheld is never called on this path.
+        assertEquals(Outcome.REACHED, d.onManualWord("cat"))
+    }
+
+    @Test fun expire_withheld_is_idempotent_with_no_pending_note() {
+        val d = CorrectionDetector()
+        d.expireWithheld() // nothing to drop
+        assertNull(d.onManualWord("cat"))
+    }
+
+    @Test fun expire_withheld_does_not_touch_a_pending_autocorrect() {
+        // expireWithheld is the withheld-note-only half of clear(); it must not
+        // also drop the unrelated one-slot revert lookback.
+        val d = CorrectionDetector()
+        d.onAutocorrect(from = "teh", to = "the")
+        d.expireWithheld()
+        assertEquals(CorrectionSignal.RevertAfterAutocorrect("teh"), d.onBackspaceUndo())
+    }
 }

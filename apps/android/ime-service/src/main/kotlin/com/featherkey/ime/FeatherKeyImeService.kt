@@ -373,9 +373,11 @@ class FeatherKeyImeService : InputMethodService() {
     private fun handleGesture(pathPts: List<PointF>, centers: Map<Char, PointF>) {
         val ic = currentInputConnection ?: return
         atomicSpan = 0 // a fresh gesture; re-armed below only if it commits a word
-        clearCorrectionLookback() // a gesture is intervening input: clear the autocorrect
-        // revert lookback so a later backspace can't spuriously whitelist a typo,
-        // even when this swipe decodes to nothing (early return below).
+        // A gesture is intervening input: clear the autocorrect revert lookback so a
+        // later backspace can't spuriously whitelist a typo, even when this swipe
+        // decodes to nothing (early return below). A swipe never checks the withheld
+        // note (it doesn't call onManualWord), so also bound its reach here.
+        clearCorrectionLookback(boundWithheld = true)
         ensureBridgeReady() // cold start: the first swipe waits for the core to open
         ensureVocabReady() // cold start: don't decode the first swipe against an empty list
         // Re-centre the keys by the core's learned per-key tap offsets and bias the
@@ -452,10 +454,21 @@ class FeatherKeyImeService : InputMethodService() {
     /** Clear the autocorrect revert lookback (the service's per-intervening-edit
      *  hook, [CorrectionDetector.reset]). When the cleared slot means a correction
      *  survived to this edit without being reverted, feed the core a KEPT training
-     *  signal (gated like all learning). */
-    private fun clearCorrectionLookback() {
+     *  signal (gated like all learning).
+     *
+     *  [boundWithheld] additionally bounds the withheld-reach counterfactual
+     *  ([CorrectionDetector.expireWithheld]) for event kinds that never call
+     *  [CorrectionDetector.onManualWord] — a swipe, a symbol/emoji, a whole-word
+     *  delete-retype, or a newline — so a withheld note can't survive across them
+     *  indefinitely and later fire a stale Reached for an unrelated later
+     *  occurrence of the same word. Left false for a plain typed character/letter
+     *  pick (mid-word, must not cut off a same-window delete-and-retype) and for
+     *  the suggestion-pick/boundary commits that already self-check the note via
+     *  `onManualWord` right after this call. */
+    private fun clearCorrectionLookback(boundWithheld: Boolean = false) {
         val kept = corrections.reset()
         if (kept != null) emitOutcome(kept)
+        if (boundWithheld) corrections.expireWithheld()
     }
 
     /** Feed the core's neural autocorrect gate the real-world [outcome] of the last
@@ -621,7 +634,9 @@ class FeatherKeyImeService : InputMethodService() {
         ic.commitText(ch, 1)
         pending.clear()
         atomicSpan = 0
-        clearCorrectionLookback() // an intervening symbol/number clears the revert lookback
+        // A symbol/number clears the revert lookback and, never checking the
+        // withheld note itself, also bounds its reach.
+        clearCorrectionLookback(boundWithheld = true)
         keyboard?.suggestions = emptyList()
     }
 
@@ -638,7 +653,9 @@ class FeatherKeyImeService : InputMethodService() {
         pending.clear()
         atomicSpan = 0
         lastWord = null
-        clearCorrectionLookback() // an intervening emoji clears the revert lookback
+        // An emoji clears the revert lookback and, never checking the withheld
+        // note itself, also bounds its reach.
+        clearCorrectionLookback(boundWithheld = true)
         keyboard?.suggestions = emptyList()
         keyboard?.recents = emojiRecents.record(emoji)
     }
@@ -777,6 +794,10 @@ class FeatherKeyImeService : InputMethodService() {
                 // Arm the one-slot revert lookback: an immediate backspace after this
                 // means the user rejected the correction (keep their original word).
                 corrections.onAutocorrect(word, out)
+                // This word's OWN autocorrect never checks a withheld note (that only
+                // happens on the uncorrected branch below) — so it can't be a match for
+                // a note left over from an earlier word either; bound its reach here.
+                corrections.expireWithheld()
             } else {
                 // The user's typed word stood uncorrected: if it is the exact word a
                 // correction was earlier WITHHELD in favour of (e.g. deleted a weak
@@ -876,8 +897,10 @@ class FeatherKeyImeService : InputMethodService() {
             lastWord = null // the deleted word is gone: no next-word context
             lastAtomicWord = null
             // Deleting a just-committed word whole is an intervening edit: surface a
-            // KEPT for any autocorrect it displaced before recording the delete.
-            clearCorrectionLookback()
+            // KEPT for any autocorrect it displaced before recording the delete. This
+            // delete-retype never checks the withheld note via onManualWord itself, so
+            // also bound its reach here.
+            clearCorrectionLookback(boundWithheld = true)
             // Deleting a just-committed word whole is a low-weight negative signal.
             if (rejected != null && observeGate()) {
                 val sig = corrections.onDeleteRetype(rejected)
@@ -912,7 +935,9 @@ class FeatherKeyImeService : InputMethodService() {
         pending.clear()
         atomicSpan = 0
         lastWord = null // Enter ends the line: start the next with no context
-        clearCorrectionLookback() // a newline is an intervening event: drop the revert lookback
+        // A newline is an intervening event: drop the revert lookback and, never
+        // checking the withheld note itself, also bound its reach.
+        clearCorrectionLookback(boundWithheld = true)
     }
 
     /**

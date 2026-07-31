@@ -375,7 +375,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 ### :ime-service
 
 - **Path:** `apps/android/ime-service`
-- `CorrectionDetector.kt` — `enum class Outcome`; `class CorrectionSignal`; `class CorrectionDetector` — fun `CorrectionDetector.clear`, `CorrectionDetector.noteWithheld`, `CorrectionDetector.onAutocorrect`, `CorrectionDetector.onBackspaceUndo`, `CorrectionDetector.onDeleteRetype`, `CorrectionDetector.onManualWord`, `CorrectionDetector.onSuggestionPicked`, `CorrectionDetector.reset`
+- `CorrectionDetector.kt` — `enum class Outcome`; `class CorrectionSignal`; `class CorrectionDetector` — fun `CorrectionDetector.clear`, `CorrectionDetector.expireWithheld`, `CorrectionDetector.noteWithheld`, `CorrectionDetector.onAutocorrect`, `CorrectionDetector.onBackspaceUndo`, `CorrectionDetector.onDeleteRetype`, `CorrectionDetector.onManualWord`, `CorrectionDetector.onSuggestionPicked`, `CorrectionDetector.reset`
 - `Diacritics.kt` — `object Diacritics` — fun `Diacritics.fold`, `Diacritics.foldChar`
 - `FeatherKeyImeService.kt` — `class FeatherKeyImeService`; `object Lexicons` — fun `FeatherKeyImeService.onCreate`, `FeatherKeyImeService.onCreateInputView`, `FeatherKeyImeService.onDestroy`, `FeatherKeyImeService.onFinishInput`, `FeatherKeyImeService.onStartInput`, `FeatherKeyImeService.onStartInputView`, `Lexicons.load`
 - `GestureDecoder.kt` — `object GestureDecoder` — fun `GestureDecoder.decode`, `GestureDecoder.keyPath`
@@ -534,6 +534,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `CorrectionAssessment` | struct — `featherkey-autocorrect::rank` |
 | `CorrectionDetector` | kotlin class — `:ime-service` |
 | `CorrectionDetector.clear` | kotlin fun — `:ime-service` |
+| `CorrectionDetector.expireWithheld` | kotlin fun — `:ime-service` |
 | `CorrectionDetector.noteWithheld` | kotlin fun — `:ime-service` |
 | `CorrectionDetector.onAutocorrect` | kotlin fun — `:ime-service` |
 | `CorrectionDetector.onBackspaceUndo` | kotlin fun — `:ime-service` |
