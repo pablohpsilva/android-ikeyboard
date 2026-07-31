@@ -109,8 +109,8 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Depends on:** `featherkey-contracts`, `featherkey-nn`
 - **Serves:** BR-12, BR-13, BR-15, BR-22, BR-26, BR-46
 - **Structs:** `AutocorrectGate`, `GateFeatures`
-- **Constants:** `INPUTS`, `RESIDUAL_BOUND`
-- **Methods:** `AutocorrectGate::from_prior`, `AutocorrectGate::residual`, `GateFeatures::to_array`
+- **Constants:** `GATE_LR`, `INPUTS`, `RESIDUAL_BOUND`
+- **Methods:** `AutocorrectGate::from_prior`, `AutocorrectGate::reinforce`, `AutocorrectGate::residual`, `GateFeatures::to_array`
 
 ### featherkey-candidate-ranker
 
@@ -482,6 +482,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `AutoCorrect::correct` | method — `featherkey-contracts` |
 | `AutocorrectGate` | struct — `featherkey-autocorrect-gate` |
 | `AutocorrectGate::from_prior` | method — `featherkey-autocorrect-gate` |
+| `AutocorrectGate::reinforce` | method — `featherkey-autocorrect-gate` |
 | `AutocorrectGate::residual` | method — `featherkey-autocorrect-gate` |
 | `BEAM` | const — `featherkey-tap-sequence` |
 | `BRANCH` | const — `featherkey-tap-sequence` |
@@ -677,6 +678,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `fold` | fn — `featherkey-fold` |
 | `fold_char` | fn — `featherkey-fold` |
 | `FunctionKey` | kotlin enum class — `:keyboard-view` |
+| `GATE_LR` | const — `featherkey-autocorrect-gate` |
 | `GateFeatures` | struct — `featherkey-autocorrect-gate` |
 | `GateFeatures::to_array` | method — `featherkey-autocorrect-gate` |
 | `GestureDecoder` | kotlin object — `:ime-service` |

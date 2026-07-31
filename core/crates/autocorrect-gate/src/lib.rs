@@ -19,6 +19,9 @@ pub const RESIDUAL_BOUND: f64 = 1.5;
 /// its input weights retain a gradient path for training (Task 4).
 const PRIOR_OFFSET_C: f32 = 8.0;
 
+/// Default learning rate for one correction outcome.
+pub const GATE_LR: f32 = 0.05;
+
 /// Structural features of one correction decision (slot order = the contract).
 #[derive(Debug, Clone, Copy)]
 pub struct GateFeatures {
@@ -73,6 +76,15 @@ impl AutocorrectGate {
     pub fn residual(&self, f: &GateFeatures) -> f64 {
         f64::from(self.nn.forward(&f.to_array())).clamp(-RESIDUAL_BOUND, RESIDUAL_BOUND)
     }
+
+    /// One SGD step of squared-error regression toward `target` (the desired
+    /// residual for these features): reverts train toward a negative target,
+    /// kept/reached toward positive. `d_output = 2 * (forward - target)`.
+    pub fn reinforce(&mut self, f: &GateFeatures, target: f32, lr: f32) {
+        let x = f.to_array();
+        let d = 2.0 * (self.nn.forward(&x) - target);
+        self.nn.train_step(&x, d, lr);
+    }
 }
 
 #[cfg(test)]
@@ -117,5 +129,28 @@ mod tests {
             momentum_weight: 1e6,
         };
         assert!(g.residual(&f).abs() <= RESIDUAL_BOUND + 1e-9);
+    }
+
+    #[test]
+    fn reinforce_moves_the_residual_toward_the_target() {
+        let f = GateFeatures {
+            edit_distance: 2.0,
+            winner_confidence: 0.1,
+            dict_rank_norm: 0.05,
+            typed_len_norm: 0.25,
+            momentum_weight: 0.0,
+        };
+        let mut up = AutocorrectGate::from_prior();
+        let before = up.residual(&f);
+        for _ in 0..200 {
+            up.reinforce(&f, 1.0, GATE_LR);
+        }
+        assert!(up.residual(&f) > before + 0.1, "target +1 must raise residual");
+
+        let mut down = AutocorrectGate::from_prior();
+        for _ in 0..200 {
+            down.reinforce(&f, -1.0, GATE_LR);
+        }
+        assert!(down.residual(&f) < -0.1, "target -1 must lower residual");
     }
 }
