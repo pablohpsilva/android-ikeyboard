@@ -37,6 +37,7 @@ members = [
     "crates/fold",
     "crates/context",
     "crates/corrections",
+    "crates/nn",
 ]
 
 [workspace.package]

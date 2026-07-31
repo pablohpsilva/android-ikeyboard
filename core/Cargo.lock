@@ -497,6 +497,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "featherkey-nn"
+version = "0.0.0"
+
+[[package]]
 name = "featherkey-personalization"
 version = "0.0.0"
 dependencies = [

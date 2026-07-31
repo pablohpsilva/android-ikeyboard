@@ -40,7 +40,7 @@ silence about something real is the one answer this index must never give.
 
 ## 1. Rust core — crate map
 
-23 crates in the `core/` Cargo workspace. Layers run inward:
+24 crates in the `core/` Cargo workspace. Layers run inward:
 `foundation` → `port` → `domain` → `adapter` → `composition`; a crate may
 only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 
@@ -61,6 +61,7 @@ only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 | `featherkey-language-momentum` | domain | Recency-weighted per-language momentum: which language the user is writing in now. | — |
 | `featherkey-layout-engine` | domain | Provide keyboard-key layout geometry (alpha/numeric/symbol pages, key rectangles and centers) with an RTL-ready direction marker (ADR-16). | kernel |
 | `featherkey-locale-manager` | domain | Track the ordered set of active languages and identify, per word, which active language it belongs to (lightweight statistical language-ID). | dictionary |
+| `featherkey-nn` | domain | Tiny dependency-free neural substrate: 1-hidden-layer MLP with forward, SGD, linear-prior init, and versioned serialization. | — |
 | `featherkey-personalization` | domain | Learn the user's vocabulary/whitelist and own the user dictionary — the sole writer of the lexical learned-data domain (`Namespace::UserDict`, ADR-14). | contracts |
 | `featherkey-prediction` | domain | Rank prefix-completion suggestions from the active-language lexicons behind the `Predictor` port. | context, contracts, dictionary, fold |
 | `featherkey-sensitive-context` | domain | Decide whether the current editor field is sensitive and must therefore suppress learning and prediction (the BR-26 gate). | contracts |
@@ -248,6 +249,15 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Enums:** `LocaleError`
 - **Methods:** `LangId::as_str`, `LangId::new`, `LocaleManager::active`, `LocaleManager::detect`, `LocaleManager::new`, `LocaleManager::set_active`
 - **Integration tests:** `tests/detection.rs`
+
+### featherkey-nn
+
+- **Path:** `core/crates/nn` — **Layer:** domain
+- **One job:** Tiny dependency-free neural substrate: 1-hidden-layer MLP with forward, SGD, linear-prior init, and versioned serialization.
+- **Depends on:** nothing (leaf)
+- **Structs:** `Mlp`
+- **Methods:** `Mlp::forward`, `Mlp::inputs`, `Mlp::with_weights`
+- ⚠️ **No README.md** — add one (ARCHITECTURE.md §5.2 crate anatomy).
 
 ### featherkey-personalization
 
@@ -820,6 +830,10 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `MAX_COMPLETIONS` | const — `featherkey-dictionary` |
 | `MAX_SUGGESTIONS` | const — `featherkey-prediction` |
 | `MAX_TAPS` | const — `featherkey-tap-sequence` |
+| `Mlp` | struct — `featherkey-nn` |
+| `Mlp::forward` | method — `featherkey-nn` |
+| `Mlp::inputs` | method — `featherkey-nn` |
+| `Mlp::with_weights` | method — `featherkey-nn` |
 | `Momentum` | struct — `featherkey-language-momentum` |
 | `Momentum::new` | method — `featherkey-language-momentum` |
 | `Momentum::observe` | method — `featherkey-language-momentum` |

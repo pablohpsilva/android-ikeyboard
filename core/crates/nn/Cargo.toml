@@ -1,0 +1,14 @@
+[package]
+name = "featherkey-nn"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Tiny dependency-free neural substrate: 1-hidden-layer MLP with forward, SGD, linear-prior init, and versioned serialization."
+
+[package.metadata.featherkey]
+layer = "domain"
+
+[lints]
+workspace = true
