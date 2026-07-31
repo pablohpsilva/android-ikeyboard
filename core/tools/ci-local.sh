@@ -52,7 +52,10 @@ step "supply-chain (cargo-deny)"
 if cargo deny --version >/dev/null 2>&1; then
     cargo generate-lockfile >/dev/null 2>&1
     run cargo deny check
-    rm -f Cargo.lock
+    # Restore the committed lockfile rather than deleting it: `generate-lockfile`
+    # above may have refreshed it, and `Cargo.lock` is committed (the supply-chain
+    # gate depends on it) — a bare `rm` left the working tree missing a tracked file.
+    git checkout -- Cargo.lock 2>/dev/null || true
 else
     echo "   SKIPPED (cargo-deny not installed) — CI installs it"
 fi
