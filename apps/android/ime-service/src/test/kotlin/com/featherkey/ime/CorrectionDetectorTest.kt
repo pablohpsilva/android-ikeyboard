@@ -133,6 +133,18 @@ class CorrectionDetectorTest {
         assertNull(d.reset())
     }
 
+    @Test fun a_next_word_pick_after_an_autocorrect_still_surfaces_kept() {
+        // BR-10 next-word flow: "teh " autocorrects to "the " (arms the lookback),
+        // then the user taps a next-word suggestion before typing anything. The
+        // service routes that pick's intervening edit through reset() FIRST, so the
+        // survived autocorrect is reported KEPT and is not swallowed by the pick.
+        val d = CorrectionDetector()
+        d.onAutocorrect(from = "teh", to = "the")
+        assertEquals(Outcome.KEPT, d.reset()) // the service's pre-pick hook
+        // onSuggestionPicked then finds no pending autocorrect left to consume.
+        assertNull(d.onSuggestionPicked(prefix = "", index = 0, picked = "cat"))
+    }
+
     // --- Reached: the user manually lands on a withheld correction -----------
 
     @Test fun reaching_the_withheld_word_is_a_reached_signal() {
@@ -159,9 +171,32 @@ class CorrectionDetectorTest {
     @Test fun a_non_matching_manual_word_leaves_the_withheld_note_intact() {
         val d = CorrectionDetector()
         d.noteWithheld("cat")
-        // The user typed something else first (e.g. deleting the weak word) — the
-        // counterfactual is still pending until they actually reach "cat".
+        // The weak word's own boundary self-check (shielded) does not expire the
+        // note, so the immediately-following delete-then-retype reach still fires.
         assertNull(d.onManualWord("xat"))
         assertEquals(Outcome.REACHED, d.onManualWord("cat"))
+    }
+
+    @Test fun a_withheld_note_does_not_fire_reached_after_an_intervening_word() {
+        // Mirrors the service: the boundary that typed the weak word "xat" both
+        // notes the withheld "cat" AND self-checks it (shielded, so the note
+        // survives). But if the user then commits an UNRELATED word instead of
+        // reaching "cat", the note expires — so typing "cat" a sentence later is
+        // NOT a false REACHED (bounded lifetime: BR-26/gate-quality safety).
+        val d = CorrectionDetector()
+        d.noteWithheld("cat")
+        assertNull(d.onManualWord("xat")) // same-commit self-check, note kept
+        assertNull(d.onManualWord("dog")) // an intervening word — expires the note
+        assertNull(d.onManualWord("cat")) // reached late: must NOT be REACHED
+    }
+
+    @Test fun clear_drops_a_pending_autocorrect_and_a_withheld_note() {
+        // A hard field boundary (onStartInput) must leak no correction judgment.
+        val d = CorrectionDetector()
+        d.onAutocorrect(from = "teh", to = "the")
+        d.noteWithheld("cat")
+        d.clear()
+        assertNull(d.onBackspaceUndo())     // no revert leaks into the new field
+        assertNull(d.onManualWord("cat"))   // no reach leaks into the new field
     }
 }

@@ -264,6 +264,8 @@ class FeatherKeyImeService : InputMethodService() {
         pending.clear()
         atomicSpan = 0
         lastWord = null // a new field starts with no preceding-word context
+        corrections.clear() // a new field is a hard boundary: no correction
+        // judgment (revert lookback or withheld note) leaks across fields
         editorInputType = info?.inputType ?: 0
         editorImeOptions = info?.imeOptions ?: 0
         editorAction = editorImeOptions and EditorInfo.IME_MASK_ACTION
@@ -728,6 +730,10 @@ class FeatherKeyImeService : InputMethodService() {
         val out = CaseMatch.matchCase(cur, word)
         if (cur.isNotEmpty()) ic.deleteSurroundingText(cur.length, 0)
         ic.commitText("$out ", 1)
+        // Picking a suggestion is an intervening edit: if it lands right after a
+        // boundary autocorrect (the BR-10 next-word flow — nothing typed since),
+        // that correction survived, so emit KEPT before consuming the lookback.
+        clearCorrectionLookback()
         // A non-top pick is a signal the ranking was off for this prefix; feed it to
         // the core (gated exactly like learning) before advancing the context.
         val pick = corrections.onSuggestionPicked(cur.lowercase(), index, out)
@@ -869,6 +875,9 @@ class FeatherKeyImeService : InputMethodService() {
             pending.clear()
             lastWord = null // the deleted word is gone: no next-word context
             lastAtomicWord = null
+            // Deleting a just-committed word whole is an intervening edit: surface a
+            // KEPT for any autocorrect it displaced before recording the delete.
+            clearCorrectionLookback()
             // Deleting a just-committed word whole is a low-weight negative signal.
             if (rejected != null && observeGate()) {
                 val sig = corrections.onDeleteRetype(rejected)

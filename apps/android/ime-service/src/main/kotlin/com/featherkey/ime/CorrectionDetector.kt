@@ -48,11 +48,20 @@ class CorrectionDetector {
     private var pendingAutocorrect: String? = null
 
     /** The word a correction was WITHHELD in favour of (the core would have
-     *  corrected to it but the gate held back). Kept until the user reaches it
-     *  ([onManualWord] matches → [Outcome.REACHED]) or a newer withhold overwrites
-     *  it; not cleared by [reset], so it survives the deletes/retypes between the
-     *  withhold and the manual landing. Null when no correction is pending judgment. */
+     *  corrected to it but the gate held back). Consulted by [onManualWord]; its
+     *  lifetime is BOUNDED to the immediately-following manual commit/pick — a
+     *  non-matching [onManualWord] expires it — so a common word withheld once and
+     *  never reached cannot fire a false [Outcome.REACHED] a sentence (or field)
+     *  later. Not touched by [reset], so it survives the intervening character
+     *  edits between the withhold and a same-window manual landing. */
     private var lastWithheld: String? = null
+
+    /** True only for the single [onManualWord] call that immediately follows a
+     *  [noteWithheld] within the same commit. It shields the withheld note from
+     *  being expired by that same-commit self-check (the boundary that typed the
+     *  weak word also runs an [onManualWord] on it), so a delete-then-retype reach
+     *  at the NEXT commit still sees the note. Consumed by the first [onManualWord]. */
+    private var withheldFresh = false
 
     /** Record that the field autocorrected [from] → [to]. Arms the one-slot
      *  lookback so a following [onBackspaceUndo] is read as a revert. */
@@ -107,16 +116,37 @@ class CorrectionDetector {
      *  confirming [Outcome.REACHED]. Overwrites any prior un-reached withhold. */
     fun noteWithheld(word: String) {
         lastWithheld = word
+        withheldFresh = true
     }
 
     /** The user manually committed/picked [word]. Returns [Outcome.REACHED] iff it
      *  matches the last withheld correction — the user reached, by hand, the word
-     *  the gate declined to auto-apply, confirming the gate was too cautious. The
-     *  signal is one-shot (the slot is consumed on a match). A non-matching word
-     *  leaves the withhold pending (the user has not reached it yet). */
+     *  the gate declined to auto-apply, confirming the gate was too cautious.
+     *
+     *  The signal is one-shot (a match consumes the note). A NON-match also consumes
+     *  the note — bounding its lifetime to the immediately-following manual word —
+     *  UNLESS this is the shielded same-commit self-check ([withheldFresh]), so the
+     *  weak word's own boundary does not expire the note before a next-commit reach.
+     *  This prevents a stale note from firing a false REACHED a word/sentence/field
+     *  later. */
     fun onManualWord(word: String): Outcome? {
-        if (word != lastWithheld) return null
+        if (word == lastWithheld) {
+            lastWithheld = null
+            withheldFresh = false
+            return Outcome.REACHED
+        }
+        if (!withheldFresh) lastWithheld = null // expire a stale, un-reached note
+        withheldFresh = false
+        return null
+    }
+
+    /** Drop ALL retained state — the revert lookback AND the withheld note —
+     *  without emitting any signal. The service calls this at a hard context
+     *  boundary (a new input field, [onStartInput]) so no correction judgment
+     *  leaks across fields. */
+    fun clear() {
+        pendingAutocorrect = null
         lastWithheld = null
-        return Outcome.REACHED
+        withheldFresh = false
     }
 }
