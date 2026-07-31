@@ -330,6 +330,7 @@ Users report that current Android keyboards suffer from the following recurring 
 | ID | Requirement | Priority | Traces to |
 |---|---|---|---|
 | BR-67 | The product will be **open-source**, so its privacy and security claims can be independently inspected and verified (directly satisfying BR-24), and will be funded through donations/sponsorship/grants rather than monetizing user data. | S | OBJ-3, OBJ-4 |
+| BR-68 | The user must be able to choose their alphabetic key layout (QWERTY, QWERTZ, AZERTY, …) independently of the selected language(s), and that layout is used for all Latin-script typing. The default matches the system's layout where detectable, falling back to the selected language's default (QWERTY for most). | S | OBJ-9 |
 
 ---
 
@@ -562,7 +563,7 @@ Contains **every "Must" (M-priority) requirement** — with no Must deferred to 
 - **Reliability:** BR-29, BR-30, BR-31
 - **Design & simplicity:** BR-32, BR-33, BR-34, BR-35
 - **Modularity & footprint:** BR-38, BR-40
-- **Table-stakes typing:** BR-47, BR-48, BR-49
+- **Table-stakes typing:** BR-47, BR-48, BR-49, BR-68
 - **Scripts:** BR-53 (if an RTL language is in the launch set)
 - **Accessibility:** BR-55 (TalkBack)
 - **Trust & model:** BR-58 (onboarding trust), BR-67 (open-source)

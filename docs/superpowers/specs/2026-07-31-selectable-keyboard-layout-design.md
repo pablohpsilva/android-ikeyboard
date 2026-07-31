@@ -51,7 +51,8 @@ Confirmed by CODEMAP query + source read + a dedicated exploration pass:
    alpha letters in production — `FeatherKeyImeService.renderKeys()` maps whatever
    `bridge.layoutKeys()` returns (`FeatherKeyImeService.kt:445`), and the
    tap-decoder resolves against that **same** key set (`keyCenters` derived at
-   `:447`). So rendering and decoding are always consistent *because* they read
+   `:448`, inside the `.also` block opened at `:447`). So rendering and decoding
+   are always consistent *because* they read
    one source. (Kotlin owns only the number/symbol pages and a `FALLBACK_QWERTY`
    used while the bridge is still opening — `KeyboardView.kt:1230`.)
 
@@ -69,8 +70,10 @@ Confirmed by CODEMAP query + source read + a dedicated exploration pass:
 4. **Settings pattern already exists.** `KeyboardAppearancePrefs`
    (`platform-services/.../KeyboardAppearancePrefs.kt`) is a SharedPreferences
    store using an `enum(tag)` + getter/setter, read by the IME per field. The
-   settings screen's `TypingSection` renders the height picker as a row of
-   `FilterChip`s (`SettingsActivity.kt:407`). `LanguagePrefs`
+   settings screen's `TypingSection` (`SettingsActivity.kt:399`) renders the
+   height picker as a row of `HeightOption(...)` calls (`:409`–`:415`), each a
+   thin wrapper over `FilterChip` (`HeightOption` at `:444`, `FilterChip` at
+   `:445`). `LanguagePrefs`
    (`platform-services/.../LanguagePrefs.kt`) is the precedent for a preference
    that flows **to the core** (via `applyLanguages`), not to the view.
 
@@ -293,4 +296,66 @@ repo's TDD/BDD contract. Each phase (design/plan/build) exits on a clean
 `/r-u-sure`.
 
 ## Audit log
-(To be appended on each `/r-u-sure` run per CLAUDE.md §1.1.)
+
+### Pass 1 — ✅ Complete and verified (design phase)
+Audited the design against BR-68 and against every existing-code reference it
+makes (a dedicated verification pass read the cited files).
+
+**Requirement side — verified:**
+- BR-68 is unused (highest existing is BR-67) → the number is free.
+- OBJ-9 ("dead-simple to use") exists (`BUSINESS_REQUIREMENTS.md:87`) → trace valid.
+- BR-47 (number/symbol layouts, priority **M**, traced OBJ-9) is a real
+  table-stakes-typing analog (`:291`). Note: the design proposes BR-68 as **S**
+  while its stated analog BR-47 is **M** — a judgment call, to be finalised when
+  the BRD row is written (build phase, §9); not a design defect.
+
+**Code-reference side — 10/10 claims verified against source, 2 line-number
+drifts (now corrected in §2):**
+- alpha_for `scripts.rs:65` (single-arg `pub fn alpha_for(tag:&str)->Self`) ✓
+- 3 call sites `lib.rs:167,199,233` ✓ (a 4th at `:154` is only a doc comment)
+- `azerty()`@:42 / `qwertz()`@:52 implemented + test
+  `azerty_and_qwertz_are_full_latin_variants`@:114 ✓
+- FFI `layout_keys`@:394 / `use_alpha_layout`@:403 / `use_numeric_layout`@:408 /
+  `use_symbols_layout`@:413 / `set_active_languages`@:423 — none takes a layout
+  selector ✓
+- `set_layout`@`lib.rs:227` exists, NOT `#[uniffi::export]`ed (lib.rs has no
+  export attrs at all — all export scaffolding is in `ffi.rs`) ✓
+- `KeyboardAppearancePrefs` + `LanguagePrefs` exist with the described pattern;
+  Language flow to core confirmed (`activeTags()`→`applyLanguages`→
+  `bridge.setActiveLanguages`) ✓
+- `renderKeys()`→`layoutKeys()`@:445, `applyLanguages` refresh@:298 ✓; keyCenters
+  actually at **:448** (was cited :447) — **fixed**.
+- `FALLBACK_QWERTY`@`KeyboardView.kt:1230` ✓
+- height picker chips: `TypingSection`@:399, chips via `HeightOption` wrapper over
+  `FilterChip`@:409–:415/:445 (was cited flatly as ":407", which is the label) —
+  **fixed**.
+- `settings-ui` has zero test source dirs ✓ (matches §2.6 / §7 caveat).
+
+Changed: §2 keyCenters ref `:447`→`:448`; §2 height-picker ref rewritten to name
+the `HeightOption`/`FilterChip` wrapper and correct lines.
+
+**Open item — RESOLVED (user, 2026-07-31):** "Auto, no physical keyboard"
+resolves via the **selected primary language's** locale default (reuse
+`alpha_for`), *not* the device's `Configuration.getLocales()`. The user chose this
+reading of "match the system" — no second locale source. D4/§5 already specify
+exactly this, so no design change is needed; the choice is now locked for the
+plan/build phases.
+
+Evidence basis: source verification pass (17 tool calls) + BRD grep. No code was
+run — this is a design artifact; runtime evidence belongs to the build gate.
+
+Verdict: ✅ **Complete and verified** for the design phase. Cleared to advance to
+the plan phase.
+
+### Pass 2 — ⚠️ Done but unverified on-device (build phase, 2026-07-31)
+Design realised on branch `selectable-keyboard-layout` (commits `dbac6de`..`a40cfaa`),
+subagent-driven with per-task reviews + a whole-branch review. Every DoD §8 item is
+green with host evidence: `ci-local.sh` 906/0, coverage ≥98% (98.96/98.77/99.23),
+fitness exit 0, bindings gate OK, `@BR-68` traceable, no panics; the public API
+matches §4 (`LatinLayout`, `alpha_for(tag,override)`, `set_latin_layout` core+FFI,
+`KeyboardLayoutPrefs`, `PhysicalKeyboardLayout`). Latin-only (D2), survives-switch,
+and Auto=selected-language-default (the D4 open item, resolved above) are proven by
+Rust tests. The whole-branch review caught + fixed one real crash (an API-33 probe
+call unguarded vs `minSdk=26`). **Handed off (no NDK/device this session):** rebuild
+the arm64 `.so` and run the on-device acceptance (§7). ⚠️ until the device pass
+confirms render+decode on the phone. Full detail in the plan's Audit log Pass 2.

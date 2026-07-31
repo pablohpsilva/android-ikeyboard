@@ -14,6 +14,7 @@ package com.featherkey.ffi
 
 import com.featherkey.ffi.generated.FfiCorrection
 import com.featherkey.ffi.generated.FfiDecode
+import com.featherkey.ffi.generated.FfiLatinLayout
 import com.featherkey.ffi.generated.FfiRankCandidate
 import com.featherkey.ffi.generated.FfiRanked
 import com.featherkey.ffi.generated.FfiSource
@@ -39,6 +40,9 @@ data class LayoutKeyDto(
 
 /** The active layout page. */
 enum class LayoutPage { ALPHA, NUMERIC, SYMBOLS }
+
+/** The Latin key arrangement, or AUTO (per-language default). */
+enum class LatinLayout { AUTO, QWERTY, QWERTZ, AZERTY }
 
 /** The current field's sensitivity, supplied by the IME from `EditorInfo`. */
 fun interface FieldSensitivity {
@@ -135,6 +139,16 @@ class FeatherKeyBridge private constructor(private val core: KeyboardCore) : Aut
         LayoutPage.NUMERIC -> core.useNumericLayout()
         LayoutPage.SYMBOLS -> core.useSymbolsLayout()
     }
+
+    /** Choose the Latin arrangement; fetch [layoutKeys] again afterwards. */
+    fun setLatinLayout(layout: LatinLayout) = core.setLatinLayout(
+        when (layout) {
+            LatinLayout.AUTO -> FfiLatinLayout.AUTO
+            LatinLayout.QWERTY -> FfiLatinLayout.QWERTY
+            LatinLayout.QWERTZ -> FfiLatinLayout.QWERTZ
+            LatinLayout.AZERTY -> FfiLatinLayout.AZERTY
+        }
+    )
 
     fun activeLanguages(): List<String> = core.activeLanguages()
 

@@ -70,6 +70,8 @@ import com.featherkey.platform.DefaultImeStatus
 import com.featherkey.platform.KeyboardAppearancePrefs
 import com.featherkey.platform.KeyboardHeight
 import com.featherkey.platform.KeyboardLanguage
+import com.featherkey.platform.KeyboardLayoutChoice
+import com.featherkey.platform.KeyboardLayoutPrefs
 import com.featherkey.platform.LanguageCatalog
 import com.featherkey.platform.LanguagePrefs
 import java.io.File
@@ -89,6 +91,7 @@ class SettingsActivity : ComponentActivity() {
         val consent = ConsentStore(applicationContext)
         val langPrefs = LanguagePrefs(applicationContext)
         val appearance = KeyboardAppearancePrefs(applicationContext)
+        val layoutPrefs = KeyboardLayoutPrefs(applicationContext)
         val languages = LanguageCatalog.all(applicationContext)
         setContent {
             FeatherKeyTheme {
@@ -120,6 +123,7 @@ class SettingsActivity : ComponentActivity() {
                             learningEnabled = learning,
                             onLearningChanged = { scope.launch { consent.setLearningEnabled(it) } },
                             appearance = appearance,
+                            layoutPrefs = layoutPrefs,
                             hasLearnedData = hasLearnedData(),
                             onClearLearned = { clearLearnedData() },
                         )
@@ -183,6 +187,7 @@ private fun SettingsScreen(
     learningEnabled: Boolean,
     onLearningChanged: (Boolean) -> Unit,
     appearance: KeyboardAppearancePrefs,
+    layoutPrefs: KeyboardLayoutPrefs,
     hasLearnedData: Boolean,
     onClearLearned: () -> Unit,
 ) {
@@ -203,7 +208,7 @@ private fun SettingsScreen(
         ) {
             SetupSection(isDefaultKeyboard, onEnableKeyboard)
             LanguagesSection(languages, initialActive, onActiveChanged)
-            TypingSection(appearance)
+            TypingSection(appearance, layoutPrefs)
             PrivacySection(
                 learningEnabled = learningEnabled,
                 onLearningChanged = onLearningChanged,
@@ -396,10 +401,11 @@ private fun LayoutOnlyCaption() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TypingSection(appearance: KeyboardAppearancePrefs) {
+private fun TypingSection(appearance: KeyboardAppearancePrefs, layoutPrefs: KeyboardLayoutPrefs) {
     var height by remember { mutableStateOf(appearance.height()) }
     var outlines by remember { mutableStateOf(appearance.keyOutlines()) }
     var haptics by remember { mutableStateOf(appearance.haptics()) }
+    var layout by remember { mutableStateOf(layoutPrefs.choice()) }
 
     Section("Typing") {
         Card(modifier = Modifier.fillMaxWidth()) {
@@ -414,6 +420,22 @@ private fun TypingSection(appearance: KeyboardAppearancePrefs) {
                     }
                     HeightOption("Tall", height == KeyboardHeight.TALL) {
                         height = KeyboardHeight.TALL; appearance.setHeight(height)
+                    }
+                }
+                HorizontalDivider()
+                Text("Keyboard layout", style = MaterialTheme.typography.titleMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LayoutOption("Auto", layout == KeyboardLayoutChoice.AUTO) {
+                        layout = KeyboardLayoutChoice.AUTO; layoutPrefs.setChoice(layout)
+                    }
+                    LayoutOption("QWERTY", layout == KeyboardLayoutChoice.QWERTY) {
+                        layout = KeyboardLayoutChoice.QWERTY; layoutPrefs.setChoice(layout)
+                    }
+                    LayoutOption("QWERTZ", layout == KeyboardLayoutChoice.QWERTZ) {
+                        layout = KeyboardLayoutChoice.QWERTZ; layoutPrefs.setChoice(layout)
+                    }
+                    LayoutOption("AZERTY", layout == KeyboardLayoutChoice.AZERTY) {
+                        layout = KeyboardLayoutChoice.AZERTY; layoutPrefs.setChoice(layout)
                     }
                 }
                 HorizontalDivider()
@@ -442,6 +464,12 @@ private fun TypingSection(appearance: KeyboardAppearancePrefs) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HeightOption(label: String, selected: Boolean, onSelect: () -> Unit) {
+    FilterChip(selected = selected, onClick = onSelect, label = { Text(label) })
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LayoutOption(label: String, selected: Boolean, onSelect: () -> Unit) {
     FilterChip(selected = selected, onClick = onSelect, label = { Text(label) })
 }
 

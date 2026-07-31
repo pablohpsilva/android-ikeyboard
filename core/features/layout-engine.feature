@@ -30,3 +30,21 @@ Feature: Non-alphabetic pages and RTL-ready layouts
     And the layout's keys are left in their original order
     # Bidirectional reordering is deferred until the launch language set is
     # fixed (ADR-16); this scenario only pins the direction marker.
+
+  @BR-68 @mvp
+  Scenario: A chosen Latin layout overrides the language default
+    Given the active language is English
+    When the user chooses the QWERTZ layout
+    Then the alpha page presents the QWERTZ arrangement (top row starts "q w e r t z")
+
+  @BR-68 @mvp
+  Scenario: The Latin layout choice does not affect a non-Latin script
+    Given the active language is Russian
+    When the user chooses the AZERTY layout
+    Then the alpha page still presents the Cyrillic ЙЦУКЕН block
+
+  @BR-68
+  Scenario: Auto reproduces the per-language default
+    Given the active language is French
+    When the user leaves the layout on Auto
+    Then the alpha page presents AZERTY (French's national default)

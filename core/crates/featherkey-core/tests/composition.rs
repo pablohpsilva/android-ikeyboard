@@ -5,7 +5,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use featherkey_core::{
-    FeatherKeyCore, FeatherKeyError, Layout, Namespace, RedbSecureStore, SecureStore, StoreError,
+    FeatherKeyCore, FeatherKeyError, LatinLayout, Layout, Namespace, RedbSecureStore, SecureStore,
+    StoreError,
 };
 
 struct Ordinary;
@@ -329,4 +330,40 @@ fn alpha_page_follows_the_primary_language_script() {
         .min_by(|a, b| a.x.total_cmp(&b.x))
         .expect("a top row");
     assert_eq!(top_left.label, "a");
+}
+
+// ---- SetLatinLayout (BR-68) ------------------------------------------------
+
+#[test]
+fn set_latin_layout_overrides_the_alpha_page() {
+    let mut fk = FeatherKeyCore::new(vec![("en".into(), vec!["hello".into()])]).unwrap();
+    assert_eq!(fk.layout_keys()[0].label, "q"); // english default = qwerty
+    fk.set_latin_layout(Some(LatinLayout::Azerty));
+    assert_eq!(fk.layout_keys()[0].label, "a"); // now azerty
+}
+
+#[test]
+fn latin_choice_survives_a_language_switch_between_latin_languages() {
+    let mut fk = FeatherKeyCore::new(vec![("en".into(), vec!["hello".into()])]).unwrap();
+    fk.set_latin_layout(Some(LatinLayout::Azerty));
+    fk.set_active_languages(vec![("pt".into(), vec!["ola".into()])])
+        .unwrap();
+    assert_eq!(fk.layout_keys()[0].label, "a"); // choice persisted across switch
+}
+
+#[test]
+fn use_alpha_layout_returns_to_the_chosen_latin_block() {
+    let mut fk = FeatherKeyCore::new(vec![("en".into(), vec!["hello".into()])]).unwrap();
+    fk.set_latin_layout(Some(LatinLayout::Azerty));
+    fk.use_numeric_layout();
+    fk.use_alpha_layout();
+    assert_eq!(fk.layout_keys()[0].label, "a"); // back to the chosen layout, not qwerty
+}
+
+#[test]
+fn auto_none_restores_the_language_default() {
+    let mut fk = FeatherKeyCore::new(vec![("en".into(), vec!["hello".into()])]).unwrap();
+    fk.set_latin_layout(Some(LatinLayout::Azerty));
+    fk.set_latin_layout(None); // "Auto"
+    assert_eq!(fk.layout_keys()[0].label, "q"); // english default again
 }

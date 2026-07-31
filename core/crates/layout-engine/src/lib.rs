@@ -12,6 +12,7 @@ mod standard;
 
 pub use direction::Direction;
 pub use kind::LayoutKind;
+pub use scripts::LatinLayout;
 
 use featherkey_kernel::{KeyId, TouchPoint};
 
