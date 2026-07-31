@@ -40,7 +40,7 @@ silence about something real is the one answer this index must never give.
 
 ## 1. Rust core — crate map
 
-25 crates in the `core/` Cargo workspace. Layers run inward:
+26 crates in the `core/` Cargo workspace. Layers run inward:
 `foundation` → `port` → `domain` → `adapter` → `composition`; a crate may
 only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 
@@ -50,6 +50,7 @@ only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 | `featherkey-secure-store` | adapter | Encrypt and persist all personal data — implements the `SecureStore` port; redb + AES-256-GCM. | contracts |
 | `featherkey-core` | composition | Be the composition root — wire the domain crates behind the `contracts` ports and present one narrow, UniFFI-ready use-case API to the shell. | autocorrect, candidate-ranker, context, contracts, corrections, dictionary, fold, input-decoder, kernel, language-momentum, layout-engine, locale-manager, neural-ranker, personalization, prediction, secure-store, sensitive-context, tap-sequence, touch-model |
 | `featherkey-autocorrect` | domain | Decide a correction for a typed token, never clobbering a word the user clearly intended (no-clobber policy, BR-12). | candidate-ranker, contracts, dictionary, language-momentum, locale-manager, personalization |
+| `featherkey-autocorrect-gate` | domain | Decide whether to trust an autocorrect — a tiny per-user neural gate over the structural features of one correction decision (`GateFeatures`). | contracts, nn |
 | `featherkey-candidate-ranker` | domain | Merge and rank candidates from all sources using language momentum. | contracts, language-momentum |
 | `featherkey-context` | domain | On-device next-word (bigram) model, persisted encrypted under PersonalLm via the SecureStore port. | contracts |
 | `featherkey-corrections` | domain | On-device correction-signal model (strip-pick prefs + unwanted words), persisted encrypted under Corrections. | contracts |
@@ -100,6 +101,16 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Constants:** `CORE_FUZZY_PRIOR`
 - **Methods:** `NoClobberCorrector::new`
 - **Integration tests:** `tests/live_policy.rs`, `tests/no_clobber.rs`
+
+### featherkey-autocorrect-gate
+
+- **Path:** `core/crates/autocorrect-gate` — **Layer:** domain
+- **One job:** Decide whether to trust an autocorrect — a tiny per-user neural gate over the structural features of one correction decision (`GateFeatures`).
+- **Depends on:** `featherkey-contracts`, `featherkey-nn`
+- **Serves:** BR-12, BR-13, BR-15, BR-22, BR-26, BR-46
+- **Structs:** `GateFeatures`
+- **Constants:** `INPUTS`
+- **Methods:** `GateFeatures::to_array`
 
 ### featherkey-candidate-ranker
 
@@ -663,6 +674,8 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `fold` | fn — `featherkey-fold` |
 | `fold_char` | fn — `featherkey-fold` |
 | `FunctionKey` | kotlin enum class — `:keyboard-view` |
+| `GateFeatures` | struct — `featherkey-autocorrect-gate` |
+| `GateFeatures::to_array` | method — `featherkey-autocorrect-gate` |
 | `GestureDecoder` | kotlin object — `:ime-service` |
 | `GestureDecoder.decode` | kotlin fun — `:ime-service` |
 | `GestureDecoder.keyPath` | kotlin fun — `:ime-service` |
@@ -679,7 +692,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `InitialPage` | kotlin enum class — `:keyboard-view` |
 | `InputDecoder` | trait — `featherkey-input-decoder` |
 | `InputDecoder::decode` | method — `featherkey-input-decoder` |
-| `INPUTS` | const — `featherkey-neural-ranker` |
+| `INPUTS` | const — `featherkey-autocorrect-gate`; const — `featherkey-neural-ranker` |
 | `Key` | struct — `featherkey-layout-engine` |
 | `Key::center` | method — `featherkey-layout-engine` |
 | `Key::new` | method — `featherkey-layout-engine` |

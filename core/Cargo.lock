@@ -369,6 +369,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "featherkey-autocorrect-gate"
+version = "0.0.0"
+dependencies = [
+ "featherkey-contracts",
+ "featherkey-nn",
+]
+
+[[package]]
 name = "featherkey-candidate-ranker"
 version = "0.0.0"
 dependencies = [
