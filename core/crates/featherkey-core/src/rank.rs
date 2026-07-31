@@ -85,10 +85,11 @@ impl FeatherKeyCore {
             prefix: prefix.to_owned(),
         });
         cands.extend(device);
-        // Correction adjustment: net of the "sticky-fix" promotion (a completion
-        // the user repeatedly picks for this prefix) and the "unwanted" demotion
-        // (a word the user repeatedly deletes and retypes). Applied before the
-        // top-k cut, so a promoted word is never dropped first.
+        // Score every candidate through the neural re-ranker. At cold start its
+        // weights are `PRIOR_COEFFS`, so this reproduces the classic linear blend
+        // (positional + momentum + source prior + correction net + spatial): the
+        // features carry the correction and spatial signals the old per-word bias
+        // applied, so no candidate is dropped before its promotion is counted.
         let spatial = self.spatial_hypotheses(prefix);
         for (word, _) in &spatial {
             if !cands.iter().any(|c| &c.word == word) {
@@ -103,55 +104,32 @@ impl FeatherKeyCore {
                 });
             }
         }
-        let ranked = featherkey_candidate_ranker::rank_with_bias(
-            &cands,
-            &self.momentum,
-            MAX_SUGGESTIONS,
-            |word| {
-                self.correction_adjustment(prefix, word)
-                    + spatial
-                        .iter()
-                        .find(|(w, _)| w == word)
-                        .map_or(0.0, |(_, score)| SPATIAL_WEIGHT * f64::from(*score))
-            },
-        );
+        let ranked = featherkey_candidate_ranker::rank_by(&cands, MAX_SUGGESTIONS, |c| {
+            self.neural_ranker
+                .score(&self.rank_features(c, prefix, &spatial))
+        });
+        // Cache the shown set so a later strip pick can train the net against what
+        // the user saw (Task 12); bounded to one snapshot, overwritten each query.
+        self.last_ranked = Some(self.snapshot_shown(prefix, &ranked, &cands, &spatial));
         self.guarantee_fold_variant(prefix, ranked)
-    }
-
-    /// The net correction score adjustment for `word` completing `prefix`:
-    /// the sticky-fix promotion minus the unwanted demotion.
-    ///
-    /// * **Promotion** `CORRECTION_STICKY_WEIGHT * ln(1 + picks)` — `picks` is how
-    ///   often the user chose this completion for this prefix (`observe_strip_pick`).
-    /// * **Demotion** `CORRECTION_UNWANTED_WEIGHT * ln(1 + unwanted)` — `unwanted`
-    ///   is how often the user deleted-and-retyped this word (`observe_delete_retype`),
-    ///   counted per word (not per prefix, matching how the signal is recorded).
-    ///
-    /// Both terms are `0.0` when their count is `0`, so a word with no correction
-    /// history is ranked exactly as before. The two offset when a word is both
-    /// picked and unwanted. Demotion is deliberately the *weaker* signal (half the
-    /// weight): an explicit pick is a strong intent signal, while a delete-retype
-    /// is noisier (a user may delete for reasons unrelated to the word being wrong),
-    /// so a single delete-retype only nudges and never unseats a strong default.
-    fn correction_adjustment(&self, prefix: &str, word: &str) -> f64 {
-        let (promote, demote) = self.correction_parts(prefix, word);
-        promote - demote
     }
 
     /// The correction score split into its two non-negative components:
     /// `(promote, demote)`. The neural re-ranker consumes them as independent
-    /// features; [`correction_adjustment`](Self::correction_adjustment) is just
-    /// their difference, so the scalar ranking behaviour is unchanged.
+    /// features (`correction_promote` weighted `+1`, `correction_demote` `-1`), so
+    /// their net reproduces the sticky-fix-minus-unwanted adjustment the classic
+    /// linear ranking applied — now expressed as two slots of [`PRIOR_COEFFS`].
     ///
     /// * **`promote`** `CORRECTION_STICKY_WEIGHT * ln(1 + picks)`, or `0.0` when
     ///   `picks == 0` — `picks` is how often the user chose this completion for
     ///   this prefix (`observe_strip_pick`).
     /// * **`demote`** `CORRECTION_UNWANTED_WEIGHT * ln(1 + unwanted)`, or `0.0`
     ///   when `unwanted == 0` — `unwanted` is how often the user deleted and
-    ///   retyped this word (`observe_delete_retype`), counted per word.
+    ///   retyped this word (`observe_delete_retype`), counted per word. Half the
+    ///   promotion weight on purpose: a delete-retype is a weaker, noisier signal.
     ///
     /// Both are always `>= 0.0`.
-    fn correction_parts(&self, prefix: &str, word: &str) -> (f64, f64) {
+    pub(crate) fn correction_parts(&self, prefix: &str, word: &str) -> (f64, f64) {
         let picks = self.corrections.pref_count(prefix, word);
         let unwanted = self.corrections.unwanted_count(word);
         let promote = if picks == 0 {
@@ -440,9 +418,9 @@ mod tests {
     }
 
     #[test]
-    fn correction_parts_sum_to_the_adjustment() {
-        // The promote/demote split the neural re-ranker consumes as two features
-        // must recombine to exactly the scalar `correction_adjustment` ranking uses.
+    fn correction_parts_split_the_two_correction_signals() {
+        // The promote/demote split the neural re-ranker consumes as two features:
+        // each is its own closed form and both are strictly positive once observed.
         // Record 3 sticky-picks for ("ca","cat") and 2 delete-retypes for "cat".
         struct Ordinary;
         impl featherkey_contracts::SensitiveContextSource for Ordinary {
@@ -464,8 +442,6 @@ mod tests {
         // Exact closed form: sticky-weighted ln(1+picks), unwanted-weighted ln(1+unwanted).
         assert_eq!(promote, CORRECTION_STICKY_WEIGHT * f64::from(1 + 3).ln());
         assert_eq!(demote, CORRECTION_UNWANTED_WEIGHT * f64::from(1 + 2).ln());
-        // The net is identical to what ranking applies (identity preserved).
-        assert_eq!(promote - demote, core.correction_adjustment("ca", "cat"));
     }
 
     #[test]
@@ -485,6 +461,9 @@ mod tests {
                 0.0,
             ]
         );
+        // Pin the concrete literals too, so a change to any source const is caught
+        // even if the assembly expression above were edited in lockstep with it.
+        assert_eq!(PRIOR_COEFFS, [1.0, 1.0, 0.2, 0.0, 1.0, -1.0, 0.35, 0.0]);
     }
 
     #[test]
@@ -495,6 +474,5 @@ mod tests {
         let (promote, demote) = core.correction_parts("ca", "cat");
         assert_eq!(promote, 0.0);
         assert_eq!(demote, 0.0);
-        assert_eq!(promote - demote, core.correction_adjustment("ca", "cat"));
     }
 }

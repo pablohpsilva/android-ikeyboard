@@ -31,6 +31,7 @@ mod error;
 mod learn;
 mod packs;
 mod rank;
+mod rank_features;
 mod spatial;
 
 #[cfg(feature = "uniffi")]
@@ -63,6 +64,7 @@ use featherkey_personalization::Personalization;
 
 use crate::packs::{build_packs, primary_tag, Pack};
 use crate::rank::PRIOR_COEFFS;
+use crate::rank_features::RankSnapshot;
 use featherkey_prediction::StatisticalPredictor;
 use featherkey_sensitive_context::SensitivityPolicy;
 use featherkey_tap_sequence::{TapDistribution, TapSequence};
@@ -136,8 +138,14 @@ pub struct FeatherKeyCore {
     corrections: Corrections,
     /// The tiny neural re-ranker, initialised to the cold-start prior
     /// ([`PRIOR_COEFFS`]) and persisted under `RankerModel`. Held here so it
-    /// survives language switches; not yet consumed by ranking (Task 11).
+    /// survives language switches; scores the suggestion strip in
+    /// [`rank_suggestions`](Self::rank_suggestions).
     neural_ranker: NeuralRanker,
+    /// The most recent ranked query's shown set (words + the features that ranked
+    /// them), bounded to one snapshot. Written by every `rank_suggestions`; read
+    /// by the pairwise trainer wired in Task 12.
+    #[allow(dead_code)] // read by Task 12 (reinforce-from-pick); written here now.
+    last_ranked: Option<RankSnapshot>,
     /// Active languages, each with its validated lexicon, in preference order.
     packs: Vec<Pack>,
     sensitivity: SensitivityPolicy,
@@ -181,6 +189,7 @@ impl FeatherKeyCore {
             context: Context::new(),
             corrections: Corrections::new(),
             neural_ranker: NeuralRanker::from_prior(&PRIOR_COEFFS),
+            last_ranked: None,
             packs,
             sensitivity: SensitivityPolicy::new(),
             momentum: Momentum::new(&primary, &tags),
