@@ -722,3 +722,39 @@ bindings are unchanged), matching how prior core features shipped.
 **Verdict: ✅ Complete and verified** — the plan is a faithful, feasible decomposition of the
 design; tasks are bite-sized and independently testable; the two numerical/correctness risks are
 closed. Ready for the build phase (subagent-driven-development).
+
+### Build gate — ✅ Complete and verified (2026-07-31)
+
+All 13 tasks implemented via subagent-driven-development (fresh implementer + per-task
+spec/quality review + fix loops + a whole-branch review), on branch `neural-reranker`. Commits
+`3146e14`…`d13009b` (implementation) atop the design/plan docs.
+
+**What was required (build):** the design's two new crates + core wiring, TDD/BDD-first, each
+task gated by review; cold-start no-regression; encrypted + purgeable; gated online learning;
+all DoD gates green.
+
+**What I did — mapped:** all 13 tasks DONE with per-task reviews clean (Task 3 and Task 13 each
+took one fix round; Task 7 reordered before Task 6 for a namespace dependency). `featherkey-nn`
+(T1–4), `featherkey-neural-ranker` (T5–6), `RankerModel` namespace (T7), `rank_by` (T8),
+`correction_parts` (T9), core hold/persist (T10), neural scorer swap + feature assembly (T11),
+gated training (T12), `@BR-11` scenario + gate (T13).
+
+**Verification — first-hand evidence:** I ran `bash core/tools/ci-local.sh` myself →
+**ALL GATES PASSED** — rustfmt, clippy `-D warnings` (lib/bins strict + tests), `cargo test
+--workspace`, fitness (≤500 lines/file, ≤60 lines/fn), BDD traceability (`@BR-11` → BR-11),
+tooling unit tests, `codemap.py --check`, lexicon order, **`bindings_check.py --check` (UNCHANGED
+— no FFI touched)**, **coverage ≥ 98%** (98.92% line / 99.22% region), **cargo-deny** (advisories/
+bans/licenses/sources ok — **zero new dependencies**). Cold-start identity proven (5 protected
+rank tests unchanged + green; whole-branch review traced the dot product; ~2e-5 error ≪ 0.05
+score gaps). Reinforce sign, sensitive-field gating (both entry points), single-train snapshot
+consumption, and corrupt/wrong-shape-blob → prior fallback all verified by tests + the final
+review.
+
+**Whole-branch review:** **APPROVE FOR MERGE**, no Critical/Important; two Minors (stale
+`#[allow(dead_code)]`; `load` shape guard) fixed in `d13009b`; deferred-acceptable: crate READMEs,
+a cosmetic const-keeper, u16 shape field, one lowercase-prefix test.
+
+**Not done (out of scope / handoff):** on-device `.so` rebuild + acceptance is a post-merge
+handoff (no FFI/bindings change, so this is a pure core swap like prior features).
+
+**Verdict: ✅ Complete and verified.** Ready to finish the branch (integration is the user's call).
