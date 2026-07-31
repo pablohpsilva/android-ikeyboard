@@ -16,6 +16,7 @@
 
 use std::collections::BTreeSet;
 use std::fmt;
+use std::sync::Arc;
 
 use fst::automaton::Str;
 use fst::{Automaton, IntoStreamer, Set, SetBuilder, Streamer};
@@ -55,22 +56,27 @@ impl fmt::Display for DictionaryError {
 
 /// A compact, read-only lexicon for a single language.
 ///
-/// `Clone` is a cheap byte-buffer copy of the backing FST; it does not make the
-/// lexicon mutable (there are still no `&mut self` methods) — it lets the
-/// composition root hand owned copies to the engines that consume a lexicon by
-/// value (`prediction`, `autocorrect`, `locale-manager`).
+/// `Clone` is **O(1)**: the two heavy, immutable structures — the backing FST
+/// and the folded index — sit behind [`Arc`], so cloning bumps two reference
+/// counts rather than deep-copying the ~12k-entry index and the FST bytes. That
+/// matters because the strip blend clones every active pack's dictionary *per
+/// keystroke* (`rank_suggestions`); a deep copy there cost milliseconds each.
+/// The lexicon stays read-only (no `&mut self` methods), so sharing is sound.
 #[derive(Clone)]
 pub struct Dictionary {
-    set: Set<Vec<u8>>,
+    set: Arc<Set<Vec<u8>>>,
     /// The distinct characters occurring in the lexicon, sorted. Used as the
     /// substitution/insertion alphabet for fuzzy lookup so candidate generation
-    /// stays bounded by the language rather than all of Unicode.
+    /// stays bounded by the language rather than all of Unicode. Small (one
+    /// entry per distinct letter), so it is copied on clone rather than shared.
     alphabet: Vec<char>,
     /// `(folded, original)` pairs sorted by `folded`, mirroring the Kotlin
     /// `Vocabulary` folded/sortedWords arrays. This is the accent-insensitive
     /// index [`fold_prefix`](Dictionary::fold_prefix) binary-searches: a bare
     /// match key (`fold("café") == "cafe"`) paired back to the real spelling.
-    folded: Vec<(String, String)>,
+    /// Behind an [`Arc`] so a per-keystroke clone shares it instead of copying
+    /// every entry.
+    folded: Arc<Vec<(String, String)>>,
 }
 
 impl Dictionary {
@@ -111,9 +117,9 @@ impl Dictionary {
         // `into_set` on the in-memory builder is infallible (it hands back the
         // bytes it just wrote), so there is no second error path to leak.
         Ok(Self {
-            set: builder.into_set(),
+            set: Arc::new(builder.into_set()),
             alphabet: alphabet.into_iter().collect(),
-            folded,
+            folded: Arc::new(folded),
         })
     }
 
