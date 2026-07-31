@@ -405,6 +405,7 @@ name = "featherkey-core"
 version = "0.0.0"
 dependencies = [
  "featherkey-autocorrect",
+ "featherkey-autocorrect-gate",
  "featherkey-candidate-ranker",
  "featherkey-context",
  "featherkey-contracts",

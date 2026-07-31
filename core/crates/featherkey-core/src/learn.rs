@@ -12,6 +12,7 @@
 //! not passive learning, so they are intentionally *not* gated — the user asked
 //! for that word to be remembered.
 
+use featherkey_autocorrect_gate::AutocorrectGate;
 use featherkey_context::Context;
 use featherkey_contracts::{SecureStore, SensitiveContextSource};
 use featherkey_corrections::Corrections;
@@ -226,6 +227,7 @@ impl FeatherKeyCore {
         self.context.persist(store)?;
         self.corrections.persist(store)?;
         self.neural_ranker.persist(store)?;
+        self.autocorrect_gate.persist(store)?;
         Ok(())
     }
 
@@ -241,6 +243,7 @@ impl FeatherKeyCore {
         self.context = Context::load(store)?;
         self.corrections = Corrections::load(store)?;
         self.neural_ranker = NeuralRanker::load(store, &PRIOR_COEFFS)?;
+        self.autocorrect_gate = AutocorrectGate::load(store)?;
         Ok(())
     }
 }
@@ -249,6 +252,7 @@ impl FeatherKeyCore {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use featherkey_autocorrect_gate::GateFeatures;
     use featherkey_contracts::Candidate;
     use featherkey_neural_ranker::RankFeatures;
 
@@ -288,6 +292,18 @@ mod tests {
 
     fn probe_score(core: &FeatherKeyCore) -> f64 {
         core.neural_ranker().score(&probe())
+    }
+
+    /// A representative feature vector for the autocorrect gate (arbitrary
+    /// values that exercise every slot, so a weight change moves the residual).
+    fn gate_probe() -> GateFeatures {
+        GateFeatures {
+            edit_distance: 1.0,
+            winner_confidence: 0.6,
+            dict_rank_norm: 0.3,
+            typed_len_norm: 0.4,
+            momentum_weight: 0.1,
+        }
     }
 
     #[test]
@@ -391,5 +407,31 @@ mod tests {
         fk.reinforce_from_pick("te", "team");
 
         assert_eq!(before, probe_score(&fk), "no snapshot means no training");
+    }
+
+    #[test]
+    fn the_autocorrect_gate_survives_persist_and_restore() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = crate::RedbSecureStore::open(dir.path().join("gate.redb"), [11u8; 32])
+            .expect("open store");
+
+        // Drive one suppression so the gate diverges from its cold-start prior
+        // (Task 9 wires the real observe call; here the crate-internal field is
+        // reached directly, mirroring how the neural-ranker restore test reaches
+        // `neural_ranker()`).
+        let mut fk = core();
+        let f = gate_probe();
+        for _ in 0..50 {
+            fk.autocorrect_gate.reinforce(&f, -1.0, 0.05);
+        }
+        fk.persist(&store).expect("persist");
+
+        let mut restored = core();
+        restored.restore(&store).expect("restore");
+        assert!(
+            (restored.autocorrect_gate.residual(&f) - fk.autocorrect_gate.residual(&f)).abs()
+                < 1e-6,
+            "the gate's learned residual must survive persist -> restore"
+        );
     }
 }

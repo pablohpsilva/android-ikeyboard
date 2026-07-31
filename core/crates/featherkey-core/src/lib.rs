@@ -51,6 +51,7 @@ pub use featherkey_contracts::{
 pub use featherkey_layout_engine::{LatinLayout, Layout, LayoutKind};
 pub use featherkey_secure_store::RedbSecureStore;
 
+use featherkey_autocorrect_gate::AutocorrectGate;
 use featherkey_context::Context;
 use featherkey_contracts::Predictor;
 use featherkey_corrections::Corrections;
@@ -141,6 +142,11 @@ pub struct FeatherKeyCore {
     /// survives language switches; scores the suggestion strip in
     /// [`rank_suggestions`](Self::rank_suggestions).
     neural_ranker: NeuralRanker,
+    /// The tiny per-user autocorrect gate, initialised to its cold-start prior
+    /// and persisted under `AutocorrectGate`. Held here so it survives language
+    /// switches; `pub(crate)` so the autocorrect use-case (Task 9) and its
+    /// observe call can reach it directly, like `neural_ranker`.
+    pub(crate) autocorrect_gate: AutocorrectGate,
     /// The most recent ranked query's shown set (words + the features that ranked
     /// them), bounded to one snapshot. Written by every `rank_suggestions`; read
     /// by the pairwise trainer (reinforce-from-pick) in `learn.rs`.
@@ -188,6 +194,7 @@ impl FeatherKeyCore {
             context: Context::new(),
             corrections: Corrections::new(),
             neural_ranker: NeuralRanker::from_prior(&PRIOR_COEFFS),
+            autocorrect_gate: AutocorrectGate::from_prior(),
             last_ranked: None,
             packs,
             sensitivity: SensitivityPolicy::new(),
