@@ -2,6 +2,8 @@
 //! scalar output, ReLU hidden activation, linear output. Pure math: no I/O, no
 //! Android types, errors are values (see `error`/`codec`).
 
+mod prior;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Mlp {
     w1: Vec<f32>, // [hidden * inputs], row-major by hidden unit
