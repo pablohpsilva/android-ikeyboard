@@ -164,7 +164,7 @@ impl FeatherKeyCore {
         let primary = primary_tag(&packs);
         let tags: Vec<String> = packs.iter().map(|p| p.lang.as_str().to_owned()).collect();
         Ok(Self {
-            layout: Layout::alpha_for(&primary),
+            layout: Layout::alpha_for(&primary, None),
             decoder: NearestKeyDecoder::new(),
             touch_model: TouchModel::default(),
             personalization: Personalization::new(),
@@ -196,7 +196,7 @@ impl FeatherKeyCore {
             .map(|p| p.lang.as_str().to_owned())
             .collect();
         self.momentum.set_languages(&primary, &tags);
-        self.layout = Layout::alpha_for(&primary);
+        self.layout = Layout::alpha_for(&primary, None);
         Ok(())
     }
 
@@ -230,7 +230,7 @@ impl FeatherKeyCore {
 
     /// Switch back to the alpha letter page for the primary active language.
     pub fn use_alpha_layout(&mut self) {
-        self.layout = Layout::alpha_for(&primary_tag(&self.packs));
+        self.layout = Layout::alpha_for(&primary_tag(&self.packs), None);
     }
 
     /// Switch to the numeric page.
