@@ -2,8 +2,12 @@
 //! scalar output, ReLU hidden activation, linear output. Pure math: no I/O, no
 //! Android types, errors are values (see `error`/`codec`).
 
+mod codec;
+mod error;
 mod prior;
 mod train;
+
+pub use error::NnError;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Mlp {
