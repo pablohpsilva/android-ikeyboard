@@ -256,7 +256,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **One job:** Tiny dependency-free neural substrate: 1-hidden-layer MLP with forward, SGD, linear-prior init, and versioned serialization.
 - **Depends on:** nothing (leaf)
 - **Structs:** `Mlp`
-- **Methods:** `Mlp::forward`, `Mlp::inputs`, `Mlp::with_weights`
+- **Methods:** `Mlp::forward`, `Mlp::from_linear`, `Mlp::inputs`, `Mlp::train_step`, `Mlp::with_weights`
 - ⚠️ **No README.md** — add one (ARCHITECTURE.md §5.2 crate anatomy).
 
 ### featherkey-personalization
@@ -832,7 +832,9 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `MAX_TAPS` | const — `featherkey-tap-sequence` |
 | `Mlp` | struct — `featherkey-nn` |
 | `Mlp::forward` | method — `featherkey-nn` |
+| `Mlp::from_linear` | method — `featherkey-nn` |
 | `Mlp::inputs` | method — `featherkey-nn` |
+| `Mlp::train_step` | method — `featherkey-nn` |
 | `Mlp::with_weights` | method — `featherkey-nn` |
 | `Momentum` | struct — `featherkey-language-momentum` |
 | `Momentum::new` | method — `featherkey-language-momentum` |

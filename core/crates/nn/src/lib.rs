@@ -3,6 +3,7 @@
 //! Android types, errors are values (see `error`/`codec`).
 
 mod prior;
+mod train;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Mlp {
