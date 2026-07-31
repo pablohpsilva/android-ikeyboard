@@ -25,6 +25,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -399,7 +401,7 @@ private fun LayoutOnlyCaption() {
 // Typing (keyboard appearance)
 // ---------------------------------------------------------------------------
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun TypingSection(appearance: KeyboardAppearancePrefs, layoutPrefs: KeyboardLayoutPrefs) {
     var height by remember { mutableStateOf(appearance.height()) }
@@ -424,7 +426,13 @@ private fun TypingSection(appearance: KeyboardAppearancePrefs, layoutPrefs: Keyb
                 }
                 HorizontalDivider()
                 Text("Keyboard layout", style = MaterialTheme.typography.titleMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // FlowRow (not Row): four chips overflow one line on narrow screens —
+                // on-device the AZERTY chip clipped into a vertical column. FlowRow
+                // wraps the overflow chip onto a second line instead.
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     LayoutOption("Auto", layout == KeyboardLayoutChoice.AUTO) {
                         layout = KeyboardLayoutChoice.AUTO; layoutPrefs.setChoice(layout)
                     }
