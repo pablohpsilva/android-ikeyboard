@@ -16,13 +16,19 @@ use featherkey_context::Context;
 use featherkey_contracts::{SecureStore, SensitiveContextSource};
 use featherkey_corrections::Corrections;
 use featherkey_kernel::KeyId;
-use featherkey_neural_ranker::NeuralRanker;
+use featherkey_neural_ranker::{NeuralRanker, RankFeatures};
 use featherkey_personalization::Personalization;
 use featherkey_touch_model::TouchModel;
 
 use crate::error::FeatherKeyError;
 use crate::rank::PRIOR_COEFFS;
 use crate::FeatherKeyCore;
+
+/// Learning rate for the online pairwise re-ranker update (Task 12). Fixed for
+/// determinism: the same pick sequence always produces the same weight change,
+/// and it is small enough that a single stray pick nudges rather than reshapes
+/// the ranking. Kept beside the trainer that consumes it.
+const RANKER_LR: f32 = 0.05;
 
 impl FeatherKeyCore {
     /// Fold a committed `word` (typed after `preceding`) into learned state —
@@ -39,6 +45,14 @@ impl FeatherKeyCore {
         }
         self.personalization.observe(word);
         self.context.record(preceding, word);
+        // If this commit corresponds to the still-cached shown set (i.e. the
+        // committed word was one of the suggestions), train the ranker toward it
+        // against that snapshot's prefix. A strip pick that already fired trains
+        // here would find no snapshot (it was consumed) and no-op — so a pick +
+        // commit trains exactly once.
+        if let Some(snap_prefix) = self.last_ranked.as_ref().map(|s| s.prefix.clone()) {
+            self.reinforce_from_pick(&snap_prefix, word);
+        }
     }
 
     /// Record that, for the typed `prefix`, the user picked `picked` from the
@@ -55,6 +69,38 @@ impl FeatherKeyCore {
             return;
         }
         self.corrections.note_pick(prefix, picked);
+        // Past the sensitivity gate, so training is structurally suppressed in a
+        // sensitive field (this line is never reached there). Reinforce the net
+        // toward the picked word against the shown-set snapshot it was chosen from.
+        self.reinforce_from_pick(prefix, picked);
+    }
+
+    /// Reinforce the neural re-ranker toward `chosen` using the cached shown-set
+    /// snapshot for `prefix`, then **consume** that snapshot (Task 12).
+    ///
+    /// A no-op unless a snapshot is cached, its prefix equals `prefix`
+    /// (lowercased, matching how `rank_suggestions` keys it), and `chosen` was one
+    /// of the shown words. On a match it runs one pairwise LTR update over exactly
+    /// the features the user saw — `O(top-k)`, no vocabulary clone — and clears
+    /// `last_ranked`, so a pick that also commits trains once, not twice.
+    ///
+    /// Callers must already be past the sensitivity gate (both call sites are), so
+    /// training never runs in a sensitive field.
+    fn reinforce_from_pick(&mut self, prefix: &str, chosen: &str) {
+        let Some(snap) = self.last_ranked.as_ref() else {
+            return;
+        };
+        if snap.prefix != prefix.to_lowercase() {
+            return;
+        }
+        let Some(chosen_idx) = snap.shown.iter().position(|(w, _)| w == chosen) else {
+            return;
+        };
+        // Clone the tiny (top-k) feature set out of the borrow so the ranker can
+        // be mutably borrowed for the update.
+        let shown: Vec<RankFeatures> = snap.shown.iter().map(|(_, f)| f.clone()).collect();
+        self.neural_ranker.reinforce(&shown, chosen_idx, RANKER_LR);
+        self.last_ranked = None;
     }
 
     /// Record one low-weight `unwanted` signal for `word` (reverted/deleted right
@@ -196,5 +242,154 @@ impl FeatherKeyCore {
         self.corrections = Corrections::load(store)?;
         self.neural_ranker = NeuralRanker::load(store, &PRIOR_COEFFS)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+    use featherkey_contracts::Candidate;
+    use featherkey_neural_ranker::RankFeatures;
+
+    struct Ordinary;
+    impl SensitiveContextSource for Ordinary {
+        fn is_sensitive(&self) -> bool {
+            false
+        }
+    }
+
+    /// A core whose "te…" completions are `tea` < `team` < `teach`.
+    fn core() -> FeatherKeyCore {
+        FeatherKeyCore::new(vec![(
+            "en".to_owned(),
+            vec!["tea".to_owned(), "team".to_owned(), "teach".to_owned()],
+        )])
+        .expect("valid single-language core")
+    }
+
+    fn no_device() -> Vec<Candidate> {
+        Vec::new()
+    }
+
+    /// A representative feature vector for weight-comparison probes (arbitrary
+    /// values that exercise every slot, so any weight change moves the score).
+    fn probe() -> RankFeatures {
+        RankFeatures {
+            positional: -0.7,
+            ln_momentum: 0.2,
+            is_lexicon: 1.0,
+            is_device: 0.0,
+            correction_promote: 0.1,
+            correction_demote: 0.0,
+            spatial: 0.3,
+        }
+    }
+
+    fn probe_score(core: &FeatherKeyCore) -> f64 {
+        core.neural_ranker().score(&probe())
+    }
+
+    #[test]
+    fn a_pick_that_also_commits_trains_only_once() {
+        // Control: exactly one strip pick after one ranked query → one reinforce.
+        let mut once = core();
+        let _ = once.rank_suggestions("", "te", no_device());
+        once.observe_strip_pick("te", "team", &Ordinary);
+
+        // Test: the same pick, then the commit of the same word. The pick
+        // consumed the only snapshot, so `learn_word` finds none and trains
+        // nothing — the net weights must match the single-reinforce control.
+        let mut pick_then_commit = core();
+        let _ = pick_then_commit.rank_suggestions("", "te", no_device());
+        pick_then_commit.observe_strip_pick("te", "team", &Ordinary);
+        pick_then_commit.learn_word("", "team", &Ordinary);
+
+        let untrained = probe_score(&core());
+        assert_ne!(
+            probe_score(&once),
+            untrained,
+            "the single pick must actually train the ranker (else the test is vacuous)"
+        );
+        assert_eq!(
+            probe_score(&pick_then_commit),
+            probe_score(&once),
+            "pick + commit must train exactly once (snapshot consumed by the pick)"
+        );
+
+        // And two picks (each refreshing the snapshot) train twice — proving the
+        // equality above is the consumed snapshot, not an inert second update.
+        let mut twice = core();
+        let _ = twice.rank_suggestions("", "te", no_device());
+        twice.observe_strip_pick("te", "team", &Ordinary);
+        let _ = twice.rank_suggestions("", "te", no_device());
+        twice.observe_strip_pick("te", "team", &Ordinary);
+        assert_ne!(
+            probe_score(&twice),
+            probe_score(&once),
+            "two full pick rounds must train twice, unlike one pick + commit"
+        );
+    }
+
+    #[test]
+    fn reinforce_from_pick_consumes_the_matching_snapshot() {
+        let mut fk = core();
+        let _ = fk.rank_suggestions("", "te", no_device());
+        assert!(fk.last_ranked().is_some());
+        let before = probe_score(&fk);
+
+        fk.reinforce_from_pick("te", "team");
+
+        assert!(
+            fk.last_ranked().is_none(),
+            "a successful reinforce consumes (clears) the snapshot"
+        );
+        assert_ne!(
+            before,
+            probe_score(&fk),
+            "the matching pick trained the net"
+        );
+    }
+
+    #[test]
+    fn reinforce_from_pick_ignores_a_prefix_mismatch() {
+        let mut fk = core();
+        let _ = fk.rank_suggestions("", "te", no_device());
+        let before = probe_score(&fk);
+
+        // Snapshot prefix is "te"; a pick reported under a different prefix does
+        // not train and leaves the snapshot intact for its real prefix.
+        fk.reinforce_from_pick("xy", "team");
+
+        assert!(fk.last_ranked().is_some(), "a mismatch leaves the snapshot");
+        assert_eq!(before, probe_score(&fk), "a prefix mismatch trains nothing");
+    }
+
+    #[test]
+    fn reinforce_from_pick_ignores_a_word_not_in_the_shown_set() {
+        let mut fk = core();
+        let _ = fk.rank_suggestions("", "te", no_device());
+        let before = probe_score(&fk);
+
+        // "zzz" was never shown for this prefix: no chosen index, no training.
+        fk.reinforce_from_pick("te", "zzz");
+
+        assert!(
+            fk.last_ranked().is_some(),
+            "an unshown word leaves the snapshot"
+        );
+        assert_eq!(before, probe_score(&fk), "an unshown word trains nothing");
+    }
+
+    #[test]
+    fn reinforce_from_pick_is_a_noop_without_a_snapshot() {
+        let mut fk = core();
+        // No rank_suggestions call, so there is no cached snapshot at all.
+        assert!(fk.last_ranked().is_none());
+        let before = probe_score(&fk);
+
+        fk.reinforce_from_pick("te", "team");
+
+        assert_eq!(before, probe_score(&fk), "no snapshot means no training");
     }
 }
