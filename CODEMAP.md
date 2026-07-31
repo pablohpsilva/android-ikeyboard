@@ -106,7 +106,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Path:** `core/crates/candidate-ranker` — **Layer:** domain
 - **One job:** Merge and rank candidates from all sources using language momentum.
 - **Depends on:** `featherkey-contracts`, `featherkey-language-momentum`
-- **Free functions:** `rank`, `rank_with_bias`, `score`
+- **Free functions:** `positional_score`, `rank`, `rank_by`, `rank_with_bias`, `score`
 - **Constants:** `LM_WEIGHT_LANG`, `SOURCE_PRIOR_DEVICE`, `SOURCE_PRIOR_LEXICON`
 - ⚠️ **No README.md** — add one (ARCHITECTURE.md §5.2 crate anatomy).
 
@@ -885,11 +885,13 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `PhysicalKeyboardLayout` | kotlin object — `:platform-services` |
 | `PhysicalKeyboardLayout.classify` | kotlin fun — `:platform-services` |
 | `PhysicalKeyboardLayout.detect` | kotlin fun — `:platform-services` |
+| `positional_score` | fn — `featherkey-candidate-ranker` |
 | `Predictor` | trait — `featherkey-contracts` |
 | `Predictor::suggest` | method — `featherkey-contracts` |
 | `PunctuationRules` | kotlin object — `:ime-service` |
 | `PunctuationRules.doubleSpaceMakesPeriod` | kotlin fun — `:ime-service` |
 | `rank` | fn — `featherkey-candidate-ranker` |
+| `rank_by` | fn — `featherkey-candidate-ranker` |
 | `rank_with_bias` | fn — `featherkey-candidate-ranker` |
 | `RankedCandidate` | struct — `featherkey-contracts` |
 | `RankFeatures` | struct — `featherkey-neural-ranker` |

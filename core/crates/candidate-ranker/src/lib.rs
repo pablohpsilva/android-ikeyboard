@@ -21,7 +21,11 @@ fn source_prior(s: Source) -> f64 {
 }
 
 /// Convert a 0-based within-source rank into a monotone score (0 = best).
-fn positional_score(rank: u32) -> f64 {
+/// Strictly decreasing in `rank`, so a better (lower) rank scores higher. Public
+/// so a caller composing its own scorer for [`rank_by`] reuses the exact curve
+/// the strip uses instead of re-deriving it.
+#[must_use]
+pub fn positional_score(rank: u32) -> f64 {
     -((1 + rank) as f64).ln()
 }
 
@@ -57,9 +61,25 @@ pub fn rank_with_bias(
     k: usize,
     bias: impl Fn(&str) -> f64,
 ) -> Vec<RankedCandidate> {
+    rank_by(cands, k, |c| score(c, momentum) + bias(&c.word))
+}
+
+/// Rank `cands` deduping by word (best score wins), ordering desc, keeping top
+/// `k` — but taking each candidate's score from `scorer` instead of the built-in
+/// blend. This is the shared merge/order/top-`k` machinery: [`rank`],
+/// [`rank_with_bias`], and any external scorer (e.g. `featherkey-neural-ranker`)
+/// route through it so they all share identical dedup, tie, and truncation
+/// semantics. Tie-handling is stable: the first candidate seen for a word wins
+/// unless a later one scores strictly higher.
+#[must_use]
+pub fn rank_by(
+    cands: &[Candidate],
+    k: usize,
+    scorer: impl Fn(&Candidate) -> f64,
+) -> Vec<RankedCandidate> {
     let mut best: Vec<RankedCandidate> = Vec::new();
     for cand in cands {
-        let score = score(cand, momentum) + bias(&cand.word);
+        let score = scorer(cand);
         match best.iter_mut().find(|r| r.word == cand.word) {
             Some(existing) if existing.score >= score => {}
             Some(existing) => {
@@ -191,6 +211,23 @@ mod tests {
             rank(&cands, &mom, 3),
             rank_with_bias(&cands, &mom, 3, |_| 0.0)
         );
+    }
+
+    #[test]
+    fn rank_by_with_the_default_scorer_equals_rank() {
+        use super::rank_by;
+        let mom = Momentum::new("en", &["en".into(), "es".into()]);
+        let cands = vec![c("hi", "en", 0), c("ho", "es", 1), c("he", "en", 2)];
+        assert_eq!(
+            rank(&cands, &mom, 3),
+            rank_by(&cands, 3, |x| score(x, &mom))
+        );
+    }
+
+    #[test]
+    fn positional_score_is_public_and_monotone() {
+        use super::positional_score;
+        assert!(positional_score(0) > positional_score(5));
     }
 
     use proptest::prelude::*;
