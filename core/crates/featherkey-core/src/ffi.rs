@@ -140,6 +140,27 @@ pub enum FfiSource {
     Device,
 }
 
+/// The Latin arrangement a user picked, or `Auto` (per-language default).
+/// Mirrors [`crate::LatinLayout`] plus an `Auto` variant for "no override".
+#[derive(Debug, uniffi::Enum)]
+pub enum FfiLatinLayout {
+    Auto,
+    Qwerty,
+    Qwertz,
+    Azerty,
+}
+
+/// Pure boundary mapping (kept out of the exported method so it is unit-testable).
+fn map_latin(layout: FfiLatinLayout) -> Option<crate::LatinLayout> {
+    use crate::LatinLayout;
+    match layout {
+        FfiLatinLayout::Auto => None,
+        FfiLatinLayout::Qwerty => Some(LatinLayout::Qwerty),
+        FfiLatinLayout::Qwertz => Some(LatinLayout::Qwertz),
+        FfiLatinLayout::Azerty => Some(LatinLayout::Azerty),
+    }
+}
+
 /// One correction/suggestion candidate the shell gathered (e.g. from the device
 /// spell-checker), tagged by language and its rank within its own source.
 #[derive(Debug, uniffi::Record)]
@@ -414,6 +435,12 @@ impl KeyboardCore {
         self.lock().use_symbols_layout();
     }
 
+    /// Choose the Latin key arrangement (`Auto` = per-language default). Latin-only:
+    /// a Cyrillic/Greek primary keeps its native block.
+    pub fn set_latin_layout(&self, layout: FfiLatinLayout) {
+        self.lock().set_latin_layout(map_latin(layout));
+    }
+
     /// Active language tags in preference order.
     pub fn active_languages(&self) -> Vec<String> {
         self.lock().active_languages()
@@ -429,7 +456,7 @@ impl KeyboardCore {
     /// Encrypt and persist learned vocabulary. Call from a background thread on
     /// a debounce; it is off the input path.
     pub fn persist(&self) -> Result<(), FfiError> {
-        let mut core = self.lock();
+        let core = self.lock();
         core.persist(&self.store)?;
         Ok(())
     }
@@ -482,6 +509,15 @@ impl KeyboardCore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ffi_latin_layout_maps_auto_to_none() {
+        use crate::LatinLayout;
+        assert_eq!(map_latin(FfiLatinLayout::Auto), None);
+        assert_eq!(map_latin(FfiLatinLayout::Qwerty), Some(LatinLayout::Qwerty));
+        assert_eq!(map_latin(FfiLatinLayout::Qwertz), Some(LatinLayout::Qwertz));
+        assert_eq!(map_latin(FfiLatinLayout::Azerty), Some(LatinLayout::Azerty));
+    }
 
     #[test]
     fn ffi_candidate_converts_to_contract_candidate() {
