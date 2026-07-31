@@ -5,6 +5,8 @@
 
 use featherkey_nn::Mlp;
 
+mod persist;
+
 /// Number of feature slots the ranker consumes: seven signals plus a constant
 /// bias slot (slot 7 == 1.0).
 pub const INPUTS: usize = 8;
@@ -94,6 +96,46 @@ impl NeuralRanker {
     pub fn score(&self, f: &RankFeatures) -> f64 {
         f64::from(self.mlp.forward(&f.to_array()))
     }
+
+    /// Online pairwise learning-to-rank from one observed choice: the user
+    /// picked candidate `chosen` out of the `shown` list, so nudge its score
+    /// above each of the others by one SGD step per pair.
+    ///
+    /// For the pairwise logistic loss `L = -ln σ(s_c - s_j)` (chosen `c`,
+    /// other `j`), `∂L/∂s_c = -σ(s_j - s_c)` and `∂L/∂s_j = +σ(s_j - s_c)`.
+    /// With `d = σ(s_j - s_c)` we push the chosen up (`-d`) and each `j` down
+    /// (`+d`) via [`Mlp::train_step`], which descends the supplied `∂L/∂out`.
+    /// Scores are recomputed per pair (bounded to `shown.len() - 1` pairs).
+    ///
+    /// A no-op if `shown.len() < 2` (no pair to order) or `chosen` is out of
+    /// range (nothing valid to promote).
+    pub fn reinforce(&mut self, shown: &[RankFeatures], chosen: usize, lr: f32) {
+        if shown.len() < 2 || chosen >= shown.len() {
+            return;
+        }
+        let chosen_x = shown[chosen].to_array();
+        for (j, other) in shown.iter().enumerate() {
+            if j == chosen {
+                continue;
+            }
+            let s_c = self.score(&shown[chosen]);
+            let s_j = self.score(other);
+            let d = sigmoid(s_j - s_c) as f32;
+            self.mlp.train_step(&chosen_x, -d, lr);
+            self.mlp.train_step(&other.to_array(), d, lr);
+        }
+    }
+}
+
+/// Numerically stable logistic sigmoid `1 / (1 + e^-x)`, deterministic (no RNG,
+/// no clock). Used only to weigh each pairwise gradient in [`reinforce`].
+fn sigmoid(x: f64) -> f64 {
+    if x >= 0.0 {
+        1.0 / (1.0 + (-x).exp())
+    } else {
+        let e = x.exp();
+        e / (1.0 + e)
+    }
 }
 
 #[cfg(test)]
@@ -102,6 +144,88 @@ mod tests {
     use super::*;
     use featherkey_candidate_ranker::{rank, Candidate, Source};
     use featherkey_language_momentum::Momentum;
+
+    /// The prior coefficients the reinforce tests share.
+    const COEFFS: [f32; INPUTS] = [1.0, 1.0, 0.2, 0.0, 1.0, -1.0, 0.35, 0.0];
+
+    /// An all-zero feature vector, so tests can vary one slot with `..zero()`.
+    fn zero() -> RankFeatures {
+        RankFeatures {
+            positional: 0.0,
+            ln_momentum: 0.0,
+            is_lexicon: 0.0,
+            is_device: 0.0,
+            correction_promote: 0.0,
+            correction_demote: 0.0,
+            spatial: 0.0,
+        }
+    }
+
+    #[test]
+    fn repeatedly_choosing_a_lower_word_promotes_it() {
+        let mut r = NeuralRanker::from_prior(&COEFFS);
+        let strong = RankFeatures {
+            positional: 0.0,
+            ..zero()
+        };
+        let weak = RankFeatures {
+            positional: -1.4,
+            ..zero()
+        };
+        assert!(r.score(&strong) > r.score(&weak));
+        for _ in 0..300 {
+            r.reinforce(&[strong.clone(), weak.clone()], 1, 0.05);
+        }
+        assert!(
+            r.score(&weak) > r.score(&strong),
+            "weak should have overtaken"
+        );
+    }
+
+    #[test]
+    fn a_single_reinforce_does_not_unseat_a_strong_default() {
+        let mut r = NeuralRanker::from_prior(&COEFFS);
+        let strong = RankFeatures {
+            positional: 0.0,
+            ..zero()
+        };
+        let weak = RankFeatures {
+            positional: -1.4,
+            ..zero()
+        };
+        r.reinforce(&[strong.clone(), weak.clone()], 1, 0.05);
+        assert!(r.score(&strong) > r.score(&weak));
+    }
+
+    #[test]
+    fn reinforce_is_a_no_op_below_two_candidates() {
+        let mut r = NeuralRanker::from_prior(&COEFFS);
+        let f = RankFeatures {
+            positional: -0.5,
+            ..zero()
+        };
+        let before = r.score(&f);
+        r.reinforce(&[], 0, 0.05); // empty
+        r.reinforce(std::slice::from_ref(&f), 0, 0.05); // single
+        assert_eq!(r.score(&f), before);
+    }
+
+    #[test]
+    fn reinforce_is_a_no_op_when_chosen_out_of_range() {
+        let mut r = NeuralRanker::from_prior(&COEFFS);
+        let a = RankFeatures {
+            positional: 0.0,
+            ..zero()
+        };
+        let b = RankFeatures {
+            positional: -1.0,
+            ..zero()
+        };
+        let before = r.score(&a);
+        r.reinforce(&[a.clone(), b.clone()], 2, 0.05); // chosen == len
+        r.reinforce(&[a.clone(), b.clone()], 9, 0.05); // chosen > len
+        assert_eq!(r.score(&a), before);
+    }
 
     #[test]
     fn from_prior_reproduces_the_linear_score() {

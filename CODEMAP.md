@@ -61,7 +61,7 @@ only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 | `featherkey-language-momentum` | domain | Recency-weighted per-language momentum: which language the user is writing in now. | — |
 | `featherkey-layout-engine` | domain | Provide keyboard-key layout geometry (alpha/numeric/symbol pages, key rectangles and centers) with an RTL-ready direction marker (ADR-16). | kernel |
 | `featherkey-locale-manager` | domain | Track the ordered set of active languages and identify, per word, which active language it belongs to (lightweight statistical language-ID). | dictionary |
-| `featherkey-neural-ranker` | domain | Tiny neural re-ranker: an 8-slot feature vector and a cold-start prior that reproduces the linear candidate ranking. | nn |
+| `featherkey-neural-ranker` | domain | Tiny neural re-ranker: an 8-slot feature vector and a cold-start prior that reproduces the linear candidate ranking. | contracts, nn |
 | `featherkey-nn` | domain | Tiny dependency-free neural substrate: 1-hidden-layer MLP with forward, SGD, linear-prior init, and versioned serialization. | — |
 | `featherkey-personalization` | domain | Learn the user's vocabulary/whitelist and own the user dictionary — the sole writer of the lexical learned-data domain (`Namespace::UserDict`, ADR-14). | contracts |
 | `featherkey-prediction` | domain | Rank prefix-completion suggestions from the active-language lexicons behind the `Predictor` port. | context, contracts, dictionary, fold |
@@ -255,10 +255,10 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 
 - **Path:** `core/crates/neural-ranker` — **Layer:** domain
 - **One job:** Tiny neural re-ranker: an 8-slot feature vector and a cold-start prior that reproduces the linear candidate ranking.
-- **Depends on:** `featherkey-nn`
+- **Depends on:** `featherkey-contracts`, `featherkey-nn`
 - **Structs:** `NeuralRanker`, `RankFeatures`
 - **Constants:** `INPUTS`
-- **Methods:** `NeuralRanker::from_prior`, `NeuralRanker::score`, `RankFeatures::to_array`
+- **Methods:** `NeuralRanker::from_prior`, `NeuralRanker::load`, `NeuralRanker::persist`, `NeuralRanker::reinforce`, `NeuralRanker::score`, `RankFeatures::to_array`
 - ⚠️ **No README.md** — add one (ARCHITECTURE.md §5.2 crate anatomy).
 
 ### featherkey-nn
@@ -864,6 +864,9 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `NearestKeyDecoder::new` | method — `featherkey-input-decoder` |
 | `NeuralRanker` | struct — `featherkey-neural-ranker` |
 | `NeuralRanker::from_prior` | method — `featherkey-neural-ranker` |
+| `NeuralRanker::load` | method — `featherkey-neural-ranker` |
+| `NeuralRanker::persist` | method — `featherkey-neural-ranker` |
+| `NeuralRanker::reinforce` | method — `featherkey-neural-ranker` |
 | `NeuralRanker::score` | method — `featherkey-neural-ranker` |
 | `NnError` | enum — `featherkey-nn::error` |
 | `NoClobberCorrector` | struct — `featherkey-autocorrect` |

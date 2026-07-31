@@ -15,6 +15,7 @@ workspace = true
 
 [dependencies]
 featherkey-nn = { path = "../nn" }
+featherkey-contracts = { path = "../contracts" }
 
 [dev-dependencies]
 featherkey-candidate-ranker = { path = "../candidate-ranker" }

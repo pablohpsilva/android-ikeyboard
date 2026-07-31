@@ -501,6 +501,7 @@ name = "featherkey-neural-ranker"
 version = "0.0.0"
 dependencies = [
  "featherkey-candidate-ranker",
+ "featherkey-contracts",
  "featherkey-language-momentum",
  "featherkey-nn",
  "proptest",
