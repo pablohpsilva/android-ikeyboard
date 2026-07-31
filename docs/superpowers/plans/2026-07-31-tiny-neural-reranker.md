@@ -63,8 +63,11 @@ same order):
 
 **Bound `B = 20.0`** covers every slot with margin (the correction terms are the widest at
 ~15). The prior's linear-region constant must satisfy `C > scale·B`; the plan uses `scale = 1.0`,
-`C = 500.0` — a large safety margin so every hidden unit stays in its linear region across the
-whole feature domain. With `positional` already carrying its coefficient of 1, and
+`C = 64.0` (~3× margin over `B`). **`C` is kept small deliberately:** the construction computes
+`(a_j/s)(s·x_j+C)` and subtracts `Σ (C/s)·a_j`, so a large `C` causes catastrophic f32
+cancellation — `C=64` keeps every hidden unit in its linear region (min pre-activation
+`-B+C = 44 > 0`) while holding the parity error to ~1e-5, far below the ln-based score gaps, so
+the cold-start ordering is bit-stable against the existing rank tests. With `positional` already carrying its coefficient of 1, and
 `correction_promote`/`demote` carrying their own weights (`CORRECTION_STICKY_WEIGHT`=1.0,
 `CORRECTION_UNWANTED_WEIGHT`=0.5) inside `correction_parts`, the prior's `forward` reproduces
 exactly `candidate_ranker::score + correction_adjustment + SPATIAL_WEIGHT·spatial`.
@@ -347,7 +350,7 @@ Manifest deps: `featherkey-nn = { path = "../nn" }`, `featherkey-contracts = { p
   [f32; INPUTS]` (slot 7 = bias 1.0).
 - `pub struct NeuralRanker { mlp: Mlp }`
 - `NeuralRanker::from_prior(coeffs: &[f32; INPUTS]) -> Self` (builds `Mlp::from_linear`
-  with hidden==INPUTS, `scale=1.0`, `offset_c=500.0`).
+  with hidden==INPUTS, `scale=1.0`, `offset_c=64.0` — see the bound/`C` rationale above).
 - `NeuralRanker::score(&self, f: &RankFeatures) -> f64`.
 
 - [ ] **Step 1: Failing tests**
@@ -577,7 +580,11 @@ fn rank_suggestions_matches_the_legacy_linear_order_before_training() {
 ```
 
 - [ ] **Step 2: Run** — confirm the guard test fails only where intended and existing tests are
-  the safety net (they should pass once the swap is correct).
+  the safety net (they should pass once the swap is correct). **Order stability:** the prior's
+  parity error is ~1e-5 (`C=64`), while adjacent legacy scores differ by ln-based gaps
+  (≥ ~ln(6/5) ≈ 0.18 between neighbouring source ranks, larger with momentum), so no existing
+  ordering can flip. If any existing test asserts an order between candidates closer than ~1e-4,
+  treat it as a real finding and widen the corpus rather than loosening the assertion.
 - [ ] **Step 3: Implement** — replace the `rank_with_bias(&cands, &momentum, k, |word| ...)`
   call with `rank_by(&cands, k, |c| self.neural_ranker.score(&self.rank_features(c, prefix,
   &spatial)))`; assemble `RankFeatures` (positional via `positional_score(c.source_rank)`,
@@ -596,9 +603,13 @@ fn rank_suggestions_matches_the_legacy_linear_order_before_training() {
 **Interfaces:**
 - Produces: `fn reinforce_from_pick(&mut self, prefix: &str, chosen: &str)` (private) — if
   `last_ranked` matches `prefix.to_lowercase()` and `chosen` is in the shown set, call
-  `self.neural_ranker.reinforce(shown_features, chosen_idx, RANKER_LR)`; else no-op.
-  `const RANKER_LR: f32 = 0.05`. Called from the **already-gated** `observe_strip_pick` (after
-  `note_pick`) and from `learn_word` when the committed word is in the current snapshot.
+  `self.neural_ranker.reinforce(shown_features, chosen_idx, RANKER_LR)` **and then clear
+  `last_ranked`** (consume the snapshot); else no-op. `const RANKER_LR: f32 = 0.05`. Called from
+  the **already-gated** `observe_strip_pick` (after `note_pick`) and from `learn_word` when the
+  committed word is in the current snapshot.
+- **One training event per shown set:** consuming the snapshot means a strip pick that fires
+  *both* `observe_strip_pick` and (on commit) `learn_word` trains exactly once — the second call
+  finds no snapshot and no-ops. A test asserts this (below).
 
 - [ ] **Step 1: Failing tests**
 ```rust
@@ -614,6 +625,12 @@ fn training_is_suppressed_in_a_sensitive_field() {
 }
 #[test]
 fn training_respects_consent_off() { /* learningEnabled=false path: no change */ }
+#[test]
+fn a_pick_that_also_commits_trains_only_once() {
+    // rank_suggestions("te"); observe_strip_pick("te","tea",ordinary) THEN
+    // learn_word(preceding,"tea",ordinary). Assert the score delta equals a single
+    // reinforce (snapshot consumed) — not double.
+}
 ```
 
 - [ ] **Step 2: Run, see fail.**
@@ -668,3 +685,40 @@ reverting Tasks 1–8 removes them with no effect on the rest of the workspace.
 
 ## Audit log
 _(Plan gate — `/r-u-sure` — appended on each run.)_
+
+### Pass 1 — ✅ Complete and verified (plan-level)
+
+**Audited the plan against the design** (each design section → a task) and against the real code
+the tasks touch.
+
+**Coverage:** substrate → T1–4; ranker policy → T5–6; `RankerModel` namespace → T7; `rank_by`
+generalisation → T8; correction split → T9; persist/restore/purge → T10; scorer swap + features
+→ T11; gated online training → T12; BDD `@BR-11` + full gate → T13. Cold-start no-regression is
+pinned in T5 (unit) and T11 (integration); encrypted+purge in T10; sensitive/consent gating in
+T12. No design section is unmapped.
+
+**Feasibility verified against real code:** `candidate_ranker::{LM_WEIGHT_LANG,
+SOURCE_PRIOR_LEXICON, SOURCE_PRIOR_DEVICE}` are already `pub` (lib.rs:8–11); the persist/restore
+fan-out (`learn.rs:175/189`) and gated observe hooks (`learn.rs:34/46`) exist as the plan
+assumes; the prior construction (H=INPUTS, one active unit per input, with the `a_j==0`
+η-handling) is mathematically sound and every weight is non-zero → trainable from step 1, and
+backprop reaches all off-diagonal `W1` entries so the net learns dense interactions after step 1.
+
+**Gaps this pass found and fixed (the gate changed the artifact):**
+1. **Prior numerical stability.** `offset_c=500` caused f32 catastrophic cancellation (~1e-3),
+   which could flip near-tie orderings and break the "existing rank tests stay green exactly"
+   guarantee. Lowered to `C=64` (~3× margin over `B=20`), error ~1e-5 ≪ the ln score gaps;
+   added the rationale + an order-stability note to T11.
+2. **Double-training.** A strip pick fires both `observe_strip_pick` and `learn_word`;
+   `reinforce_from_pick` now **consumes** (clears) the snapshot after training, so one shown set
+   trains exactly once. Added `a_pick_that_also_commits_trains_only_once` to T12.
+
+**Handed to the build phase (not plan gaps):** the exact corpus for the T5/T11 order tests and
+the T9/T10 integration fixtures are described concretely (assertions + seams named) but written
+in prose where they reuse existing per-file test fixtures — the implementer writes them against
+those fixtures. On-device `.so` rebuild + acceptance is a post-merge handoff (no FFI change, so
+bindings are unchanged), matching how prior core features shipped.
+
+**Verdict: ✅ Complete and verified** — the plan is a faithful, feasible decomposition of the
+design; tasks are bite-sized and independently testable; the two numerical/correctness risks are
+closed. Ready for the build phase (subagent-driven-development).
