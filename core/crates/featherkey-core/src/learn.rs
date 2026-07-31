@@ -12,7 +12,7 @@
 //! not passive learning, so they are intentionally *not* gated — the user asked
 //! for that word to be remembered.
 
-use featherkey_autocorrect_gate::AutocorrectGate;
+use featherkey_autocorrect_gate::{AutocorrectGate, GATE_LR};
 use featherkey_context::Context;
 use featherkey_contracts::{SecureStore, SensitiveContextSource};
 use featherkey_corrections::Corrections;
@@ -21,6 +21,7 @@ use featherkey_neural_ranker::{NeuralRanker, RankFeatures};
 use featherkey_personalization::Personalization;
 use featherkey_touch_model::TouchModel;
 
+use crate::correct::{AutocorrectOutcome, KEPT_TARGET, REACHED_TARGET, REVERT_TARGET};
 use crate::error::FeatherKeyError;
 use crate::rank::PRIOR_COEFFS;
 use crate::FeatherKeyCore;
@@ -111,6 +112,27 @@ impl FeatherKeyCore {
             return;
         }
         self.corrections.note_unwanted(word);
+    }
+
+    /// Train the gate on `outcome` for the last correction — gated (BR-26).
+    pub fn observe_autocorrect_outcome(
+        &mut self,
+        outcome: AutocorrectOutcome,
+        field: &dyn SensitiveContextSource,
+    ) {
+        if self.sensitivity.should_suppress(field) {
+            return;
+        }
+        let Some(last) = self.last_correction.as_ref() else {
+            return;
+        };
+        let target = match outcome {
+            AutocorrectOutcome::Reverted => REVERT_TARGET,
+            AutocorrectOutcome::Kept => KEPT_TARGET,
+            AutocorrectOutcome::Reached => REACHED_TARGET,
+        };
+        self.autocorrect_gate
+            .reinforce(&last.features, target, GATE_LR);
     }
 
     /// Bulk-load pre-computed `(prev, next, count)` bigram transitions into the
@@ -261,6 +283,21 @@ mod tests {
         fn is_sensitive(&self) -> bool {
             false
         }
+    }
+
+    struct Sensitive;
+    impl SensitiveContextSource for Sensitive {
+        fn is_sensitive(&self) -> bool {
+            true
+        }
+    }
+
+    fn correction_core() -> FeatherKeyCore {
+        FeatherKeyCore::new(vec![(
+            "en".into(),
+            vec!["cat".into(), "dog".into(), "hat".into(), "bat".into()],
+        )])
+        .expect("core")
     }
 
     /// A core whose "te…" completions are `tea` < `team` < `teach`.
@@ -433,5 +470,29 @@ mod tests {
                 < 1e-6,
             "the gate's learned residual must survive persist -> restore"
         );
+    }
+
+    #[test]
+    fn revert_suppresses_a_repeatedly_reverted_correction() {
+        let mut fk = correction_core();
+        let _ = fk.choose_correction("xat", &[], vec![]).expect("ok");
+        // Cold-start overshoots for ~2 dozen reverts before settling (~30); margin: 60.
+        for _ in 0..60 {
+            let _ = fk.choose_correction("xat", &[], vec![]).expect("ok");
+            fk.observe_autocorrect_outcome(AutocorrectOutcome::Reverted, &Ordinary);
+        }
+        let got = fk.choose_correction("xat", &[], vec![]).expect("ok");
+        assert!(!got.applied, "the user's reverts pushed it under the floor");
+    }
+
+    #[test]
+    fn a_sensitive_field_records_nothing() {
+        let mut fk = correction_core();
+        let _ = fk.choose_correction("xat", &[], vec![]).expect("ok");
+        let features = fk.last_correction.as_ref().expect("cached").features;
+        let before = fk.autocorrect_gate.residual(&features);
+        fk.observe_autocorrect_outcome(AutocorrectOutcome::Reverted, &Sensitive);
+        let after = fk.autocorrect_gate.residual(&features);
+        assert_eq!(before, after, "gate must not change");
     }
 }

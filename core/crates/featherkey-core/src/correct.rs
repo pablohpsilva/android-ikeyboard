@@ -44,16 +44,34 @@ pub(crate) const AUTOCORRECT_FLOOR: f64 = 0.3;
 /// The most recent gated correction decision, bounded to one snapshot: the
 /// features that were scored, the winner that was weighed, and whether it was
 /// applied. Written by every [`choose_correction`](FeatherKeyCore::choose_correction);
-/// read by the observe-outcome trainer (Task 9) to reinforce the gate, and by
-/// this module's gate tests today. The lib build has no reader until Task 9
-/// wires `observe_correction_outcome`, so its fields are dead there for now.
-#[cfg_attr(not(test), allow(dead_code))]
+/// `features` is read by `observe_autocorrect_outcome` (`learn.rs`) to
+/// reinforce the gate. `winner`/`applied` are read by this module's gate tests
+/// only for now (no non-test reader until the FFI surface exposes them).
 #[derive(Debug, Clone)]
 pub(crate) struct LastCorrection {
     pub(crate) features: GateFeatures,
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) winner: String,
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) applied: bool,
 }
+
+/// Real-world outcome of the last gated correction (Task 9), fed to the gate
+/// by `observe_autocorrect_outcome` (`learn.rs`) as a training signal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutocorrectOutcome {
+    /// The user reverted/undid it: push the gate toward "withhold".
+    Reverted,
+    /// The user kept it, with no strong signal either way.
+    Kept,
+    /// The user typed on past it cleanly: a confirming signal.
+    Reached,
+}
+
+/// Gate training targets, one per [`AutocorrectOutcome`] variant.
+pub(crate) const REVERT_TARGET: f32 = -1.0;
+pub(crate) const KEPT_TARGET: f32 = 0.25;
+pub(crate) const REACHED_TARGET: f32 = 1.0;
 
 impl FeatherKeyCore {
     /// Multilingual, momentum-aware correction, **gated** by the per-user neural
