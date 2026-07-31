@@ -40,7 +40,7 @@ mod ffi;
 #[cfg(feature = "uniffi")]
 uniffi::setup_scaffolding!();
 
-pub use crate::error::FeatherKeyError;
+pub use crate::{correct::AutocorrectOutcome, error::FeatherKeyError};
 
 // Re-exported so the shell depends only on this façade, never on the internal
 // crates directly (SEDD §3.6, EP-3 boundary).
