@@ -7,6 +7,7 @@
 //! additional design weight — `ffi.rs` still owns the exported `KeyboardCore`
 //! object and the foreign-trait boundary.
 
+use crate::correct::AutocorrectOutcome;
 use crate::{DecodeResult, FeatherKeyError};
 
 /// One active language and its sorted lexicon, as handed across the FFI.
@@ -44,6 +45,13 @@ pub struct FfiCorrection {
     pub primary: String,
     pub alternatives: Vec<String>,
     pub applied: bool,
+    /// When the neural gate withheld an otherwise-available correction
+    /// (`applied == false` but a winner existed), the winner it declined to
+    /// apply — mirrors [`featherkey_contracts::Correction::withheld`]. `None`
+    /// when nothing was withheld (a correction applied, or there was no
+    /// candidate to gate). The shell surfaces this as the counterfactual
+    /// "reached" signal for `observe_autocorrect_outcome`.
+    pub withheld: Option<String>,
 }
 
 /// One key of the active layout for the shell to render, in the layout's logical
@@ -136,6 +144,28 @@ pub enum FfiLatinLayout {
     Qwerty,
     Qwertz,
     Azerty,
+}
+
+/// The real-world outcome of the last gated correction (Task 9's training
+/// signal), marshalled across the FFI. Mirrors [`AutocorrectOutcome`] 1:1.
+#[derive(Debug, uniffi::Enum)]
+pub enum FfiAutocorrectOutcome {
+    /// The user reverted/undid it: push the gate toward "withhold".
+    Reverted,
+    /// The user kept it, with no strong signal either way.
+    Kept,
+    /// The user typed on past it cleanly: a confirming signal.
+    Reached,
+}
+
+impl From<FfiAutocorrectOutcome> for AutocorrectOutcome {
+    fn from(o: FfiAutocorrectOutcome) -> Self {
+        match o {
+            FfiAutocorrectOutcome::Reverted => AutocorrectOutcome::Reverted,
+            FfiAutocorrectOutcome::Kept => AutocorrectOutcome::Kept,
+            FfiAutocorrectOutcome::Reached => AutocorrectOutcome::Reached,
+        }
+    }
 }
 
 /// Pure boundary mapping (kept out of the exported method so it is unit-testable).
