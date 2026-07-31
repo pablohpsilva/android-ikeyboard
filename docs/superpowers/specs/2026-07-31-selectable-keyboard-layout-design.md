@@ -346,3 +346,16 @@ run — this is a design artifact; runtime evidence belongs to the build gate.
 
 Verdict: ✅ **Complete and verified** for the design phase. Cleared to advance to
 the plan phase.
+
+### Pass 2 — ⚠️ Done but unverified on-device (build phase, 2026-07-31)
+Design realised on branch `selectable-keyboard-layout` (commits `dbac6de`..`a40cfaa`),
+subagent-driven with per-task reviews + a whole-branch review. Every DoD §8 item is
+green with host evidence: `ci-local.sh` 906/0, coverage ≥98% (98.96/98.77/99.23),
+fitness exit 0, bindings gate OK, `@BR-68` traceable, no panics; the public API
+matches §4 (`LatinLayout`, `alpha_for(tag,override)`, `set_latin_layout` core+FFI,
+`KeyboardLayoutPrefs`, `PhysicalKeyboardLayout`). Latin-only (D2), survives-switch,
+and Auto=selected-language-default (the D4 open item, resolved above) are proven by
+Rust tests. The whole-branch review caught + fixed one real crash (an API-33 probe
+call unguarded vs `minSdk=26`). **Handed off (no NDK/device this session):** rebuild
+the arm64 `.so` and run the on-device acceptance (§7). ⚠️ until the device pass
+confirms render+decode on the phone. Full detail in the plan's Audit log Pass 2.

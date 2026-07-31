@@ -941,3 +941,37 @@ No code was run (this is a plan artifact; the executable evidence — test count
 exit 0, on-device — is produced and recorded at the build-phase gate, Task 7 Step 7).
 
 Verdict: ✅ **Complete and verified** for the plan phase. Cleared to execute.
+
+### Pass 2 — ⚠️ Done but unverified on-device (build phase)
+All 7 tasks + a final-review fix implemented on branch `selectable-keyboard-layout`
+(commits `dbac6de`..`a40cfaa`), each task gated by an independent spec+quality
+review; a whole-branch review (opus) closed the branch.
+
+**Green with evidence (ran at HEAD):** `ci-local.sh` 906 tests / 0 failed;
+coverage 98.96 / 98.77 / 99.23 % (region/fn/line, ≥98% DoD met); fitness exit 0
+(incl. the `ffi.rs`→`ffi_types.rs` split that fixed a 536>500 violation caught in
+task review); `bindings_check --check` OK (bindings host-regenerated — no NDK
+needed); `codemap --check` up to date; `bdd_check` 18 files traceable (`@BR-68`
+maps to BR-68 in the BRD); `cargo build --workspace` clean; clippy `-D warnings`
+clean (no panics added). Gradle: `:platform-services` 6/6 unit tests, `:settings-ui`
++ `:ime-service` compile; `:platform-services:lintDebug` NewApi-clean for the new
+file.
+
+**One real defect found and fixed by review:** the whole-branch review caught an
+API-33 call (`InputDevice.getKeyCodeForKeyLocation`) in `PhysicalKeyboardLayout.detect()`
+unguarded against `minSdk=26` — would crash the IME on API 26–32 devices with a
+physical keyboard on the default AUTO setting. Fixed (`a40cfaa`) with an `SDK_INT >=
+TIRAMISU` early-return guard + a `runCatching` wrap at the call site; re-review
+confirmed ADDRESSED, no new breakage.
+
+**NOT verified here (handed off to the user — this session has no NDK/device):**
+(1) rebuild the arm64 `.so` via `apps/android/ffi-bridge/build-jni.sh` (needs
+`ANDROID_NDK_HOME`); (2) the on-device acceptance checklist (design §7) on a real
+device. Until (2) passes, this remains ⚠️, not ✅ — the keyboard's real behaviour
+has been verified only via host tests + compilation, not on the phone.
+
+**Deferred non-blocking follow-ups:** `primary_subtag()` DRY in `scripts.rs`; a
+test for `set_latin_layout`'s numeric-page skip-branch; possible 4-chip overflow on
+a narrow screen (FlowRow fallback); a log breadcrumb for the silent `runCatching`;
+and two pre-existing, out-of-scope issues (`ci-local.sh:55 rm -f Cargo.lock`; two
+`KeystoreKeyProvider` NewApi StrongBox lint errors).
