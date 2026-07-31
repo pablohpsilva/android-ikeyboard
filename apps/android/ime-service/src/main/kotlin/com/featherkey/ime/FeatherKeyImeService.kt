@@ -31,6 +31,7 @@ import android.widget.Toast
 import com.featherkey.ffi.FeatherKeyBridge
 import com.featherkey.ffi.FieldSensitivity
 import com.featherkey.ffi.Language
+import com.featherkey.ffi.LatinLayout
 import com.featherkey.ffi.generated.FfiRankCandidate
 import com.featherkey.ffi.generated.FfiSource
 import com.featherkey.keyboard.FunctionKey
@@ -41,8 +42,11 @@ import com.featherkey.platform.DeviceDictionary
 import com.featherkey.platform.EditorInfoSensitivity
 import com.featherkey.platform.EmojiRecents
 import com.featherkey.platform.KeyboardAppearancePrefs
+import com.featherkey.platform.KeyboardLayoutChoice
+import com.featherkey.platform.KeyboardLayoutPrefs
 import com.featherkey.platform.KeystoreKeyProvider
 import com.featherkey.platform.LanguagePrefs
+import com.featherkey.platform.PhysicalKeyboardLayout
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -76,6 +80,8 @@ class FeatherKeyImeService : InputMethodService() {
     private lateinit var langPrefs: LanguagePrefs
     /** Keyboard height / outlines / haptics prefs, re-read per field like languages. */
     private lateinit var appearancePrefs: KeyboardAppearancePrefs
+    /** The user's chosen Latin key arrangement (BR-68), re-read per field. */
+    private lateinit var layoutPrefs: KeyboardLayoutPrefs
     /** Persisted most-recently-used emoji for the emoji page's recents tab. */
     private lateinit var emojiRecents: EmojiRecents
     /** The active languages currently loaded into the core (order = preference). */
@@ -127,6 +133,7 @@ class FeatherKeyImeService : InputMethodService() {
         super.onCreate()
         langPrefs = LanguagePrefs(this)
         appearancePrefs = KeyboardAppearancePrefs(this)
+        layoutPrefs = KeyboardLayoutPrefs(this)
         emojiRecents = EmojiRecents(this)
         currentTags = langPrefs.activeTags()
         // The device dictionary's async lookups refresh the strip on completion.
@@ -221,6 +228,31 @@ class FeatherKeyImeService : InputMethodService() {
         )
     }
 
+    /**
+     * Push the chosen Latin layout to the core, then re-pull the rendered keys so
+     * render and decode stay in lockstep. Read-on-next-field, like [applyLanguages]
+     * and [applyAppearance]. AUTO resolves to a probed physical-keyboard layout if
+     * one is attached, else stays AUTO so the core uses the per-language default.
+     */
+    private fun applyLayout() {
+        val choice = layoutPrefs.choice()
+        val resolved = if (choice == KeyboardLayoutChoice.AUTO) {
+            PhysicalKeyboardLayout.detect() ?: KeyboardLayoutChoice.AUTO
+        } else {
+            choice
+        }
+        val kind = when (resolved) {
+            KeyboardLayoutChoice.AUTO -> LatinLayout.AUTO
+            KeyboardLayoutChoice.QWERTY -> LatinLayout.QWERTY
+            KeyboardLayoutChoice.QWERTZ -> LatinLayout.QWERTZ
+            KeyboardLayoutChoice.AZERTY -> LatinLayout.AZERTY
+        }
+        runCatching { bridge?.setLatinLayout(kind) }
+        // The alpha page may have changed; re-pull keys (also refreshes keyCenters
+        // for the tap model via renderKeys()'s `.also`, same as applyLanguages).
+        keyboard?.let { it.keys = renderKeys() }
+    }
+
     override fun onStartInput(info: EditorInfo?, restarting: Boolean) {
         super.onStartInput(info, restarting)
         val sensitive = EditorInfoSensitivity.isSensitive(info)
@@ -236,6 +268,7 @@ class FeatherKeyImeService : InputMethodService() {
         // Pick up any language or appearance changes made in settings since the
         // last field (both are read synchronously and take effect from here on).
         applyLanguages(langPrefs.activeTags())
+        applyLayout()
         applyAppearance()
         applyAutoCaps() // start a sentence/name field already shifted
     }
