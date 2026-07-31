@@ -654,6 +654,43 @@ Each task is one commit. The gate is additive and defaults to the prior (≈0 re
 
 ## Audit log
 
+### Build gate — ✅ Complete and verified (2026-07-31)
+All 12 tasks + an inserted convergence-fix task (9b) executed via subagent-driven-development
+(fresh implementer + per-task spec/quality review + fix loops + a whole-branch review), branch
+`autocorrect-gate`, commits `b97f114`…`f860f4c` (18 on the branch).
+
+**What the process caught (and fixed):** the Task-9 review found the gate needed ~30-60 reverts
+to suppress and over-suppressed unrelated corrections (dead-unit prior). Escalated to the product
+owner, who chose "fix now"; **Task 9b** reworked `from_prior` to a centred signed feature-pair
+prior — now suppresses at ~revert 4 with no global collateral, verified by hand-derived numerics
+in review. The Task-11 review caught two counterfactual-signal bugs (KEPT lost on a next-word
+pick; unbounded `lastWithheld` → false REACHED); both fixed + re-reviewed clean. The final
+whole-branch review caught a stale crate README + a looser-than-documented `lastWithheld`
+lifetime; both fixed in one wave + re-reviewed clean.
+
+**Verification — first-hand:** `bash core/tools/ci-local.sh` → **ALL GATES PASSED** (rustfmt,
+clippy -D lib+tests, `cargo test --workspace` 535, fitness ≤500/≤60, BDD `@BR-12` maps, codemap
+--check, bindings_check --check, **coverage 98.92% line**, cargo-deny **zero new deps**). Kotlin
+`:ime-service:testDebugUnitTest` green; `:app:assembleDebug` SUCCESS. **On-device SM-A166B/Android 15:**
+rebuilt `.so` (3 ABIs) + `:app:installDebug`; keyboard renders, typing commits, suggestion strip
+populates, autocorrect-boundary + backspace-revert path exercised with **no crash/panic**, process
+alive.
+
+**Whole-branch review verdict:** *Ready to merge (with the doc fixes now applied)* — BR-12
+no-clobber verified airtight and gate-state-independent (the gate is consulted only for corrections
+the policy already permits; a maximally-trained gate can never clobber a known/intended word), all
+three learning signals consent+sensitivity gated at both the Rust and Kotlin seams, encrypted
+persistence degrades to prior without panic.
+
+**Deferred (non-blocking, in the ledger):** a few test-hygiene/doc minors; a separate `codemap.py`
+grouped-`pub use` tool bug (worked around, not this feature); the `lastWithheld` expiry is
+event-driven not turn-bounded (documented in the crate README limitations).
+
+**Not done (handoff):** on-device *behavioural* acceptance — does the gate visibly suppress after a
+few real reverts / apply a reached correction — is a human pass over real use (like prior slices).
+
+**Verdict: ✅ Complete and verified.** Ready to finish the branch (integration is the user's call).
+
 ### Plan gate — ✅ Complete and verified
 Audited the plan against the design spec.
 - **Spec coverage:** every design section maps to a task — mechanism (winner_confidence + floor + bounded residual) → T3/T6/T8; crate + features → T2–T5; three signals incl. counterfactual → T9/T11; persistence → T5/T7; no-clobber-absolute → T8 (gate consulted only when `assess()` reports a correction available) + T12 scenario; namespace → T1; FFI/shell wiring → T6/T8/T10/T11.
