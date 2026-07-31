@@ -19,7 +19,6 @@ use crate::FeatherKeyCore;
 /// `rank_suggestions` overwrites it — so a later pick trains the net against
 /// precisely the set the user saw, at no standing memory cost.
 #[derive(Debug)]
-#[allow(dead_code)] // fields read by Task 12 (reinforce-from-pick); tested here.
 pub(crate) struct RankSnapshot {
     /// The in-progress prefix these suggestions completed, lowercased.
     pub prefix: String,
@@ -92,9 +91,10 @@ impl FeatherKeyCore {
         }
     }
 
-    /// The most recent ranked query's cached shown set, if any. Read seam for the
-    /// pairwise trainer wired in Task 12; exercised now by the caching test.
-    #[allow(dead_code)] // consumed by Task 12 (reinforce-from-pick); tested here.
+    /// The most recent ranked query's cached shown set, if any. Test-only
+    /// accessor: the pairwise trainer in `learn.rs` reads the `last_ranked` field
+    /// directly.
+    #[cfg(test)]
     pub(crate) fn last_ranked(&self) -> Option<&RankSnapshot> {
         self.last_ranked.as_ref()
     }

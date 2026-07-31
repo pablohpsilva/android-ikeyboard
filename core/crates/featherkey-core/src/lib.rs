@@ -143,8 +143,7 @@ pub struct FeatherKeyCore {
     neural_ranker: NeuralRanker,
     /// The most recent ranked query's shown set (words + the features that ranked
     /// them), bounded to one snapshot. Written by every `rank_suggestions`; read
-    /// by the pairwise trainer wired in Task 12.
-    #[allow(dead_code)] // read by Task 12 (reinforce-from-pick); written here now.
+    /// by the pairwise trainer (reinforce-from-pick) in `learn.rs`.
     last_ranked: Option<RankSnapshot>,
     /// Active languages, each with its validated lexicon, in preference order.
     packs: Vec<Pack>,
@@ -344,9 +343,9 @@ impl FeatherKeyCore {
         featherkey_candidate_ranker::rank(&cands, &self.momentum, k)
     }
 
-    /// The held neural re-ranker (read-only seam for Task-11 ranking and the
-    /// persistence tests). Not yet consumed by the suggestion blend.
-    #[allow(dead_code)] // wired into ranking in Task 11; exercised by tests now.
+    /// The held neural re-ranker. Test-only accessor: production ranking and
+    /// persistence reach the ranker through the `neural_ranker` field directly.
+    #[cfg(test)]
     pub(crate) fn neural_ranker(&self) -> &NeuralRanker {
         &self.neural_ranker
     }

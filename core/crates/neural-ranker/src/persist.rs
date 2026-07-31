@@ -32,15 +32,24 @@ impl NeuralRanker {
     /// back to the cold-start `prior` when nothing is stored **or** the stored
     /// blob is corrupt/stale.
     ///
-    /// A corrupt or old-format blob is not surfaced as an error: it degrades to
-    /// the prior (today's linear ranking), so a format change never breaks
-    /// ranking. Only a [`StoreError`] from the store's own `get` propagates.
+    /// A corrupt, old-format, **or wrong-shape** blob is not surfaced as an error:
+    /// it degrades to the prior (today's linear ranking), so a format or feature-
+    /// count change never breaks ranking. Only a [`StoreError`] from the store's
+    /// own `get` propagates.
+    ///
+    /// A blob whose [`inputs`](Mlp::inputs) count differs from [`INPUTS`] is
+    /// rejected before adoption: scoring it against the `INPUTS`-wide feature
+    /// vector would read truncated or misaligned features, so it falls back to the
+    /// prior instead.
     ///
     /// # Errors
     /// Returns the store's [`StoreError`] on a backend/crypto failure.
     pub fn load(store: &impl SecureStore, prior: &[f32; INPUTS]) -> Result<Self, StoreError> {
         let mlp = match store.get(Namespace::RankerModel, BLOB_KEY)? {
-            Some(bytes) => Mlp::from_bytes(&bytes).unwrap_or_else(|_| Self::from_prior(prior).mlp),
+            Some(bytes) => match Mlp::from_bytes(&bytes) {
+                Ok(mlp) if mlp.inputs() == INPUTS => mlp,
+                Ok(_) | Err(_) => Self::from_prior(prior).mlp,
+            },
             None => return Ok(Self::from_prior(prior)),
         };
         Ok(Self { mlp })
@@ -117,6 +126,27 @@ mod tests {
         let store = FakeStore::default();
         store
             .put(Namespace::RankerModel, BLOB_KEY, b"not a model")
+            .unwrap();
+
+        let loaded = NeuralRanker::load(&store, &PRIOR).unwrap();
+        let prior = NeuralRanker::from_prior(&PRIOR);
+        for p in [-2.0_f32, -1.0, 0.0, 0.5] {
+            let f = feat(p);
+            assert_eq!(loaded.score(&f), prior.score(&f));
+        }
+    }
+
+    #[test]
+    fn load_falls_back_to_prior_on_wrong_shape_blob() {
+        // A stored blob that parses cleanly but has the wrong input count (a
+        // different feature layout) must be rejected, not adopted: scoring it
+        // against the INPUTS-wide vector would read misaligned features. It
+        // degrades to the prior without surfacing an error.
+        let store = FakeStore::default();
+        let wrong_shape = Mlp::from_linear(&[1.0, 2.0], 0.0, 1.0, 64.0);
+        assert_ne!(wrong_shape.inputs(), INPUTS);
+        store
+            .put(Namespace::RankerModel, BLOB_KEY, &wrong_shape.to_bytes())
             .unwrap();
 
         let loaded = NeuralRanker::load(&store, &PRIOR).unwrap();
