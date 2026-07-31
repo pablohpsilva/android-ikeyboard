@@ -367,3 +367,22 @@ fn auto_none_restores_the_language_default() {
     fk.set_latin_layout(None); // "Auto"
     assert_eq!(fk.layout_keys()[0].label, "q"); // english default again
 }
+
+#[test]
+fn set_latin_layout_leaves_a_non_alpha_page_untouched() {
+    // The re-derive is guarded on `kind() == Alpha`: choosing a layout while a
+    // numeric (or symbol) page is live must NOT yank the user back to letters —
+    // it only records the choice, which takes effect on the next alpha page.
+    let mut fk = FeatherKeyCore::new(vec![("en".into(), vec!["hello".into()])]).unwrap();
+    fk.use_numeric_layout();
+    let numeric = fk.layout_keys();
+    fk.set_latin_layout(Some(LatinLayout::Azerty));
+    assert_eq!(
+        fk.layout_keys(),
+        numeric,
+        "numeric page must be untouched (the skip branch)"
+    );
+    // The choice was still stored: it applies once the alpha page returns.
+    fk.use_alpha_layout();
+    assert_eq!(fk.layout_keys()[0].label, "a");
+}
