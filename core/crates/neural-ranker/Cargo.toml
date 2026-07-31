@@ -1,0 +1,22 @@
+[package]
+name = "featherkey-neural-ranker"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Tiny neural re-ranker: an 8-slot feature vector and a cold-start prior that reproduces the linear candidate ranking."
+
+[package.metadata.featherkey]
+layer = "domain"
+
+[lints]
+workspace = true
+
+[dependencies]
+featherkey-nn = { path = "../nn" }
+
+[dev-dependencies]
+featherkey-candidate-ranker = { path = "../candidate-ranker" }
+featherkey-language-momentum = { path = "../language-momentum" }
+proptest = "1.11.0"

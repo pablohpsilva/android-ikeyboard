@@ -38,6 +38,7 @@ members = [
     "crates/context",
     "crates/corrections",
     "crates/nn",
+    "crates/neural-ranker",
 ]
 
 [workspace.package]

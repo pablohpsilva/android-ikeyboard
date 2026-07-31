@@ -1,7 +1,10 @@
 //! Merge candidates from all sources into one ranked list. Pure: given the same
 //! candidates and momentum snapshot it always returns the same order.
 
-use featherkey_contracts::{Candidate, RankedCandidate, Source};
+// Re-export the candidate types so downstream crates that only rank (e.g.
+// `featherkey-neural-ranker`) reach them through this crate's public API
+// without taking their own direct dependency on `featherkey-contracts`.
+pub use featherkey_contracts::{Candidate, RankedCandidate, Source};
 use featherkey_language_momentum::Momentum;
 
 /// Weight of the language-momentum term relative to positional score.
