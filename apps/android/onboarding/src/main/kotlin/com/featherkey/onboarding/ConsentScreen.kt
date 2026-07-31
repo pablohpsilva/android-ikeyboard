@@ -65,7 +65,7 @@ fun OnboardingFlow(
     onFinish: (learningEnabled: Boolean) -> Unit,
 ) {
     var step by remember { mutableIntStateOf(0) }
-    var learningEnabled by remember { mutableStateOf(false) }
+    var learningEnabled by remember { mutableStateOf(true) }
 
     Surface(modifier = Modifier.fillMaxSize()) {
         Column(
@@ -96,7 +96,7 @@ fun OnboardingFlow(
 /** Backwards-compatible entry point: a bare consent screen with no turn-on step. */
 @Composable
 fun ConsentScreen(onContinue: (learningEnabled: Boolean) -> Unit) {
-    var learningEnabled by remember { mutableStateOf(false) }
+    var learningEnabled by remember { mutableStateOf(true) }
     Surface(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier.fillMaxSize().padding(24.dp),
