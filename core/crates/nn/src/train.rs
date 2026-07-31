@@ -184,12 +184,56 @@ mod tests {
     #[test]
     fn active_relu_unit_updates_all_its_params() {
         // Complements the dead-unit test: a unit with pre > 0 has relu'=1, so
-        // its input weights, bias, and output weight all move.
+        // its input weights, bias, and output weight all move — by exact amounts.
         let mut m = Mlp::with_weights(vec![1.0], vec![0.0], vec![5.0], 0.0, 1, 1);
         let before = m.clone();
         m.train_step(&[3.0], 2.0, 0.1); // pre = 3 → relu' = 1, h = 3
-        assert_ne!(m.w1_at(0), before.w1_at(0));
-        assert_ne!(m.b1_at(0), before.b1_at(0));
-        assert_ne!(m.w2_at(0), before.w2_at(0));
+                                        // δ_0 = d·w2·relu' = 2·5·1 = 10.
+                                        // w2[0] step = lr·d·h = 0.1·2·3 = 0.6.
+        assert!((before.w2_at(0) - m.w2_at(0) - 0.6).abs() < 1e-6);
+        // w1[0] step = lr·δ·x = 0.1·10·3 = 3.0.
+        assert!((before.w1_at(0) - m.w1_at(0) - 3.0).abs() < 1e-6);
+        // b1[0] step = lr·δ = 0.1·10 = 1.0.
+        assert!((before.b1_at(0) - m.b1_at(0) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn train_step_uses_old_w2_for_hidden_deltas_not_updated_w2() {
+        // Ordering guard: δ_j must be computed from the FORWARD-pass (old) w2,
+        // before the output layer is updated. Two active hidden units with a
+        // non-trivial w2 make old-vs-updated w2 give measurably different steps.
+        // w1 row-major [h*i]: unit0=(0.5,0.5), unit1=(-0.3,0.4); b1=(1,1).
+        let net = Mlp::with_weights(
+            vec![0.5, 0.5, -0.3, 0.4],
+            vec![1.0, 1.0],
+            vec![3.0, -2.0],
+            0.5,
+            2,
+            2,
+        );
+        let x = [1.0, 2.0];
+        // pre_0 = 0.5+1.0+1.0 = 2.5 > 0; pre_1 = -0.3+0.8+1.0 = 1.5 > 0 → both active.
+        let (d_output, lr) = (2.0, 0.1);
+        let mut stepped = net.clone();
+        stepped.train_step(&x, d_output, lr);
+        // Analytic δ with OLD w2: δ_0 = d·w2_old[0]·1 = 2·3 = 6; δ_1 = 2·(-2) = -4.
+        for (j, w2_old) in [(0usize, 3.0_f32), (1usize, -2.0_f32)] {
+            let delta = d_output * w2_old; // relu'(pre_j) = 1
+            for (i, &xi) in x.iter().enumerate() {
+                let idx = j * 2 + i;
+                let applied = net.w1_at(idx) - stepped.w1_at(idx);
+                let expected = lr * delta * xi; // lr·d·w2_OLD[j]·relu'·x[i]
+                assert!(
+                    (applied - expected).abs() < 1e-4,
+                    "w1[{idx}] applied={applied} expected={expected}"
+                );
+            }
+            let applied_b1 = net.b1_at(j) - stepped.b1_at(j);
+            let expected_b1 = lr * delta;
+            assert!(
+                (applied_b1 - expected_b1).abs() < 1e-4,
+                "b1[{j}] applied={applied_b1} expected={expected_b1}"
+            );
+        }
     }
 }
