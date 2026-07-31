@@ -114,6 +114,24 @@ impl FeatherKeyCore {
     /// is noisier (a user may delete for reasons unrelated to the word being wrong),
     /// so a single delete-retype only nudges and never unseats a strong default.
     fn correction_adjustment(&self, prefix: &str, word: &str) -> f64 {
+        let (promote, demote) = self.correction_parts(prefix, word);
+        promote - demote
+    }
+
+    /// The correction score split into its two non-negative components:
+    /// `(promote, demote)`. The neural re-ranker consumes them as independent
+    /// features; [`correction_adjustment`](Self::correction_adjustment) is just
+    /// their difference, so the scalar ranking behaviour is unchanged.
+    ///
+    /// * **`promote`** `CORRECTION_STICKY_WEIGHT * ln(1 + picks)`, or `0.0` when
+    ///   `picks == 0` — `picks` is how often the user chose this completion for
+    ///   this prefix (`observe_strip_pick`).
+    /// * **`demote`** `CORRECTION_UNWANTED_WEIGHT * ln(1 + unwanted)`, or `0.0`
+    ///   when `unwanted == 0` — `unwanted` is how often the user deleted and
+    ///   retyped this word (`observe_delete_retype`), counted per word.
+    ///
+    /// Both are always `>= 0.0`.
+    fn correction_parts(&self, prefix: &str, word: &str) -> (f64, f64) {
         let picks = self.corrections.pref_count(prefix, word);
         let unwanted = self.corrections.unwanted_count(word);
         let promote = if picks == 0 {
@@ -126,7 +144,7 @@ impl FeatherKeyCore {
         } else {
             CORRECTION_UNWANTED_WEIGHT * f64::from(1 + unwanted).ln()
         };
-        promote - demote
+        (promote, demote)
     }
 
     /// The learned `freq` and bundled `dict_rank` snapshots the ranked predictor
@@ -399,5 +417,45 @@ mod tests {
         ];
         let out = core.rank_suggestions("", "", device);
         assert_eq!(out[0].word, "hola");
+    }
+
+    #[test]
+    fn correction_parts_sum_to_the_adjustment() {
+        // The promote/demote split the neural re-ranker consumes as two features
+        // must recombine to exactly the scalar `correction_adjustment` ranking uses.
+        // Record 3 sticky-picks for ("ca","cat") and 2 delete-retypes for "cat".
+        struct Ordinary;
+        impl featherkey_contracts::SensitiveContextSource for Ordinary {
+            fn is_sensitive(&self) -> bool {
+                false
+            }
+        }
+        let mut core = FeatherKeyCore::new(vec![("en".into(), vec!["cat".into()])]).expect("core");
+        for _ in 0..3 {
+            core.observe_strip_pick("ca", "cat", &Ordinary);
+        }
+        for _ in 0..2 {
+            core.observe_delete_retype("cat", &Ordinary);
+        }
+        let (promote, demote) = core.correction_parts("ca", "cat");
+        // Both terms exercise their count > 0 branch and are strictly positive.
+        assert!(promote > 0.0, "promote should be positive: {promote}");
+        assert!(demote > 0.0, "demote should be positive: {demote}");
+        // Exact closed form: sticky-weighted ln(1+picks), unwanted-weighted ln(1+unwanted).
+        assert_eq!(promote, CORRECTION_STICKY_WEIGHT * f64::from(1 + 3).ln());
+        assert_eq!(demote, CORRECTION_UNWANTED_WEIGHT * f64::from(1 + 2).ln());
+        // The net is identical to what ranking applies (identity preserved).
+        assert_eq!(promote - demote, core.correction_adjustment("ca", "cat"));
+    }
+
+    #[test]
+    fn correction_parts_are_zero_without_history() {
+        // Both count == 0 branches: a word with no correction history yields (0, 0),
+        // so ranking is unchanged — the two together net to the same zero adjustment.
+        let core = FeatherKeyCore::new(vec![("en".into(), vec!["cat".into()])]).expect("core");
+        let (promote, demote) = core.correction_parts("ca", "cat");
+        assert_eq!(promote, 0.0);
+        assert_eq!(demote, 0.0);
+        assert_eq!(promote - demote, core.correction_adjustment("ca", "cat"));
     }
 }
