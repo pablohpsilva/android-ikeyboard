@@ -108,9 +108,9 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **One job:** Decide whether to trust an autocorrect — a tiny per-user neural gate over the structural features of one correction decision (`GateFeatures`).
 - **Depends on:** `featherkey-contracts`, `featherkey-nn`
 - **Serves:** BR-12, BR-13, BR-15, BR-22, BR-26, BR-46
-- **Structs:** `GateFeatures`
-- **Constants:** `INPUTS`
-- **Methods:** `GateFeatures::to_array`
+- **Structs:** `AutocorrectGate`, `GateFeatures`
+- **Constants:** `INPUTS`, `RESIDUAL_BOUND`
+- **Methods:** `AutocorrectGate::from_prior`, `AutocorrectGate::residual`, `GateFeatures::to_array`
 
 ### featherkey-candidate-ranker
 
@@ -480,6 +480,9 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `AutoCaps.shouldCapitalize` | kotlin fun — `:ime-service` |
 | `AutoCorrect` | trait — `featherkey-contracts` |
 | `AutoCorrect::correct` | method — `featherkey-contracts` |
+| `AutocorrectGate` | struct — `featherkey-autocorrect-gate` |
+| `AutocorrectGate::from_prior` | method — `featherkey-autocorrect-gate` |
+| `AutocorrectGate::residual` | method — `featherkey-autocorrect-gate` |
 | `BEAM` | const — `featherkey-tap-sequence` |
 | `BRANCH` | const — `featherkey-tap-sequence` |
 | `C::capacity` | method — `featherkey-diagnostics` |
@@ -913,6 +916,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `RedbSecureStore` | struct — `featherkey-secure-store` |
 | `RedbSecureStore::open` | method — `featherkey-secure-store` |
 | `RenderKey` | kotlin class — `:keyboard-view` |
+| `RESIDUAL_BOUND` | const — `featherkey-autocorrect-gate` |
 | `score` | fn — `featherkey-candidate-ranker` |
 | `SecureStore` | trait — `featherkey-contracts` |
 | `SecureStore::get` | method — `featherkey-contracts` |
