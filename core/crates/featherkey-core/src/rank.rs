@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
+use featherkey_candidate_ranker::{LM_WEIGHT_LANG, SOURCE_PRIOR_DEVICE, SOURCE_PRIOR_LEXICON};
 use featherkey_contracts::{Candidate, RankedCandidate, Source, TypingContext};
 use featherkey_dictionary::Dictionary;
 use featherkey_prediction::{StatisticalPredictor, MAX_SUGGESTIONS};
@@ -24,6 +25,25 @@ use crate::{FeatherKeyCore, CORRECTION_STICKY_WEIGHT, CORRECTION_UNWANTED_WEIGHT
 /// ranker. Spatial fit nudges; frequency, learning, context and momentum still
 /// decide.
 const SPATIAL_WEIGHT: f64 = 0.35;
+
+/// Cold-start coefficients for the neural re-ranker, one per feature slot in
+/// `RankFeatures::to_array` order: `[positional, ln_momentum, is_lexicon,
+/// is_device, correction_promote, correction_demote, spatial, bias]`. Assembled
+/// from the *same* source consts the classic linear ranking uses (via `as f32`
+/// casts, so a change there can never silently drift the prior — pinned by
+/// `prior_coeffs_match_the_source_constants`), so the net reproduces today's
+/// order until trained (Task 11+). The unit `1.0`/`-1.0` slots are for features
+/// pre-weighted at their call sites; the trailing `0.0` is the bias slot.
+pub(crate) const PRIOR_COEFFS: [f32; featherkey_neural_ranker::INPUTS] = [
+    1.0,
+    LM_WEIGHT_LANG as f32,
+    SOURCE_PRIOR_LEXICON as f32,
+    SOURCE_PRIOR_DEVICE as f32,
+    1.0,
+    -1.0,
+    SPATIAL_WEIGHT as f32,
+    0.0,
+];
 
 impl FeatherKeyCore {
     /// The whole suggestion-strip blend, core-owned (ARCH §9.1 `Suggest`,
@@ -446,6 +466,25 @@ mod tests {
         assert_eq!(demote, CORRECTION_UNWANTED_WEIGHT * f64::from(1 + 2).ln());
         // The net is identical to what ranking applies (identity preserved).
         assert_eq!(promote - demote, core.correction_adjustment("ca", "cat"));
+    }
+
+    #[test]
+    fn prior_coeffs_match_the_source_constants() {
+        // Drift guard: the prior must stay assembled from the consts the classic
+        // ranking uses, so a source change can't silently desync it.
+        assert_eq!(
+            PRIOR_COEFFS,
+            [
+                1.0,
+                LM_WEIGHT_LANG as f32,
+                SOURCE_PRIOR_LEXICON as f32,
+                SOURCE_PRIOR_DEVICE as f32,
+                1.0,
+                -1.0,
+                SPATIAL_WEIGHT as f32,
+                0.0,
+            ]
+        );
     }
 
     #[test]

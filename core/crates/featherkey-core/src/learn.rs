@@ -16,10 +16,12 @@ use featherkey_context::Context;
 use featherkey_contracts::{SecureStore, SensitiveContextSource};
 use featherkey_corrections::Corrections;
 use featherkey_kernel::KeyId;
+use featherkey_neural_ranker::NeuralRanker;
 use featherkey_personalization::Personalization;
 use featherkey_touch_model::TouchModel;
 
 use crate::error::FeatherKeyError;
+use crate::rank::PRIOR_COEFFS;
 use crate::FeatherKeyCore;
 
 impl FeatherKeyCore {
@@ -177,6 +179,7 @@ impl FeatherKeyCore {
         self.touch_model.persist(store)?;
         self.context.persist(store)?;
         self.corrections.persist(store)?;
+        self.neural_ranker.persist(store)?;
         Ok(())
     }
 
@@ -191,6 +194,7 @@ impl FeatherKeyCore {
         self.touch_model = TouchModel::load(store)?;
         self.context = Context::load(store)?;
         self.corrections = Corrections::load(store)?;
+        self.neural_ranker = NeuralRanker::load(store, &PRIOR_COEFFS)?;
         Ok(())
     }
 }

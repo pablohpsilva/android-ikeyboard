@@ -58,9 +58,11 @@ use featherkey_input_decoder::{InputDecoder, NearestKeyDecoder};
 use featherkey_kernel::TouchPoint;
 use featherkey_language_momentum::Momentum;
 use featherkey_locale_manager::LangId;
+use featherkey_neural_ranker::NeuralRanker;
 use featherkey_personalization::Personalization;
 
 use crate::packs::{build_packs, primary_tag, Pack};
+use crate::rank::PRIOR_COEFFS;
 use featherkey_prediction::StatisticalPredictor;
 use featherkey_sensitive_context::SensitivityPolicy;
 use featherkey_tap_sequence::{TapDistribution, TapSequence};
@@ -132,6 +134,10 @@ pub struct FeatherKeyCore {
     context: Context,
     /// On-device correction-signal model, persisted under `Corrections`.
     corrections: Corrections,
+    /// The tiny neural re-ranker, initialised to the cold-start prior
+    /// ([`PRIOR_COEFFS`]) and persisted under `RankerModel`. Held here so it
+    /// survives language switches; not yet consumed by ranking (Task 11).
+    neural_ranker: NeuralRanker,
     /// Active languages, each with its validated lexicon, in preference order.
     packs: Vec<Pack>,
     sensitivity: SensitivityPolicy,
@@ -174,6 +180,7 @@ impl FeatherKeyCore {
             personalization: Personalization::new(),
             context: Context::new(),
             corrections: Corrections::new(),
+            neural_ranker: NeuralRanker::from_prior(&PRIOR_COEFFS),
             packs,
             sensitivity: SensitivityPolicy::new(),
             momentum: Momentum::new(&primary, &tags),
@@ -328,6 +335,13 @@ impl FeatherKeyCore {
         featherkey_candidate_ranker::rank(&cands, &self.momentum, k)
     }
 
+    /// The held neural re-ranker (read-only seam for Task-11 ranking and the
+    /// persistence tests). Not yet consumed by the suggestion blend.
+    #[allow(dead_code)] // wired into ranking in Task 11; exercised by tests now.
+    pub(crate) fn neural_ranker(&self) -> &NeuralRanker {
+        &self.neural_ranker
+    }
+
     /// Clone each active lexicon — the derived read engines (predictor, corrector)
     /// own their inputs by value, so the façade hands them clones of its packs.
     fn lexicon_clones(&self) -> Vec<Dictionary> {
@@ -348,6 +362,46 @@ impl FeatherKeyCore {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use featherkey_neural_ranker::RankFeatures;
+
+    /// A representative feature vector for score comparisons (values are
+    /// arbitrary but exercise every slot, so an off-by-one in the prior wiring
+    /// would change the score).
+    fn sample_feat() -> RankFeatures {
+        RankFeatures {
+            positional: -0.9,
+            ln_momentum: 0.3,
+            is_lexicon: 1.0,
+            is_device: 0.0,
+            correction_promote: 0.2,
+            correction_demote: 0.1,
+            spatial: 0.4,
+        }
+    }
+
+    #[test]
+    fn new_core_holds_the_prior_ranker() {
+        // A fresh core's held ranker scores identically to a standalone prior —
+        // proof `new()` seeds it from PRIOR_COEFFS.
+        let core = FeatherKeyCore::new(vec![("en".into(), vec!["cat".into()])]).expect("core");
+        let prior = NeuralRanker::from_prior(&PRIOR_COEFFS);
+        let f = sample_feat();
+        assert_eq!(core.neural_ranker().score(&f), prior.score(&f));
+    }
+
+    #[test]
+    fn restore_from_empty_store_yields_the_prior() {
+        // Restoring from an empty store leaves the ranker at the cold-start prior
+        // (first-run / purge proof), not some other state.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store =
+            crate::RedbSecureStore::open(dir.path().join("s.redb"), [3u8; 32]).expect("open store");
+        let mut core = FeatherKeyCore::new(vec![("en".into(), vec!["cat".into()])]).expect("core");
+        core.restore(&store).expect("restore");
+        let prior = NeuralRanker::from_prior(&PRIOR_COEFFS);
+        let f = sample_feat();
+        assert_eq!(core.neural_ranker().score(&f), prior.score(&f));
+    }
 
     #[test]
     fn observing_a_language_raises_its_weight() {
