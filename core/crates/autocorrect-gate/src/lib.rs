@@ -11,18 +11,42 @@ pub const INPUTS: usize = 5;
 /// apply threshold, never overturn a no-clobber veto (which is applied first).
 pub const RESIDUAL_BOUND: f64 = 1.5;
 
-/// Output-region offset handed to [`Mlp::from_linear`]. Deliberately small: for
-/// an all-zero coefficient prior every unit is degenerate, so `from_linear`
-/// gives each unit the `DEAD_UNIT_WEIGHT` floor `η` and cancels the per-unit
-/// constant `η·offset_c` uniformly against `b2`. A *large* `offset_c` turns that
-/// cancellation into a difference of large f32 magnitudes (catastrophic
-/// cancellation, see the re-ranker design); `C = 8` keeps the residual ~0 at
-/// cold start while `b1 = C > 0` keeps every unit in its ReLU linear region so
-/// its input weights retain a gradient path for training (Task 4).
-const PRIOR_OFFSET_C: f32 = 8.0;
+/// Per-feature typical value the prior centres each feature on (slot order). A
+/// hidden-unit *pair* per feature reads `feature − centre`, so the learned
+/// residual is driven by how far each feature sits from its centre rather than
+/// by its raw magnitude. Centres are order-of-magnitude estimates from the Task-8
+/// fixtures (edit distance ~1–2, confidence ~0.5, dict-rank-norm ~0.5, typed
+/// length ~0.3, momentum ~ln 1 ≈ 0); their exact values only shift where the
+/// piecewise response bends, not the cold-start residual (which is ~0 for any
+/// realistic feature by construction).
+const FEATURE_CENTERS: [f32; INPUTS] = [1.5, 0.5, 0.5, 0.3, 0.0];
 
-/// Default learning rate for one correction outcome.
-pub const GATE_LR: f32 = 0.05;
+/// Input-weight magnitude of each hidden unit (`±PRIOR_SCALE` on its own
+/// feature). Large enough that the per-feature gradient energy dominates the
+/// single global bias term, so training one correction barely moves an unrelated
+/// one (no collateral suppression); see [`from_prior`](AutocorrectGate::from_prior).
+const PRIOR_SCALE: f32 = 4.0;
+
+/// Bias that keeps both halves of a feature's unit pair *marginally* active at
+/// the centre (`pre = PRIOR_MARGIN > 0`), so every input weight retains a
+/// gradient path from step 1 (Task 4) while the two halves' constant
+/// contributions cancel exactly (`+κ·δ − κ·δ = 0`) — a ~0 cold-start residual.
+const PRIOR_MARGIN: f32 = 0.05;
+
+/// Output weight magnitude (`±PRIOR_WEIGHT`) of each unit pair. Deliberately
+/// small: it scales the cold-start output (kept ~0) and the input-layer
+/// gradients, without touching the output-weight gradient (`h_j`, which carries
+/// the feature signal), so it tunes cold-start smallness independently of
+/// learning sensitivity.
+const PRIOR_WEIGHT: f32 = 0.005;
+
+/// Default learning rate for one correction outcome. Gentle on purpose: with the
+/// feature-sensitive prior, ~4 reverts of one correction cross the apply floor
+/// (the product-approved 3–5), so a single accidental revert does not kill a
+/// correction, and the per-step move is small enough that convergence is smooth
+/// (no oscillation) rather than the overshoot the old constant-activation prior
+/// produced.
+pub const GATE_LR: f32 = 0.008;
 
 /// Structural features of one correction decision (slot order = the contract).
 #[derive(Debug, Clone, Copy)]
@@ -63,13 +87,37 @@ pub struct AutocorrectGate {
 }
 
 impl AutocorrectGate {
-    /// Cold start: a ~0 residual (autocorrect behaves as base+floor), with the
-    /// dead-unit weights `from_linear` supplies so training still flows step 1.
+    /// Cold start: a ~0 residual (autocorrect behaves as base+floor) built from a
+    /// **feature-sensitive** prior, so training one correction's outcome moves
+    /// that correction without dragging unrelated ones with it.
+    ///
+    /// Two hidden units per feature form a centred, signed reader of feature `j`:
+    /// unit `2j` fires above [`FEATURE_CENTERS`]`[j]` (`ReLU(+s·x_j − s·μ_j + δ)`)
+    /// and unit `2j+1` below it (`ReLU(−s·x_j + s·μ_j + δ)`), with output weights
+    /// `+κ` / `−κ`. At `x_j = μ_j` both pre-activations equal `δ > 0` (marginally
+    /// active, so their input weights keep a gradient path) and their outputs
+    /// cancel (`+κδ − κδ = 0`), giving a ~0 cold-start residual. Because each pair
+    /// only activates for *its* feature's deviation, a revert of correction *A*
+    /// concentrates its gradient on the units *A* actually excites, leaving a
+    /// differently-shaped correction *B* almost untouched (no global coupling —
+    /// the failure of the old constant-activation prior).
     #[must_use]
     pub fn from_prior() -> Self {
-        let zero = [0.0_f32; INPUTS];
+        let hidden = 2 * INPUTS;
+        let mut w1 = vec![0.0_f32; hidden * INPUTS];
+        let mut b1 = vec![0.0_f32; hidden];
+        let mut w2 = vec![0.0_f32; hidden];
+        for (j, &mu) in FEATURE_CENTERS.iter().enumerate() {
+            let (pos, neg) = (2 * j, 2 * j + 1);
+            w1[pos * INPUTS + j] = PRIOR_SCALE;
+            b1[pos] = -PRIOR_SCALE * mu + PRIOR_MARGIN;
+            w2[pos] = PRIOR_WEIGHT;
+            w1[neg * INPUTS + j] = -PRIOR_SCALE;
+            b1[neg] = PRIOR_SCALE * mu + PRIOR_MARGIN;
+            w2[neg] = -PRIOR_WEIGHT;
+        }
         Self {
-            nn: Mlp::from_linear(&zero, 0.0, 1.0, PRIOR_OFFSET_C),
+            nn: Mlp::with_weights(w1, b1, w2, 0.0, INPUTS, hidden),
         }
     }
 
@@ -106,8 +154,24 @@ mod tests {
         assert_eq!(f.to_array(), [1.0, 0.5, 0.25, 0.375, 0.0]);
     }
 
+    /// A representative strong correction: one edit from the commonest neighbour,
+    /// high confidence (~0.75), top dict rank. Mirrors the Task-8 "xat"→"cat"
+    /// fixture the core gate applies at cold start.
+    fn strong() -> GateFeatures {
+        GateFeatures {
+            edit_distance: 1.0,
+            winner_confidence: 0.75,
+            dict_rank_norm: 1.0,
+            typed_len_norm: 0.1875,
+            momentum_weight: 0.0,
+        }
+    }
+
     #[test]
-    fn cold_start_residual_is_negligible() {
+    fn cold_start_residual_is_small() {
+        // The prior is a near-no-op: for a realistic feature vector its residual
+        // is within the design's "residual ≈ 0" tolerance (exact zero is not
+        // required; the centred unit pairs cancel to a small, not zero, output).
         let g = AutocorrectGate::from_prior();
         let f = GateFeatures {
             edit_distance: 1.0,
@@ -116,7 +180,54 @@ mod tests {
             typed_len_norm: 0.3,
             momentum_weight: 0.0,
         };
-        assert!(g.residual(&f).abs() < 1e-3, "cold-start residual must be ~0");
+        assert!(
+            g.residual(&f).abs() < 0.05,
+            "cold-start residual must be ~0"
+        );
+    }
+
+    #[test]
+    fn a_few_reverts_suppress_one_correction() {
+        // Reverting ONE strong correction a handful of times must pull its
+        // residual far enough negative that `winner_confidence + residual` drops
+        // below the core's `AUTOCORRECT_FLOOR` (0.3) — i.e. it would be withheld.
+        let mut g = AutocorrectGate::from_prior();
+        let f = strong();
+        for _ in 0..5 {
+            g.reinforce(&f, -1.0, GATE_LR); // the core's REVERT_TARGET
+        }
+        let gated = f64::from(f.winner_confidence) + g.residual(&f);
+        assert!(
+            gated < 0.3,
+            "five reverts must push a strong correction under the floor: {gated}"
+        );
+    }
+
+    #[test]
+    fn reverting_one_correction_does_not_suppress_another() {
+        // Suppressing correction A must not drag a DISTINCT correction B down with
+        // it (no global collateral). B differs from A in edit distance, confidence
+        // and dict rank, so it excites a different set of centred unit pairs.
+        let mut g = AutocorrectGate::from_prior();
+        let a = strong();
+        let b = GateFeatures {
+            edit_distance: 2.0,
+            winner_confidence: 0.4,
+            dict_rank_norm: 0.15,
+            typed_len_norm: 0.5,
+            momentum_weight: 0.1,
+        };
+        let b_cold = g.residual(&b);
+        for _ in 0..5 {
+            g.reinforce(&a, -1.0, GATE_LR);
+        }
+        assert!(
+            (g.residual(&b) - b_cold).abs() < 0.1,
+            "B's residual must stay ~unchanged: cold {b_cold}, now {}",
+            g.residual(&b)
+        );
+        // And B, being a different correction, would still apply.
+        assert!(f64::from(b.winner_confidence) + g.residual(&b) >= 0.3);
     }
 
     #[test]
@@ -147,7 +258,10 @@ mod tests {
         for _ in 0..200 {
             up.reinforce(&f, 1.0, GATE_LR);
         }
-        assert!(up.residual(&f) > before + 0.1, "target +1 must raise residual");
+        assert!(
+            up.residual(&f) > before + 0.1,
+            "target +1 must raise residual"
+        );
 
         let mut down = AutocorrectGate::from_prior();
         for _ in 0..200 {

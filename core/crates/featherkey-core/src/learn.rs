@@ -476,8 +476,9 @@ mod tests {
     fn revert_suppresses_a_repeatedly_reverted_correction() {
         let mut fk = correction_core();
         let _ = fk.choose_correction("xat", &[], vec![]).expect("ok");
-        // Cold-start overshoots for ~2 dozen reverts before settling (~30); margin: 60.
-        for _ in 0..60 {
+        // The feature-sensitive prior converges smoothly: a strong correction
+        // crosses the floor in ~4 reverts (product-approved 3–5); 8 is the margin.
+        for _ in 0..8 {
             let _ = fk.choose_correction("xat", &[], vec![]).expect("ok");
             fk.observe_autocorrect_outcome(AutocorrectOutcome::Reverted, &Ordinary);
         }
