@@ -44,7 +44,8 @@ built**; this feature *upgrades the ranking policy*, it does not rebuild learnin
 |---|---|---|
 | Merge + rank candidates (linear, momentum) | `featherkey-candidate-ranker` (`rank`, `rank_with_bias`, `score`) | **Extend**: add a pure `rank_by(cands, k, scorer)` that owns dedup/order/top-k over *any* scorer; existing fns delegate to it, byte-identical. |
 | Bigram next-word context | `featherkey-context` (persists under `Namespace::PersonalLm`) | **Consume** as an input feature (context score). Unchanged. |
-| Correction signals (strip-pick prefs, unwanted words) | `featherkey-corrections`; core `correction_adjustment` (promote − demote) | **Consume** as two input features. Unchanged. |
+| Correction signals (strip-pick prefs, unwanted words) | `featherkey-corrections`; core `correction_adjustment` (promote − demote) | **Consume** as two input features (split the fn to expose both parts). |
+| Spatial tap hypotheses | core `spatial_hypotheses(prefix)` × `SPATIAL_WEIGHT` (in today's bias closure) | **Consume** as one input feature. Unchanged. |
 | Learned vocabulary / user dict | `featherkey-personalization` | **Consume** `is_known` as an input feature. Unchanged. |
 | Language momentum | `featherkey-language-momentum` (`Momentum::weight_of`) | **Consume** as an input feature. Unchanged. |
 | Encryption + persistence | `featherkey-secure-store` (redb + AES-256-GCM), `SecureStore` port (`put`/`get`) | **Reuse**: weights persist under a new namespace. No port change (no `delete` needed). |
@@ -74,7 +75,7 @@ featherkey-core (composition)
 The tiny substrate. Pure math, no I/O, no `SecureStore`, no Android types.
 
 - `struct Mlp` — one hidden layer: `W1 [I×H]`, `b1 [H]`, `W2 [H×1]`, `b2 [1]`
-  (`I ≈ 10` inputs, `H = 8` hidden). ~100–150 `f32` params.
+  (`I ≈ 8` inputs, `H = 8` hidden). ~80–100 `f32` params.
 - `Mlp::forward(&self, x: &[f32]) -> f32` — matvec → +bias → ReLU → matvec → +bias.
 - `Mlp::train_step(&mut self, x: &[f32], grad_of_output: f32, lr: f32)` — backprop the
   supplied output-gradient through the net and apply SGD. (The *ranking loss* and its
@@ -123,10 +124,13 @@ Depends on `featherkey-nn`, `featherkey-contracts` (`Candidate`, `RankedCandidat
 
 - **Open:** load `RankerModel` blob → `NeuralRanker::from_bytes`, or `from_prior()` if absent
   or `Err` (corrupt/old). Held in the core's owned state alongside context/corrections.
-- **Rank:** `rank_suggestions` computes the per-candidate `signals` it already computes today
-  (positional/momentum/source/correction/dict-rank/context/is-known) and calls
-  `candidate-ranker::rank_by(cands, k, |c| neural.score(c, &momentum, signals_for(c)))`.
-  The fixed `score`+`bias` path is superseded by the neural scorer when active.
+- **Rank:** `rank_suggestions` today ends in
+  `candidate_ranker::rank_with_bias(&cands, &momentum, MAX_SUGGESTIONS, |word|
+  correction_adjustment(prefix, word) + SPATIAL_WEIGHT·spatial(word))` and then
+  `guarantee_fold_variant`. The neural ranker replaces the **`score` + bias** closure at that
+  exact seam: `candidate_ranker::rank_by(&cands, MAX_SUGGESTIONS, |c| neural.score(c,
+  &momentum, signals_for(c)))`, with `guarantee_fold_variant` unchanged after it. The signals
+  are exactly what that closure has access to now (§5).
 - **Train:** the core caches the last ranked candidate set (with features) per lowercased
   prefix (it already produces this set). On the matching commit/strip-pick — in the existing
   `learn_word` / `observe_strip_pick` off-hot-path location, behind the existing
@@ -138,36 +142,54 @@ No new FFI surface expected this slice → **no UniFFI binding / `.so` change**.
 finds a signal the shell must pass that the core lacks, that becomes an explicit FFI sub-task;
 the current signals are all core-internal.)
 
-## 5. The feature vector (~10 inputs, all already computed at rank time)
+## 5. The feature vector (~8 inputs — exactly the signals available at the ranker seam)
 
-| # | Feature | Source (already available) |
+The net operates at the `candidate-ranker` seam, where the current linear `score` + bias
+closure operates. **Context, dict-rank, and frequency are *already* folded into each
+candidate's `source_rank`** by the predictor (`new_ranked` / `suggest_ranked`) *before*
+`candidate-ranker` sees it — so they are represented (via `positional_score(source_rank)`),
+not passed again as separate features. Adding them raw would double-count.
+
+| # | Feature | Source (already available at the seam) |
 |---|---|---|
-| 1 | `positional_score(source_rank)` | `candidate-ranker::positional_score` |
+| 1 | `positional_score(source_rank)` (embeds context + dict-rank + freq) | `candidate-ranker::positional_score` |
 | 2 | `ln(momentum.weight_of(lang))` | `Momentum::weight_of` |
 | 3 | source == Lexicon (0/1) | `Candidate::source` |
 | 4 | source == Device (0/1) | `Candidate::source` |
-| 5 | correction promote | core `correction_adjustment` (promote part) |
-| 6 | correction demote | core `correction_adjustment` (demote part) |
-| 7 | dict-rank / frequency (normalised) | pack `dict_rank` snapshot |
-| 8 | bigram-context score | `Context::next_counts` |
-| 9 | is-known / learned word (0/1) | `Personalization::is_known` |
-| 10 | bias term (constant 1.0) | — |
+| 5 | correction **promote** | core `correction_adjustment`, split into its promote part |
+| 6 | correction **demote** | core `correction_adjustment`, split into its demote part |
+| 7 | spatial-hypothesis score | core `spatial_hypotheses(prefix)` × `SPATIAL_WEIGHT` |
+| 8 | bias term (constant 1.0) | — |
 
 All are bounded, cheap scalars computed once per candidate per rank (as today). No feature
-requires a new scan or a vocabulary clone (BR-46).
+requires a new scan or a vocabulary clone (BR-46). `correction_adjustment` currently returns
+`promote − demote` as one `f64`; it is refactored to expose both parts (features 5 & 6) so the
+net can weight the two signals independently — the existing `promote − demote` caller becomes
+`promote + demote` of the split (behaviour-preserving).
+
+**Deferred enrichment (a later slice, not now):** plumbing the predictor's *raw* context /
+dict-rank / freq sub-scores out to the seam as independent features (so the net can re-weight
+them, rather than seeing them pre-collapsed into `source_rank`). Kept out of slice 1 to hold
+the change surgical.
 
 ## 6. Cold-start guarantee — no day-1 regression (load-bearing invariant)
 
-`NeuralRanker::from_prior()` initialises the `Mlp` so `forward(features(cand)) ==
-candidate-ranker::score(cand, momentum)` (within f32 tolerance) for the linear terms:
-the hidden layer passes the score's linear combination through (ReLU with a bias offset that
-keeps the operating range on the linear side, or a linear passthrough unit), and the output
-weights equal the current constants (`LM_WEIGHT_LANG`, `SOURCE_PRIOR_LEXICON/DEVICE`, the
-positional coefficient = 1, correction weights = the current sticky/unwanted weights).
+`NeuralRanker::from_prior()` initialises the `Mlp` so that, before any training,
+`forward(features(cand))` reproduces the **full current seam score** —
+`candidate-ranker::score(cand, momentum) + correction_adjustment + SPATIAL_WEIGHT·spatial` —
+within f32 tolerance. Because every input feature is **bounded** (positional and momentum are
+log terms over bounded ranges; the rest are 0/1 or bounded weights), an arbitrary linear
+target `L(x)` is reproduced exactly through ReLU units using the identity
+`L(x) = ReLU(L(x) + C) − C` for a constant `C` large enough that `L(x) + C > 0` over the input
+domain — a linear passthrough on the operating range. The output weights then equal the
+current constants (`LM_WEIGHT_LANG`, `SOURCE_PRIOR_LEXICON/DEVICE`, positional coefficient = 1,
+`CORRECTION_STICKY_WEIGHT`, `CORRECTION_UNWANTED_WEIGHT`, `SPATIAL_WEIGHT`). The plan must
+state the concrete `C` and the feature bounds it relies on.
 
-**Gate test:** on a fixed candidate corpus, `NeuralRanker::from_prior()` produces the *same
-top-k order* as `candidate-ranker::rank` **before any training**. This is the proof that a
-fresh install (or a post-wipe reload) never regresses today's behaviour.
+**Gate test:** on a fixed candidate corpus (including candidates with correction and spatial
+signals), `NeuralRanker::from_prior()` produces the *same top-k order* as today's
+`rank_suggestions` scoring **before any training**. This is the proof that a fresh install (or
+a post-wipe reload) never regresses today's behaviour.
 
 ## 7. Learning (online, off hot path, gated)
 
@@ -248,3 +270,42 @@ fresh install (or a post-wipe reload) never regresses today's behaviour.
 
 ## Audit log
 _(Design gate — `/r-u-sure` — appended on each run.)_
+
+### Pass 1 — ✅ Complete and verified (design-level)
+
+**What was required:** a design closing the user's request (tiny NN; smarter, context-aware,
+learns from the user; encrypted; purgeable) as slice 1 (foundation + re-ranker), grounded in
+what already exists (CLAUDE.md §2), naming ports/invariants/alternatives.
+
+**Evidence (verified against real code, not assumed):**
+- Read `candidate-ranker/src/lib.rs` — confirmed the linear `score` + `rank_with_bias` seam;
+  added the pure `rank_by` generalisation and the delegation-identity test to the design.
+- Read `contracts/src/lib.rs` — confirmed `Namespace` (`PersonalLm` **is** used by `context`;
+  contracts doc-comment is stale → design records the fix) and that `SecureStore` has only
+  `put`/`get` (no `delete`) → purge design relies on the whole-store wipe.
+- Read `secure-store/src/lib.rs` — AES-256-GCM confirmed; weights get their own namespace.
+- Read `SettingsActivity.kt` — `clearLearnedData()` deletes the whole `featherkey.redb`
+  (+ TSVs) → net is purged for free; **no new purge code**.
+- Read `featherkey-core/src/rank.rs:42–130` — confirmed `rank_suggestions` and
+  `correction_adjustment`.
+
+**Gaps this pass found and fixed (the gate changed the artifact):**
+1. **Missing spatial feature.** The real bias closure blends `correction_adjustment` **and**
+   `SPATIAL_WEIGHT·spatial_hypotheses`, which the first draft omitted. Added spatial as feature
+   #7 and to the §3 table + cold-start prior.
+2. **Double-counting risk.** Context / dict-rank / freq are already collapsed into `source_rank`
+   by `new_ranked`/`suggest_ranked` before the seam; the draft listed them as separate features.
+   Corrected §5 to the ~8 signals actually available at the seam; raw sub-score plumbing moved
+   to an explicit deferred enrichment.
+3. **Cold-start prior scope.** Prior now reproduces the *full* seam score (score + correction +
+   spatial), and §6 states the `L(x)=ReLU(L(x)+C)−C` bounded-input construction the plan must
+   pin (concrete `C`, feature bounds).
+
+**Handed to the plan phase (not design gaps — plan-level detail):** concrete `C` + feature
+bounds for the prior; splitting `correction_adjustment` into promote/demote parts
+(behaviour-preserving); bounding the per-prefix training-example cache; adding BR-69 to the BRD
++ `@BR-69` scenario.
+
+**Verdict: ✅ Complete and verified** — design covers every requirement area, is grounded in the
+actual seam code, and the load-bearing invariants (cold-start no-regression, encrypted, purged
+by the existing wipe, gated) are specified. Ready for user review, then the plan phase.
