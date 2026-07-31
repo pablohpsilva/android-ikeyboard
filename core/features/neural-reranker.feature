@@ -1,10 +1,11 @@
 # BDD specification — the suggestion strip learns which word I mean.
 #
 # Gherkin scenarios are tagged to the Business Requirement they verify (ARCH §8).
-# The executable form of these scenarios lives in the core re-ranking tests
-# (crates/core/tests/w6b_ranking_reflects_learning.rs and
-# crates/neural-ranker/tests/{neural_learning,neural_persistence}.rs); as the
-# cucumber harness is wired up (SEDD §12), these steps bind directly to it. The
+# The executable form of these scenarios lives in the featherkey-core integration
+# tests (core/crates/featherkey-core/tests/{w6b_ranking_reflects_learning,
+# neural_learning,neural_persistence}.rs), backed by the re-ranker's own inline
+# #[cfg(test)] unit tests in core/crates/neural-ranker/src/{lib,persist}.rs; as
+# the cucumber harness is wired up (SEDD §12), these steps bind directly to it. The
 # tiny neural re-ranker starts identical to the legacy linear ranking (cold-start
 # prior) and learns online from strip-picks; its weights are encrypted in the
 # RankerModel namespace and purged by the "clear learned data" wipe (ADR-3).
