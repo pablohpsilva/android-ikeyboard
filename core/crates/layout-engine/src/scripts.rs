@@ -86,9 +86,15 @@ enum Script {
     Latin,
 }
 
+/// The primary subtag of a BCP-47 `tag` — the part before the first `-`/`_`
+/// (so `ru-RU` and `ru` resolve alike). Falls back to the whole tag.
+fn primary_subtag(tag: &str) -> &str {
+    tag.split(['-', '_']).next().unwrap_or(tag)
+}
+
 /// Classify a BCP-47 `tag` by its primary subtag (so `ru-RU` and `ru` agree).
 fn script_of(tag: &str) -> Script {
-    match tag.split(['-', '_']).next().unwrap_or(tag) {
+    match primary_subtag(tag) {
         "ru" | "uk" | "be" | "bg" | "sr" | "mk" => Script::Cyrillic,
         "el" => Script::Greek,
         _ => Script::Latin,
@@ -97,7 +103,7 @@ fn script_of(tag: &str) -> Script {
 
 /// Today's per-locale Latin default (used when no override is set).
 fn default_latin_for(tag: &str) -> Layout {
-    match tag.split(['-', '_']).next().unwrap_or(tag) {
+    match primary_subtag(tag) {
         "fr" => Layout::azerty(),
         "de" | "lb" => Layout::qwertz(),
         _ => Layout::qwerty(),
