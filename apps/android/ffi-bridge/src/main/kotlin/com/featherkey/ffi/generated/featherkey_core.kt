@@ -786,6 +786,8 @@ internal open class UniffiVTableCallbackInterfaceSensitiveField(
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -847,6 +849,8 @@ internal interface UniffiLib : Library {
     fun uniffi_featherkey_core_fn_method_keyboardcore_rank_suggestions(`ptr`: Pointer,`preceding`: RustBuffer.ByValue,`prefix`: RustBuffer.ByValue,`device`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_featherkey_core_fn_method_keyboardcore_set_active_languages(`ptr`: Pointer,`languages`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_featherkey_core_fn_method_keyboardcore_set_latin_layout(`ptr`: Pointer,`layout`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_featherkey_core_fn_method_keyboardcore_suggest(`ptr`: Pointer,`preceding`: RustBuffer.ByValue,`prefix`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -1014,6 +1018,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_set_active_languages(
     ): Short
+    fun uniffi_featherkey_core_checksum_method_keyboardcore_set_latin_layout(
+    ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_suggest(
     ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_tap_offsets(
@@ -1097,6 +1103,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_set_active_languages() != 10043.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_set_latin_layout() != 22975.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_suggest() != 38328.toShort()) {
@@ -1584,6 +1593,12 @@ public interface KeyboardCoreInterface {
     fun `setActiveLanguages`(`languages`: List<LanguagePack>)
     
     /**
+     * Choose the Latin key arrangement (`Auto` = per-language default). Latin-only:
+     * a Cyrillic/Greek primary keeps its native block.
+     */
+    fun `setLatinLayout`(`layout`: FfiLatinLayout)
+    
+    /**
      * Ranked completions for `prefix` in `preceding` context.
      */
     fun `suggest`(`preceding`: kotlin.String, `prefix`: kotlin.String): List<FfiSuggestion>
@@ -1970,6 +1985,21 @@ open class KeyboardCore: Disposable, AutoCloseable, KeyboardCoreInterface {
     uniffiRustCallWithError(FfiException) { _status ->
     UniffiLib.INSTANCE.uniffi_featherkey_core_fn_method_keyboardcore_set_active_languages(
         it, FfiConverterSequenceTypeLanguagePack.lower(`languages`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Choose the Latin key arrangement (`Auto` = per-language default). Latin-only:
+     * a Cyrillic/Greek primary keeps its native block.
+     */override fun `setLatinLayout`(`layout`: FfiLatinLayout)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_featherkey_core_fn_method_keyboardcore_set_latin_layout(
+        it, FfiConverterTypeFfiLatinLayout.lower(`layout`),_status)
 }
     }
     
@@ -2996,6 +3026,42 @@ public object FfiConverterTypeFfiError : FfiConverterRustBuffer<FfiException> {
     }
 
 }
+
+
+
+/**
+ * The Latin arrangement a user picked, or `Auto` (per-language default).
+ * Mirrors [`crate::LatinLayout`] plus an `Auto` variant for "no override".
+ */
+
+enum class FfiLatinLayout {
+    
+    AUTO,
+    QWERTY,
+    QWERTZ,
+    AZERTY;
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiLatinLayout: FfiConverterRustBuffer<FfiLatinLayout> {
+    override fun read(buf: ByteBuffer) = try {
+        FfiLatinLayout.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: FfiLatinLayout) = 4UL
+
+    override fun write(value: FfiLatinLayout, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
 
 
 
