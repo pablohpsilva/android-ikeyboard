@@ -47,7 +47,7 @@ pub use featherkey_contracts::{
     Candidate, Correction, Namespace, RankedCandidate, SecureStore, SensitiveContextSource,
     StoreError, Suggestion, Suggestions, Token, TypingContext,
 };
-pub use featherkey_layout_engine::Layout;
+pub use featherkey_layout_engine::{LatinLayout, Layout, LayoutKind};
 pub use featherkey_secure_store::RedbSecureStore;
 
 use featherkey_context::Context;
@@ -143,6 +143,10 @@ pub struct FeatherKeyCore {
     /// characters, so an early slip can still be reconsidered (BR-5/BR-6).
     /// Transient in-memory state: never persisted, no `Namespace` (BR-26).
     taps: TapSequence,
+    /// The user's chosen Latin arrangement, or `None` for the per-language
+    /// default ("Auto"). Held across language switches so a switch never drops
+    /// the choice (design §4.2). Latin-only: non-Latin scripts ignore it.
+    latin_override: Option<LatinLayout>,
 }
 
 impl FeatherKeyCore {
@@ -174,6 +178,7 @@ impl FeatherKeyCore {
             sensitivity: SensitivityPolicy::new(),
             momentum: Momentum::new(&primary, &tags),
             taps: TapSequence::new(),
+            latin_override: None,
         })
     }
 
@@ -196,7 +201,7 @@ impl FeatherKeyCore {
             .map(|p| p.lang.as_str().to_owned())
             .collect();
         self.momentum.set_languages(&primary, &tags);
-        self.layout = Layout::alpha_for(&primary, None);
+        self.layout = Layout::alpha_for(&primary, self.latin_override);
         Ok(())
     }
 
@@ -228,9 +233,20 @@ impl FeatherKeyCore {
         self.layout = layout;
     }
 
+    /// Choose the Latin key arrangement (`None` = "Auto", the per-language
+    /// default). Re-derives the live page immediately **only if** it is the alpha
+    /// page, so the change shows without a language switch while a numeric/symbol
+    /// page in progress is left alone (design §4.2).
+    pub fn set_latin_layout(&mut self, layout: Option<LatinLayout>) {
+        self.latin_override = layout;
+        if self.layout.kind() == LayoutKind::Alpha {
+            self.layout = Layout::alpha_for(&primary_tag(&self.packs), self.latin_override);
+        }
+    }
+
     /// Switch back to the alpha letter page for the primary active language.
     pub fn use_alpha_layout(&mut self) {
-        self.layout = Layout::alpha_for(&primary_tag(&self.packs), None);
+        self.layout = Layout::alpha_for(&primary_tag(&self.packs), self.latin_override);
     }
 
     /// Switch to the numeric page.
