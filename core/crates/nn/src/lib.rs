@@ -4,10 +4,12 @@
 
 mod codec;
 mod error;
+mod multi;
 mod prior;
 mod train;
 
 pub use error::NnError;
+pub use multi::MlpMulti;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Mlp {

@@ -288,9 +288,9 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Path:** `core/crates/nn` — **Layer:** domain
 - **One job:** Tiny dependency-free neural substrate: 1-hidden-layer MLP with forward, SGD, linear-prior init, and versioned serialization.
 - **Depends on:** nothing (leaf)
-- **Structs:** `Mlp`
+- **Structs:** `Mlp`, `MlpMulti`
 - **Enums:** `NnError`
-- **Methods:** `Mlp::forward`, `Mlp::from_bytes`, `Mlp::from_linear`, `Mlp::inputs`, `Mlp::to_bytes`, `Mlp::train_step`, `Mlp::with_weights`
+- **Methods:** `Mlp::forward`, `Mlp::from_bytes`, `Mlp::from_linear`, `Mlp::inputs`, `Mlp::to_bytes`, `Mlp::train_step`, `Mlp::with_weights`, `MlpMulti::forward`, `MlpMulti::hidden`, `MlpMulti::inputs`, `MlpMulti::outputs`, `MlpMulti::softmax`, `MlpMulti::with_weights`
 - ⚠️ **No README.md** — add one (ARCHITECTURE.md §5.2 crate anatomy).
 
 ### featherkey-personalization
@@ -459,6 +459,7 @@ Behaviour specs in `core/features/`, tagged to requirement IDs and gated by
 | `locale-manager.feature` | Concurrent multilingual typing with automatic per-word detection | 5 | BR-16, BR-17, BR-18, BR-19 |
 | `neural-reranker.feature` | The suggestion strip learns which word I mean | 1 | BR-11 |
 | `neural-tap-decoder.feature` | The tap decoder learns the user's systematic aim and generalizes it | 4 | BR-7 |
+| `neural_lm.feature` | On-device neural next-word language model (foundation) | 4 | BR-10, BR-11 |
 | `personalization.feature` | On-device personal vocabulary learning | 3 | BR-7, BR-13 |
 | `prediction.feature` | Relevant autocomplete completions for the in-progress word | 4 | BR-10 |
 | `secure-store.feature` | Encrypted persistence of personal data | 4 | BR-8, BR-23, BR-62 |
@@ -898,6 +899,13 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `Mlp::to_bytes` | method — `featherkey-nn` |
 | `Mlp::train_step` | method — `featherkey-nn` |
 | `Mlp::with_weights` | method — `featherkey-nn` |
+| `MlpMulti` | struct — `featherkey-nn::multi` |
+| `MlpMulti::forward` | method — `featherkey-nn` |
+| `MlpMulti::hidden` | method — `featherkey-nn` |
+| `MlpMulti::inputs` | method — `featherkey-nn` |
+| `MlpMulti::outputs` | method — `featherkey-nn` |
+| `MlpMulti::softmax` | method — `featherkey-nn` |
+| `MlpMulti::with_weights` | method — `featherkey-nn` |
 | `Momentum` | struct — `featherkey-language-momentum` |
 | `Momentum::new` | method — `featherkey-language-momentum` |
 | `Momentum::observe` | method — `featherkey-language-momentum` |
