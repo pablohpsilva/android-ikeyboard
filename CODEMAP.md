@@ -40,7 +40,7 @@ silence about something real is the one answer this index must never give.
 
 ## 1. Rust core — crate map
 
-26 crates in the `core/` Cargo workspace. Layers run inward:
+27 crates in the `core/` Cargo workspace. Layers run inward:
 `foundation` → `port` → `domain` → `adapter` → `composition`; a crate may
 only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 
@@ -48,7 +48,7 @@ only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 |---|---|---|---|
 | `featherkey-crash-guard` | adapter | Isolate panics at the FFI seam and provide safe-mode fallback. | — |
 | `featherkey-secure-store` | adapter | Encrypt and persist all personal data — implements the `SecureStore` port; redb + AES-256-GCM. | contracts |
-| `featherkey-core` | composition | Be the composition root — wire the domain crates behind the `contracts` ports and present one narrow, UniFFI-ready use-case API to the shell. | autocorrect, autocorrect-gate, candidate-ranker, context, contracts, corrections, dictionary, fold, input-decoder, kernel, language-momentum, layout-engine, locale-manager, neural-ranker, personalization, prediction, secure-store, sensitive-context, tap-sequence, touch-model |
+| `featherkey-core` | composition | Be the composition root — wire the domain crates behind the `contracts` ports and present one narrow, UniFFI-ready use-case API to the shell. | autocorrect, autocorrect-gate, candidate-ranker, context, contracts, corrections, dictionary, fold, input-decoder, kernel, language-momentum, layout-engine, locale-manager, neural-ranker, neural-tap, personalization, prediction, secure-store, sensitive-context, tap-sequence, touch-model |
 | `featherkey-autocorrect` | domain | Decide a correction for a typed token, never clobbering a word the user clearly intended (no-clobber policy, BR-12). | candidate-ranker, contracts, dictionary, language-momentum, locale-manager, personalization |
 | `featherkey-autocorrect-gate` | domain | Decide whether to trust an autocorrect — a tiny per-user neural gate over the structural features of one correction decision (`GateFeatures`). | contracts, nn |
 | `featherkey-candidate-ranker` | domain | Merge and rank candidates from all sources using language momentum. | contracts, language-momentum |
@@ -63,6 +63,7 @@ only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 | `featherkey-layout-engine` | domain | Provide keyboard-key layout geometry (alpha/numeric/symbol pages, key rectangles and centers) with an RTL-ready direction marker (ADR-16). | kernel |
 | `featherkey-locale-manager` | domain | Track the ordered set of active languages and identify, per word, which active language it belongs to (lightweight statistical language-ID). | dictionary |
 | `featherkey-neural-ranker` | domain | Tiny neural re-ranker: an 8-slot feature vector and a cold-start prior that reproduces the linear candidate ranking. | contracts, nn |
+| `featherkey-neural-tap` | domain | Learn a per-user coordinate warp — a bounded `(Δx, Δy)` pixel shift over a normalized tap position `(nx, ny)` in `[-1,1]` — that generalizes a person's systematic tap bias across keys, rather than per-key. | contracts, nn |
 | `featherkey-nn` | domain | Tiny dependency-free neural substrate: 1-hidden-layer MLP with forward, SGD, linear-prior init, and versioned serialization. | — |
 | `featherkey-personalization` | domain | Learn the user's vocabulary/whitelist and own the user dictionary — the sole writer of the lexical learned-data domain (`Namespace::UserDict`, ADR-14). | contracts |
 | `featherkey-prediction` | domain | Rank prefix-completion suggestions from the active-language lexicons behind the `Predictor` port. | context, contracts, dictionary, fold |
@@ -144,7 +145,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 
 - **Path:** `core/crates/featherkey-core` — **Layer:** composition
 - **One job:** Be the composition root — wire the domain crates behind the `contracts` ports and present one narrow, UniFFI-ready use-case API to the shell.
-- **Depends on:** `featherkey-autocorrect`, `featherkey-autocorrect-gate`, `featherkey-candidate-ranker`, `featherkey-context`, `featherkey-contracts`, `featherkey-corrections`, `featherkey-dictionary`, `featherkey-fold`, `featherkey-input-decoder`, `featherkey-kernel`, `featherkey-language-momentum`, `featherkey-layout-engine`, `featherkey-locale-manager`, `featherkey-neural-ranker`, `featherkey-personalization`, `featherkey-prediction`, `featherkey-secure-store`, `featherkey-sensitive-context`, `featherkey-tap-sequence`, `featherkey-touch-model` — **external:** `thiserror`, `uniffi`
+- **Depends on:** `featherkey-autocorrect`, `featherkey-autocorrect-gate`, `featherkey-candidate-ranker`, `featherkey-context`, `featherkey-contracts`, `featherkey-corrections`, `featherkey-dictionary`, `featherkey-fold`, `featherkey-input-decoder`, `featherkey-kernel`, `featherkey-language-momentum`, `featherkey-layout-engine`, `featherkey-locale-manager`, `featherkey-neural-ranker`, `featherkey-neural-tap`, `featherkey-personalization`, `featherkey-prediction`, `featherkey-secure-store`, `featherkey-sensitive-context`, `featherkey-tap-sequence`, `featherkey-touch-model` — **external:** `thiserror`, `uniffi`
 - **Serves:** BR-5, BR-7, BR-8, BR-10, BR-12, BR-16, BR-26
 - **Traits (ports):** `SensitiveField` *(internal)*
 - **Structs:** `DecodeResult`, `FeatherKeyCore`, `FfiCandidate` *(internal)*, `FfiCorrection` *(internal)*, `FfiDecode` *(internal)*, `FfiKey` *(internal)*, `FfiRankCandidate` *(internal)*, `FfiRanked` *(internal)*, `FfiSuggestion` *(internal)*, `FfiTapOffset` *(internal)*, `FfiTransition` *(internal)*, `FfiWordFreq` *(internal)*, `KeyCandidate`, `KeyboardCore` *(internal)*, `LanguagePack` *(internal)*, `LayoutKey`
@@ -249,7 +250,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Serves:** BR-47, BR-51, BR-53
 - **Structs:** `Key`, `Layout`
 - **Enums:** `Direction`, `LatinLayout`, `LayoutKind`
-- **Methods:** `Direction::is_rtl`, `Key::center`, `Key::new`, `LatinLayout::build`, `Layout::alpha_for`, `Layout::azerty`, `Layout::cyrillic`, `Layout::direction`, `Layout::greek`, `Layout::is_empty`, `Layout::keys`, `Layout::kind`, `Layout::new`, `Layout::numeric`, `Layout::qwerty`, `Layout::qwerty_tracer_row`, `Layout::qwertz`, `Layout::symbols`, `Layout::with_direction`
+- **Methods:** `Direction::is_rtl`, `Key::center`, `Key::new`, `LatinLayout::build`, `Layout::alpha_for`, `Layout::azerty`, `Layout::center_of`, `Layout::cyrillic`, `Layout::direction`, `Layout::greek`, `Layout::is_empty`, `Layout::keys`, `Layout::kind`, `Layout::new`, `Layout::normalize`, `Layout::numeric`, `Layout::qwerty`, `Layout::qwerty_tracer_row`, `Layout::qwertz`, `Layout::symbols`, `Layout::with_direction`
 
 ### featherkey-locale-manager
 
@@ -271,6 +272,16 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Constants:** `INPUTS`
 - **Methods:** `NeuralRanker::from_prior`, `NeuralRanker::load`, `NeuralRanker::persist`, `NeuralRanker::reinforce`, `NeuralRanker::score`, `RankFeatures::to_array`
 - ⚠️ **No README.md** — add one (ARCHITECTURE.md §5.2 crate anatomy).
+
+### featherkey-neural-tap
+
+- **Path:** `core/crates/neural-tap` — **Layer:** domain
+- **One job:** Learn a per-user coordinate warp — a bounded `(Δx, Δy)` pixel shift over a normalized tap position `(nx, ny)` in `[-1,1]` — that generalizes a person's systematic tap bias across keys, rather than per-key.
+- **Depends on:** `featherkey-contracts`, `featherkey-nn`
+- **Serves:** BR-7, BR-8
+- **Structs:** `TapWarp`
+- **Constants:** `INPUTS`, `WARP_BOUND`, `WARP_LR`
+- **Methods:** `TapWarp::from_prior`, `TapWarp::load`, `TapWarp::persist`, `TapWarp::reinforce`, `TapWarp::warp`
 
 ### featherkey-nn
 
@@ -447,6 +458,7 @@ Behaviour specs in `core/features/`, tagged to requirement IDs and gated by
 | `layout-engine.feature` | Non-alphabetic pages and RTL-ready layouts | 6 | BR-47, BR-53, BR-68 |
 | `locale-manager.feature` | Concurrent multilingual typing with automatic per-word detection | 5 | BR-16, BR-17, BR-18, BR-19 |
 | `neural-reranker.feature` | The suggestion strip learns which word I mean | 1 | BR-11 |
+| `neural-tap-decoder.feature` | The tap decoder learns the user's systematic aim and generalizes it | 4 | BR-7 |
 | `personalization.feature` | On-device personal vocabulary learning | 3 | BR-7, BR-13 |
 | `prediction.feature` | Relevant autocomplete completions for the in-progress word | 4 | BR-10 |
 | `secure-store.feature` | Encrypted persistence of personal data | 4 | BR-8, BR-23, BR-62 |
@@ -710,7 +722,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `InitialPage` | kotlin enum class — `:keyboard-view` |
 | `InputDecoder` | trait — `featherkey-input-decoder` |
 | `InputDecoder::decode` | method — `featherkey-input-decoder` |
-| `INPUTS` | const — `featherkey-autocorrect-gate`; const — `featherkey-neural-ranker` |
+| `INPUTS` | const — `featherkey-autocorrect-gate`; const — `featherkey-neural-ranker`; const — `featherkey-neural-tap` |
 | `Key` | struct — `featherkey-layout-engine` |
 | `Key::center` | method — `featherkey-layout-engine` |
 | `Key::new` | method — `featherkey-layout-engine` |
@@ -832,6 +844,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `Layout` | struct — `featherkey-layout-engine` |
 | `Layout::alpha_for` | method — `featherkey-layout-engine` |
 | `Layout::azerty` | method — `featherkey-layout-engine` |
+| `Layout::center_of` | method — `featherkey-layout-engine` |
 | `Layout::cyrillic` | method — `featherkey-layout-engine` |
 | `Layout::direction` | method — `featherkey-layout-engine` |
 | `Layout::greek` | method — `featherkey-layout-engine` |
@@ -839,6 +852,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `Layout::keys` | method — `featherkey-layout-engine` |
 | `Layout::kind` | method — `featherkey-layout-engine` |
 | `Layout::new` | method — `featherkey-layout-engine` |
+| `Layout::normalize` | method — `featherkey-layout-engine` |
 | `Layout::numeric` | method — `featherkey-layout-engine` |
 | `Layout::qwerty` | method — `featherkey-layout-engine` |
 | `Layout::qwerty_tracer_row` | method — `featherkey-layout-engine` |
@@ -994,6 +1008,12 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `TapSequence::push` | method — `featherkey-tap-sequence` |
 | `TapSequence::taps` | method — `featherkey-tap-sequence` |
 | `TapSequence::truncate` | method — `featherkey-tap-sequence` |
+| `TapWarp` | struct — `featherkey-neural-tap` |
+| `TapWarp::from_prior` | method — `featherkey-neural-tap` |
+| `TapWarp::load` | method — `featherkey-neural-tap` |
+| `TapWarp::persist` | method — `featherkey-neural-tap` |
+| `TapWarp::reinforce` | method — `featherkey-neural-tap` |
+| `TapWarp::warp` | method — `featherkey-neural-tap` |
 | `Token` | struct — `featherkey-contracts` |
 | `TouchModel` | struct — `featherkey-touch-model` |
 | `TouchModel::covariance` | method — `featherkey-touch-model` |
@@ -1020,5 +1040,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `Vocabulary.load` | kotlin fun — `:ime-service` |
 | `Vocabulary.rankOf` | kotlin fun — `:ime-service` |
 | `Vocabulary.words` | kotlin val/var — `:ime-service` |
+| `WARP_BOUND` | const — `featherkey-neural-tap` |
+| `WARP_LR` | const — `featherkey-neural-tap` |
 | `word_left` | fn — `featherkey-editing::cursor` |
 | `word_right` | fn — `featherkey-editing::cursor` |

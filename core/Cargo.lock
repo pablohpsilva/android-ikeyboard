@@ -418,6 +418,7 @@ dependencies = [
  "featherkey-layout-engine",
  "featherkey-locale-manager",
  "featherkey-neural-ranker",
+ "featherkey-neural-tap",
  "featherkey-personalization",
  "featherkey-prediction",
  "featherkey-secure-store",
@@ -515,6 +516,14 @@ dependencies = [
  "featherkey-language-momentum",
  "featherkey-nn",
  "proptest",
+]
+
+[[package]]
+name = "featherkey-neural-tap"
+version = "0.0.0"
+dependencies = [
+ "featherkey-contracts",
+ "featherkey-nn",
 ]
 
 [[package]]

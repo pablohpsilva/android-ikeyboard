@@ -40,6 +40,7 @@ members = [
     "crates/nn",
     "crates/neural-ranker",
     "crates/autocorrect-gate",
+    "crates/neural-tap",
 ]
 
 [workspace.package]

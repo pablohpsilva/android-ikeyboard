@@ -43,6 +43,9 @@ pub enum Namespace {
     /// Neural autocorrect-gate model (sole writer: `featherkey-neural-autocorrect`
     /// via the composition root).
     AutocorrectGate,
+    /// Per-user neural tap-warp weights (sole writer: `featherkey-neural-tap`
+    /// via the composition root).
+    TapWarpModel,
 }
 
 impl Namespace {
@@ -57,6 +60,7 @@ impl Namespace {
             Namespace::Corrections => "corrections",
             Namespace::RankerModel => "ranker_model",
             Namespace::AutocorrectGate => "autocorrect_gate",
+            Namespace::TapWarpModel => "tap_warp_model",
         }
     }
 }
@@ -243,6 +247,7 @@ mod tests {
             Namespace::Corrections,
             Namespace::RankerModel,
             Namespace::AutocorrectGate,
+            Namespace::TapWarpModel,
         ];
         let keys: Vec<&str> = all.iter().map(|n| n.as_str()).collect();
         assert_eq!(
@@ -254,7 +259,8 @@ mod tests {
                 "clipboard",
                 "corrections",
                 "ranker_model",
-                "autocorrect_gate"
+                "autocorrect_gate",
+                "tap_warp_model"
             ]
         );
         // Distinct table names — no two namespaces collide in storage.
@@ -273,6 +279,11 @@ mod tests {
     #[test]
     fn autocorrect_gate_namespace_has_a_stable_key() {
         assert_eq!(Namespace::AutocorrectGate.as_str(), "autocorrect_gate");
+    }
+
+    #[test]
+    fn tap_warp_model_namespace_has_a_stable_key() {
+        assert_eq!(Namespace::TapWarpModel.as_str(), "tap_warp_model");
     }
 
     #[test]

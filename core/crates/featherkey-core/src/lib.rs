@@ -61,6 +61,7 @@ use featherkey_kernel::TouchPoint;
 use featherkey_language_momentum::Momentum;
 use featherkey_locale_manager::LangId;
 use featherkey_neural_ranker::NeuralRanker;
+use featherkey_neural_tap::TapWarp;
 use featherkey_personalization::Personalization;
 
 use crate::correct::LastCorrection;
@@ -133,6 +134,9 @@ pub struct FeatherKeyCore {
     layout: Layout,
     decoder: NearestKeyDecoder,
     touch_model: TouchModel,
+    /// Per-user coordinate warp applied to a touch before decode (cold-start
+    /// prior, near-zero shift). See [`Self::decode`].
+    tap_warp: TapWarp,
     personalization: Personalization,
     /// On-device next-word (bigram) model, persisted under `PersonalLm`.
     context: Context,
@@ -191,6 +195,7 @@ impl FeatherKeyCore {
             layout: Layout::alpha_for(&primary, None),
             decoder: NearestKeyDecoder::new(),
             touch_model: TouchModel::default(),
+            tap_warp: TapWarp::from_prior(),
             personalization: Personalization::new(),
             context: Context::new(),
             corrections: Corrections::new(),
@@ -307,9 +312,12 @@ impl FeatherKeyCore {
     /// # Errors
     /// [`FeatherKeyError::EmptyLayout`] if the active layout has no keys.
     pub fn decode(&mut self, x: f32, y: f32) -> Result<DecodeResult, FeatherKeyError> {
-        let candidates =
-            self.decoder
-                .decode(TouchPoint::new(x, y), &self.layout, &self.touch_model)?;
+        let (nx, ny) = self.layout.normalize(x, y);
+        let (wdx, wdy) = self.tap_warp.warp(nx, ny);
+        let touch = TouchPoint::new(x + wdx, y + wdy);
+        let candidates = self
+            .decoder
+            .decode(touch, &self.layout, &self.touch_model)?;
         // Keep the tap as a distribution, not just its winner: that is what lets
         // a slip on this key be reconsidered once the rest of the word arrives
         // (BR-5/BR-6). Bounded and preallocated, so the hot path never grows the
@@ -359,6 +367,18 @@ impl FeatherKeyCore {
         &self.neural_ranker
     }
 
+    /// The held tap-warp. Test-only accessor for decode-path probes.
+    #[cfg(test)]
+    pub(crate) fn tap_warp(&self) -> &TapWarp {
+        &self.tap_warp
+    }
+
+    /// The active layout. Test-only accessor for decode-path probes.
+    #[cfg(test)]
+    pub(crate) fn layout(&self) -> &Layout {
+        &self.layout
+    }
+
     /// Clone each active lexicon — the derived read engines (predictor, corrector)
     /// own their inputs by value, so the façade hands them clones of its packs.
     fn lexicon_clones(&self) -> Vec<Dictionary> {
@@ -376,125 +396,4 @@ impl FeatherKeyCore {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-mod tests {
-    use super::*;
-    use featherkey_neural_ranker::RankFeatures;
-
-    /// A representative feature vector for score comparisons (values are
-    /// arbitrary but exercise every slot, so an off-by-one in the prior wiring
-    /// would change the score).
-    fn sample_feat() -> RankFeatures {
-        RankFeatures {
-            positional: -0.9,
-            ln_momentum: 0.3,
-            is_lexicon: 1.0,
-            is_device: 0.0,
-            correction_promote: 0.2,
-            correction_demote: 0.1,
-            spatial: 0.4,
-        }
-    }
-
-    #[test]
-    fn new_core_holds_the_prior_ranker() {
-        // A fresh core's held ranker scores identically to a standalone prior —
-        // proof `new()` seeds it from PRIOR_COEFFS.
-        let core = FeatherKeyCore::new(vec![("en".into(), vec!["cat".into()])]).expect("core");
-        let prior = NeuralRanker::from_prior(&PRIOR_COEFFS);
-        let f = sample_feat();
-        assert_eq!(core.neural_ranker().score(&f), prior.score(&f));
-    }
-
-    #[test]
-    fn restore_from_empty_store_yields_the_prior() {
-        // Restoring from an empty store leaves the ranker at the cold-start prior
-        // (first-run / purge proof), not some other state.
-        let dir = tempfile::tempdir().expect("tempdir");
-        let store =
-            crate::RedbSecureStore::open(dir.path().join("s.redb"), [3u8; 32]).expect("open store");
-        let mut core = FeatherKeyCore::new(vec![("en".into(), vec!["cat".into()])]).expect("core");
-        core.restore(&store).expect("restore");
-        let prior = NeuralRanker::from_prior(&PRIOR_COEFFS);
-        let f = sample_feat();
-        assert_eq!(core.neural_ranker().score(&f), prior.score(&f));
-    }
-
-    #[test]
-    fn observing_a_language_raises_its_weight() {
-        let mut core = FeatherKeyCore::new(vec![
-            ("en".into(), vec!["hello".into()]),
-            ("es".into(), vec!["hola".into()]),
-        ])
-        .expect("core");
-        let before = core.language_weight("es");
-        core.observe_language(vec!["es".into()]);
-        assert!(core.language_weight("es") > before * 0.9); // bumped past pure decay
-    }
-
-    #[test]
-    fn switching_languages_reseeds_momentum() {
-        let mut core = FeatherKeyCore::new(vec![("en".into(), vec!["hi".into()])]).expect("core");
-        core.set_active_languages(vec![("es".into(), vec!["hola".into()])])
-            .expect("switch");
-        assert!(core.language_weight("es") >= core.language_weight("en"));
-    }
-
-    #[test]
-    fn rank_candidates_uses_momentum() {
-        use featherkey_contracts::{Candidate, Source};
-        let mut core = FeatherKeyCore::new(vec![
-            ("en".into(), vec!["hello".into()]),
-            ("es".into(), vec!["hola".into()]),
-        ])
-        .expect("core");
-        for _ in 0..5 {
-            core.observe_language(vec!["es".into()]);
-        }
-        let cands = vec![
-            Candidate {
-                word: "hello".into(),
-                lang: "en".into(),
-                source: Source::Lexicon,
-                source_rank: 0,
-            },
-            Candidate {
-                word: "hola".into(),
-                lang: "es".into(),
-                source: Source::Lexicon,
-                source_rank: 0,
-            },
-        ];
-        let out = core.rank_candidates(cands, 2);
-        assert_eq!(out[0].word, "hola");
-    }
-
-    #[test]
-    fn learn_word_records_both_frequency_and_context_when_allowed() {
-        struct Ordinary;
-        impl featherkey_contracts::SensitiveContextSource for Ordinary {
-            fn is_sensitive(&self) -> bool {
-                false
-            }
-        }
-        let mut core = FeatherKeyCore::new(vec![("en".into(), vec!["cat".into()])]).expect("core");
-        core.learn_word("the", "cat", &Ordinary);
-        assert_eq!(core.word_frequency("cat"), 1);
-        assert_eq!(core.context_next_words("the", 5), vec!["cat".to_string()]);
-    }
-
-    #[test]
-    fn correction_hooks_record_when_field_is_ordinary() {
-        struct Ordinary;
-        impl featherkey_contracts::SensitiveContextSource for Ordinary {
-            fn is_sensitive(&self) -> bool {
-                false
-            }
-        }
-        let mut core = FeatherKeyCore::new(vec![("en".into(), vec!["teh".into()])]).expect("core");
-        core.observe_strip_pick("teh", "teh", &Ordinary);
-        core.observe_delete_retype("ducking", &Ordinary);
-        assert_eq!(core.correction_pref_count("teh", "teh"), 1);
-        assert_eq!(core.correction_unwanted_count("ducking"), 1);
-    }
-}
+mod tests;
