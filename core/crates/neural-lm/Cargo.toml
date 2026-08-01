@@ -1,0 +1,19 @@
+[package]
+name = "featherkey-neural-lm"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Tiny on-device embedding next-word LM: a bounded per-user Vocab plus (later) the NextWordLm that trains from it."
+
+[package.metadata.featherkey]
+layer = "domain"
+
+[lints]
+workspace = true
+
+[dependencies]
+featherkey-nn = { path = "../nn" }
+featherkey-contracts = { path = "../contracts" }
+featherkey-context = { path = "../context" }

@@ -40,7 +40,7 @@ silence about something real is the one answer this index must never give.
 
 ## 1. Rust core — crate map
 
-27 crates in the `core/` Cargo workspace. Layers run inward:
+28 crates in the `core/` Cargo workspace. Layers run inward:
 `foundation` → `port` → `domain` → `adapter` → `composition`; a crate may
 only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 
@@ -62,6 +62,7 @@ only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 | `featherkey-language-momentum` | domain | Recency-weighted per-language momentum: which language the user is writing in now. | — |
 | `featherkey-layout-engine` | domain | Provide keyboard-key layout geometry (alpha/numeric/symbol pages, key rectangles and centers) with an RTL-ready direction marker (ADR-16). | kernel |
 | `featherkey-locale-manager` | domain | Track the ordered set of active languages and identify, per word, which active language it belongs to (lightweight statistical language-ID). | dictionary |
+| `featherkey-neural-lm` | domain | Own the bounded per-user `Vocab` (word ↔ index map) that a | context, contracts, nn |
 | `featherkey-neural-ranker` | domain | Tiny neural re-ranker: an 8-slot feature vector and a cold-start prior that reproduces the linear candidate ranking. | contracts, nn |
 | `featherkey-neural-tap` | domain | Learn a per-user coordinate warp — a bounded `(Δx, Δy)` pixel shift over a normalized tap position `(nx, ny)` in `[-1,1]` — that generalizes a person's systematic tap bias across keys, rather than per-key. | contracts, nn |
 | `featherkey-nn` | domain | Tiny dependency-free neural substrate: 1-hidden-layer MLP with forward, SGD, linear-prior init, and versioned serialization. | — |
@@ -264,6 +265,16 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Enums:** `LocaleError`
 - **Methods:** `LangId::as_str`, `LangId::new`, `LocaleManager::active`, `LocaleManager::detect`, `LocaleManager::new`, `LocaleManager::set_active`
 - **Integration tests:** `tests/detection.rs`
+
+### featherkey-neural-lm
+
+- **Path:** `core/crates/neural-lm` — **Layer:** domain
+- **One job:** Own the bounded per-user `Vocab` (word ↔ index map) that a
+- **Depends on:** `featherkey-context`, `featherkey-contracts`, `featherkey-nn`
+- **Serves:** BR-11
+- **Structs:** `Vocab`
+- **Constants:** `BOS` *(internal)*, `MAX_VOCAB` *(internal)*, `UNK` *(internal)*
+- **Methods:** `Vocab::index_of`, `Vocab::intern`, `Vocab::is_empty`, `Vocab::len`, `Vocab::new`, `Vocab::word_of`
 
 ### featherkey-neural-ranker
 
@@ -505,6 +516,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `AutocorrectOutcome` | enum — `featherkey-core::correct`; kotlin enum class — `:ffi-bridge` |
 | `AvailableCorrection` | struct — `featherkey-autocorrect::rank` |
 | `BEAM` | const — `featherkey-tap-sequence` |
+| `BOS` | const — `featherkey-neural-lm::vocab` *(internal)* |
 | `BRANCH` | const — `featherkey-tap-sequence` |
 | `C::capacity` | method — `featherkey-diagnostics` |
 | `C::is_empty` | method — `featherkey-diagnostics` |
@@ -895,6 +907,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `MAX_COMPLETIONS` | const — `featherkey-dictionary` |
 | `MAX_SUGGESTIONS` | const — `featherkey-prediction` |
 | `MAX_TAPS` | const — `featherkey-tap-sequence` |
+| `MAX_VOCAB` | const — `featherkey-neural-lm::vocab` *(internal)* |
 | `MIN_TOKEN_CHARS` | const — `featherkey-context` |
 | `Mlp` | struct — `featherkey-nn` |
 | `Mlp::forward` | method — `featherkey-nn` |
@@ -1046,6 +1059,14 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `TouchPoint::new` | method — `featherkey-kernel` |
 | `TypingContext` | struct — `featherkey-contracts` |
 | `TypingError` | enum — `featherkey-smart-typing` |
+| `UNK` | const — `featherkey-neural-lm::vocab` *(internal)* |
+| `Vocab` | struct — `featherkey-neural-lm::vocab` |
+| `Vocab::index_of` | method — `featherkey-neural-lm` |
+| `Vocab::intern` | method — `featherkey-neural-lm` |
+| `Vocab::is_empty` | method — `featherkey-neural-lm` |
+| `Vocab::len` | method — `featherkey-neural-lm` |
+| `Vocab::new` | method — `featherkey-neural-lm` |
+| `Vocab::word_of` | method — `featherkey-neural-lm` |
 | `Vocabulary` | kotlin class — `:ime-service` |
 | `Vocabulary.accentedCanonical` | kotlin fun — `:ime-service` |
 | `Vocabulary.accentVariantsOf` | kotlin fun — `:ime-service` |
