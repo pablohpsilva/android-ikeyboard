@@ -249,7 +249,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Serves:** BR-47, BR-51, BR-53
 - **Structs:** `Key`, `Layout`
 - **Enums:** `Direction`, `LatinLayout`, `LayoutKind`
-- **Methods:** `Direction::is_rtl`, `Key::center`, `Key::new`, `LatinLayout::build`, `Layout::alpha_for`, `Layout::azerty`, `Layout::cyrillic`, `Layout::direction`, `Layout::greek`, `Layout::is_empty`, `Layout::keys`, `Layout::kind`, `Layout::new`, `Layout::numeric`, `Layout::qwerty`, `Layout::qwerty_tracer_row`, `Layout::qwertz`, `Layout::symbols`, `Layout::with_direction`
+- **Methods:** `Direction::is_rtl`, `Key::center`, `Key::new`, `LatinLayout::build`, `Layout::alpha_for`, `Layout::azerty`, `Layout::center_of`, `Layout::cyrillic`, `Layout::direction`, `Layout::greek`, `Layout::is_empty`, `Layout::keys`, `Layout::kind`, `Layout::new`, `Layout::normalize`, `Layout::numeric`, `Layout::qwerty`, `Layout::qwerty_tracer_row`, `Layout::qwertz`, `Layout::symbols`, `Layout::with_direction`
 
 ### featherkey-locale-manager
 
@@ -833,6 +833,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `Layout` | struct — `featherkey-layout-engine` |
 | `Layout::alpha_for` | method — `featherkey-layout-engine` |
 | `Layout::azerty` | method — `featherkey-layout-engine` |
+| `Layout::center_of` | method — `featherkey-layout-engine` |
 | `Layout::cyrillic` | method — `featherkey-layout-engine` |
 | `Layout::direction` | method — `featherkey-layout-engine` |
 | `Layout::greek` | method — `featherkey-layout-engine` |
@@ -840,6 +841,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `Layout::keys` | method — `featherkey-layout-engine` |
 | `Layout::kind` | method — `featherkey-layout-engine` |
 | `Layout::new` | method — `featherkey-layout-engine` |
+| `Layout::normalize` | method — `featherkey-layout-engine` |
 | `Layout::numeric` | method — `featherkey-layout-engine` |
 | `Layout::qwerty` | method — `featherkey-layout-engine` |
 | `Layout::qwerty_tracer_row` | method — `featherkey-layout-engine` |

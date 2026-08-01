@@ -120,6 +120,32 @@ impl Layout {
             .collect();
         Self::new(keys)
     }
+
+    /// Logical bounds (far right/bottom edge over all keys), or `(0,0)` if empty.
+    /// `Key` fields are public (`x, y, width, height`), so the true rect edge is
+    /// `x + width` / `y + height` — NOT `2·center`, which overshoots off-origin keys.
+    fn bounds(&self) -> (f32, f32) {
+        self.keys.iter().fold((0.0_f32, 0.0_f32), |(mx, my), k| {
+            (mx.max(k.x + k.width), my.max(k.y + k.height))
+        })
+    }
+
+    /// Map a surface-local pixel to `[-1, 1]` per axis. `(0,0)` for an empty layout.
+    #[must_use]
+    pub fn normalize(&self, x: f32, y: f32) -> (f32, f32) {
+        let (bx, by) = self.bounds();
+        if bx <= 0.0 || by <= 0.0 {
+            return (0.0, 0.0);
+        }
+        ((x / bx) * 2.0 - 1.0, (y / by) * 2.0 - 1.0)
+    }
+
+    /// Centre of the key that commits `ch` (matched via `KeyId::ch`), or `None` if
+    /// no key on this page commits it.
+    #[must_use]
+    pub fn center_of(&self, ch: char) -> Option<TouchPoint> {
+        self.keys.iter().find(|k| k.id.ch() == ch).map(Key::center)
+    }
 }
 
 #[cfg(test)]
@@ -164,6 +190,38 @@ mod tests {
         assert_eq!(Layout::default().direction(), Direction::Ltr);
         assert_eq!(Layout::qwerty_tracer_row().kind(), LayoutKind::Alpha);
         assert_eq!(Layout::qwerty_tracer_row().direction(), Direction::Ltr);
+    }
+
+    #[test]
+    fn normalize_maps_bounds_to_unit_range() {
+        let l = Layout::qwerty();
+        // Far bottom-right corner (max key right/bottom edge) maps to ~(1,1).
+        let (bx, by) = l.keys().iter().fold((0.0_f32, 0.0_f32), |(mx, my), k| {
+            (mx.max(k.x + k.width), my.max(k.y + k.height))
+        });
+        let (ex, ey) = l.normalize(bx, by);
+        assert!(
+            (ex - 1.0).abs() < 1e-3 && (ey - 1.0).abs() < 1e-3,
+            "corner near 1: {ex},{ey}"
+        );
+        let (cx, cy) = l.normalize(bx / 2.0, by / 2.0);
+        assert!(
+            cx.abs() < 0.05 && cy.abs() < 0.05,
+            "centre near origin: {cx},{cy}"
+        );
+    }
+
+    #[test]
+    fn center_of_returns_a_known_key_and_none_for_absent() {
+        let l = Layout::qwerty();
+        assert!(l.center_of('q').is_some());
+        assert_eq!(l.center_of('€'), None); // not on the qwerty alpha page
+    }
+
+    #[test]
+    fn normalize_never_panics_on_empty_layout() {
+        let l = Layout::default(); // empty
+        assert_eq!(l.normalize(10.0, 10.0), (0.0, 0.0));
     }
 
     #[test]
