@@ -395,19 +395,19 @@ impl FeatherKeyCore {
     }
 
     /// Mutable access to the held next-word LM. Test-only seam: `learn_word`
-    /// does not yet drive `NextWordLm::observe` on the commit path (that is
-    /// Task 7), so a test that needs a *warm* LM to exercise the `lm_logprob`
-    /// re-ranker feature trains it directly through this accessor instead of
-    /// waiting on the not-yet-built wiring.
+    /// drives `NextWordLm::observe` on the commit path (Task 7), but some
+    /// tests (e.g. the `lm_logprob` re-ranker feature) want a *warm* LM
+    /// without also exercising the commit path, so they train it directly
+    /// through this accessor instead.
     #[cfg(test)]
     pub(crate) fn lm_mut(&mut self) -> &mut NextWordLm {
         &mut self.lm
     }
 
     /// Mutable access to the ephemeral 2-word context buffer. Test-only seam:
-    /// `learn_word` does not yet call `RecentWords::push` on the commit path
-    /// (Task 7), so a test that needs the buffer positioned at a specific
-    /// 2-word boundary drives it directly through this accessor.
+    /// `learn_word` advances this via `RecentWords::push` on the commit path
+    /// (Task 7), but some tests want the buffer positioned at a specific
+    /// 2-word boundary directly, without going through a commit.
     #[cfg(test)]
     pub(crate) fn recent_mut(&mut self) -> &mut RecentWords {
         &mut self.recent

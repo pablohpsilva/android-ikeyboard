@@ -6,14 +6,9 @@
 /// an FFI interface change.
 #[derive(Debug, Clone)]
 pub struct RecentWords {
-    /// The oldest of the two words (entered first). Only read outside tests
-    /// once `push`/`two_word_context` are wired into `FeatherKeyCore` (Task
-    /// 5/7); until then this field is write-only in production builds.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// The oldest of the two words (entered first).
     older: Option<String>,
-    /// The newest of the two words (entered most recently). Same
-    /// not-yet-wired note as `older`.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// The newest of the two words (entered most recently).
     newer: Option<String>,
 }
 
@@ -30,11 +25,9 @@ impl RecentWords {
     /// Advance the 2-word window: the previous "newer" becomes "older", `word`
     /// becomes "newer".
     ///
-    /// Not yet called from `FeatherKeyCore` (Task 4 owns the buffer but does
-    /// not wire it into the commit path — that is Task 5/7); the
-    /// `not(test)` allow keeps this crate's `-D warnings` clippy gate green
-    /// in the interim, matching `correct.rs`'s `LastCorrection` fields.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// Called from `FeatherKeyCore::learn_word` (Task 7), inside the
+    /// sensitivity gate, immediately after `two_word_context` reads the
+    /// pre-commit window for that same call.
     pub fn push(&mut self, word: &str) {
         self.older = self.newer.take();
         self.newer = Some(word.to_string());
@@ -48,11 +41,9 @@ impl RecentWords {
     ///   and an older word exists (coherent 2-word context).
     /// - `[preceding]` otherwise (safe k=1 degradation — never a WRONG 2-word context).
     ///
-    /// Wired into `FeatherKeyCore::rank_suggestions` (Task 5): called once per
-    /// query to build the LM feature's context. `push` itself is not yet called
-    /// on the commit path (Task 7), so today this always falls through to the
-    /// `[preceding]`/`[]` branches — the LM feature's math is fully wired, but a
-    /// real 2-word context won't appear until Task 7 wires `push`.
+    /// Wired into `FeatherKeyCore::rank_suggestions` (Task 5), called once per
+    /// query to build the LM feature's context, and into `learn_word` (Task 7),
+    /// which reads it immediately before `push` advances the window.
     pub fn two_word_context(&self, preceding: &str) -> Vec<String> {
         // Empty preceding is a boundary — no context
         if preceding.is_empty() {
@@ -70,17 +61,6 @@ impl RecentWords {
 
         // Safe degradation: just the preceding word (k=1)
         vec![preceding.to_string()]
-    }
-
-    /// Clear both word slots.
-    ///
-    /// Not yet called from `FeatherKeyCore` or exercised by this module's own
-    /// tests (Task 5/7 wires the caller); unconditional allow, unlike `push`/
-    /// `two_word_context` which the tests below already exercise.
-    #[allow(dead_code)]
-    pub fn reset(&mut self) {
-        self.older = None;
-        self.newer = None;
     }
 }
 

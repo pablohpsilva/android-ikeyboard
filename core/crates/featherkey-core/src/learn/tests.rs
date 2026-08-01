@@ -402,3 +402,50 @@ fn a_sensitive_field_records_nothing() {
     let after = fk.autocorrect_gate.residual(&features);
     assert_eq!(before, after, "gate must not change");
 }
+
+#[test]
+fn learn_word_trains_the_lm_and_raises_confidence() {
+    let mut fk = core();
+    assert_eq!(fk.lm().confidence(), 0.0, "cold start: nothing learned yet");
+
+    // Drive the real `learn_word` path (gated, buffer-advancing) — not the
+    // `lm_mut()` test seam — repeatedly committing the same "the" -> "cat"
+    // transition. Each call's `preceding` ("the") never equals the buffer's
+    // "newer" slot (which settles on "cat" after the first push), so every
+    // call trains the same one-word context deterministically.
+    for _ in 0..30 {
+        fk.learn_word("the", "cat", &non_sensitive());
+    }
+
+    assert!(
+        fk.lm().confidence() > 0.0,
+        "committing words under consent must warm the LM"
+    );
+
+    let top = fk.lm().rank_next(&["the"], 1);
+    assert_eq!(
+        top.first().map(|(w, _)| w.as_str()),
+        Some("cat"),
+        "the repeatedly-learned transition must become the LM's top prediction"
+    );
+}
+
+#[test]
+fn a_sensitive_field_trains_no_lm() {
+    // @BR-26
+    let mut fk = core();
+    fk.learn_word("the", "cat", &sensitive());
+    fk.learn_word("cat", "sat", &sensitive());
+
+    assert_eq!(
+        fk.lm().confidence(),
+        0.0,
+        "a sensitive field must not train the LM"
+    );
+    assert_eq!(
+        fk.recent_mut().two_word_context("sat"),
+        vec!["sat".to_string()],
+        "a sensitive field must not advance the recent-words buffer either \
+         (a real advance would make this a coherent 2-word [\"cat\", \"sat\"] context)"
+    );
+}

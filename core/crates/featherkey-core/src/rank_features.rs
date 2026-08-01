@@ -240,13 +240,13 @@ mod tests {
 
     #[test]
     fn a_warm_lm_reorders_completions_by_two_word_context() {
-        // `learn_word` does not yet drive `NextWordLm::observe` or
-        // `RecentWords::push` on the commit path — that wiring is Task 7. To
-        // exercise the plumbing THIS task adds (context threading + the
-        // confidence-gated `lm_logprob` feature) honestly, this test warms the
-        // LM and positions the context buffer directly through the crate-private
-        // `lm_mut`/`recent_mut` test seams, bypassing the not-yet-built commit
-        // wiring rather than faking it.
+        // `learn_word` does drive `NextWordLm::observe`/`RecentWords::push` on
+        // the commit path (Task 7), but that is exercised end-to-end in
+        // `learn::tests`. To isolate the plumbing THIS task adds (context
+        // threading + the confidence-gated `lm_logprob` feature) from the
+        // commit path, this test warms the LM and positions the context
+        // buffer directly through the crate-private `lm_mut`/`recent_mut`
+        // test seams instead of committing words through `learn_word`.
         //
         // "word" is bundled rank 0 (cold-start favourite over "work" at rank 1);
         // after training the LM to strongly predict "work" following
