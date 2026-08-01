@@ -631,6 +631,13 @@ class FeatherKeyImeService : InputMethodService() {
     /** A number/symbol key: commit verbatim; it ends the current learnable word. */
     private fun handleChar(ch: String) {
         val ic = currentInputConnection ?: return
+        // "word ," → "word,": a sentence/clause mark typed right after a space
+        // pulls tight against the word, dropping the (any) preceding space.
+        if (PunctuationRules.collapsesPrecedingSpace(ch) &&
+            ic.getTextBeforeCursor(1, 0)?.lastOrNull() == ' '
+        ) {
+            ic.deleteSurroundingText(1, 0)
+        }
         ic.commitText(ch, 1)
         pending.clear()
         atomicSpan = 0
