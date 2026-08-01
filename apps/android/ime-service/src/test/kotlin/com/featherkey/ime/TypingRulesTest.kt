@@ -77,6 +77,18 @@ class TypingRulesTest {
         assertTrue(AutoCaps.precedingWordStartsSentence("line\nparis", 5)) // newline
     }
 
+    // --- Adjustment: punctuation collapses a preceding space -----------------
+
+    @Test fun sentence_and_clause_punctuation_collapses_a_preceding_space() {
+        for (p in listOf(".", ",", "!", "?", ":", ";"))
+            assertTrue("'$p' should collapse", PunctuationRules.collapsesPrecedingSpace(p))
+    }
+
+    @Test fun other_characters_leave_a_preceding_space_alone() {
+        for (p in listOf("a", "1", "-", "'", ")", "(", "\"", "..", ""))
+            assertFalse("'$p' should not collapse", PunctuationRules.collapsesPrecedingSpace(p))
+    }
+
     // --- Bug: Enter is a dead key --------------------------------------------
 
     @Test fun enter_is_a_newline_in_a_no_action_field() {

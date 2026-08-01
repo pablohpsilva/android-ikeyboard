@@ -22,6 +22,13 @@ object PunctuationRules {
         if (before == null || before.length < 2) return false
         return before[before.length - 1] == ' ' && before[before.length - 2].isLetterOrDigit()
     }
+
+    /** Punctuation that should sit tight against the word before it: when one of
+     *  these is typed with a space immediately before the cursor, that space is
+     *  removed first (so "word ," becomes "word,"). Sentence- and clause-level
+     *  marks only — a hyphen, apostrophe or bracket keeps its space. */
+    fun collapsesPrecedingSpace(text: String): Boolean =
+        text.length == 1 && text[0] in ".,!?:;"
 }
 
 /** Auto-capitalization: precise (never in password/email/URL) but flexible

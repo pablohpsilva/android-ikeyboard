@@ -369,9 +369,18 @@ class FeatherKeyImeService : InputMethodService() {
         runCatching { runBlocking { vocabJob?.join() } }
     }
 
-    /** A swipe over the letters: decode to a word, commit it, offer alternatives. */
+    /** True when the pending word was committed by a swipe and already carries a
+     *  trailing auto-space — the strip can still swap it, but it is otherwise a
+     *  finished, spaced word. Derived from existing state (atomicSpan spans the
+     *  word plus its one space), so there is no separate flag to keep in sync. */
+    private fun swipedWordIsSpaced(): Boolean =
+        pending.isNotEmpty() && atomicSpan == pending.length + 1
+
+    /** A swipe over the letters: decode to a word, commit it (with a trailing
+     *  space), offer alternatives that can still swap it in place. */
     private fun handleGesture(pathPts: List<PointF>, centers: Map<Char, PointF>) {
         val ic = currentInputConnection ?: return
+        val prevWasSpacedSwipe = swipedWordIsSpaced() // capture before atomicSpan resets
         atomicSpan = 0 // a fresh gesture; re-armed below only if it commits a word
         // A gesture is intervening input: clear the autocorrect revert lookback so a
         // later backspace can't spuriously whitelist a typo, even when this swipe
@@ -398,10 +407,14 @@ class FeatherKeyImeService : InputMethodService() {
         val ranked = runCatching { bridge?.rank(cands, SUGGESTIONS.toUInt())?.map { it.word } ?: emptyList() }
             .getOrDefault(emptyList())
         val best = ranked.firstOrNull() ?: words.firstOrNull() ?: return
-        if (pending.isNotEmpty()) { // finalise a half-typed word with a space
-            learnWord(pending.toString())
-            ic.commitText(" ", 1)
-            pending.clear()
+        if (pending.isNotEmpty()) { // finalise the previous word
+            if (prevWasSpacedSwipe) {
+                pending.clear() // already committed with its space and learned
+            } else {
+                learnWord(pending.toString())
+                ic.commitText(" ", 1)
+                pending.clear()
+            }
         }
         // Honor auto-caps for swipe too: a sentence-initial glide capitalizes its
         // word just as typing would (the shift is armed by applyAutoCaps). Under
@@ -414,9 +427,10 @@ class FeatherKeyImeService : InputMethodService() {
             else -> best
         }
         kb?.consumeShift()
-        ic.commitText(out, 1)
-        pending.clear(); pending.append(out) // treat as the current word: alts replace it
-        atomicSpan = out.length // a wrong swipe clears whole on the next backspace
+        ic.commitText("$out ", 1) // a swipe commits the word AND its trailing space
+        learnWord(out) // a swiped word is finished: learn it now (gated)
+        pending.clear(); pending.append(out) // keep as current word so alts can swap it
+        atomicSpan = out.length + 1 // word + its auto-space clears whole on backspace
         lastAtomicWord = out
         val alts = ranked.take(3).ifEmpty { words.take(3) }
         // Match the strip to what a pick would commit (see updateSuggestions).
@@ -527,6 +541,9 @@ class FeatherKeyImeService : InputMethodService() {
     /** A letter touch, already mapped to the Rust layout's logical space. */
     private fun handleTouch(x: Float, y: Float) {
         val ic = currentInputConnection ?: return
+        // A tap after a swiped (already-spaced) word starts a NEW word rather than
+        // extending the finished one; release the swiped word before appending.
+        if (swipedWordIsSpaced()) pending.clear()
         atomicSpan = 0 // typing edits the word char-by-char, so backspace is char-wise
         ensureBridgeReady() // cold start: the first tap waits for the core to open
         val result = runCatching { bridge?.decode(x, y) }.getOrNull() ?: return
@@ -631,6 +648,13 @@ class FeatherKeyImeService : InputMethodService() {
     /** A number/symbol key: commit verbatim; it ends the current learnable word. */
     private fun handleChar(ch: String) {
         val ic = currentInputConnection ?: return
+        // "word ," → "word,": a sentence/clause mark typed right after a space
+        // pulls tight against the word, dropping the (any) preceding space.
+        if (PunctuationRules.collapsesPrecedingSpace(ch) &&
+            ic.getTextBeforeCursor(1, 0)?.lastOrNull() == ' '
+        ) {
+            ic.deleteSurroundingText(1, 0)
+        }
         ic.commitText(ch, 1)
         pending.clear()
         atomicSpan = 0
@@ -745,7 +769,10 @@ class FeatherKeyImeService : InputMethodService() {
         // so tapping a completion for "Hel" gives "Hello", not "hello" — and an
         // all-caps prefix from caps lock ("HEL") completes to "HELLO".
         val out = CaseMatch.matchCase(cur, word)
-        if (cur.isNotEmpty()) ic.deleteSurroundingText(cur.length, 0)
+        // A swiped word already carries a trailing space; strip that too so the
+        // pick replaces the whole "word " unit, not just the word.
+        val extra = if (swipedWordIsSpaced()) 1 else 0
+        if (cur.isNotEmpty()) ic.deleteSurroundingText(cur.length + extra, 0)
         ic.commitText("$out ", 1)
         // Picking a suggestion is an intervening edit: if it lands right after a
         // boundary autocorrect (the BR-10 next-word flow — nothing typed since),
@@ -772,6 +799,9 @@ class FeatherKeyImeService : InputMethodService() {
     /** Word boundary: correct + accent the pending word, learn it (gated), then
      *  space — or, on a bare second space, end the sentence with ". ". */
     private fun boundary(ic: InputConnection) {
+        // A swiped word already carries its auto-space, so a space now is a SECOND
+        // space (→ double-space period), not a re-commit of the already-done word.
+        if (swipedWordIsSpaced()) pending.clear()
         val word = pending.toString()
         // A word boundary is an intervening event: clear the autocorrect revert
         // lookback up front so an uncorrected commit (or a double-space period) can't

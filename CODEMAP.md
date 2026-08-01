@@ -416,7 +416,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - `GestureDecoder.kt` — `object GestureDecoder` — fun `GestureDecoder.decode`, `GestureDecoder.keyPath`
 - `GestureGeometry.kt` — `object GestureGeometry` — fun `GestureGeometry.shiftCenters`
 - `LegacyMigration.kt` — `object LegacyMigration` — fun `LegacyMigration.isPending`, `LegacyMigration.migrate`, `LegacyMigration.parseContext`, `LegacyMigration.parseUsage`
-- `TypingRules.kt` — `object PunctuationRules`; `object AutoCaps`; `object FieldLayout`; `object EnterKey`; `object TapDisambiguator`; `object SuggestionStrip`; `object GraphemeDeletion`; `object CaseMatch` — fun `AutoCaps.isCapitalizableTextField`, `AutoCaps.precedingWordStartsSentence`, `AutoCaps.shouldCapitalize`, `CaseMatch.matchCase`, `CaseMatch.matchLeading`, `EnterKey.insertsNewline`, `FieldLayout.affixKeys`, `FieldLayout.initialPage`, `GraphemeDeletion.lastClusterLength`, `PunctuationRules.doubleSpaceMakesPeriod`, `SuggestionStrip.withGuaranteedVariant`, `TapDisambiguator.choose`
+- `TypingRules.kt` — `object PunctuationRules`; `object AutoCaps`; `object FieldLayout`; `object EnterKey`; `object TapDisambiguator`; `object SuggestionStrip`; `object GraphemeDeletion`; `object CaseMatch` — fun `AutoCaps.isCapitalizableTextField`, `AutoCaps.precedingWordStartsSentence`, `AutoCaps.shouldCapitalize`, `CaseMatch.matchCase`, `CaseMatch.matchLeading`, `EnterKey.insertsNewline`, `FieldLayout.affixKeys`, `FieldLayout.initialPage`, `GraphemeDeletion.lastClusterLength`, `PunctuationRules.collapsesPrecedingSpace`, `PunctuationRules.doubleSpaceMakesPeriod`, `SuggestionStrip.withGuaranteedVariant`, `TapDisambiguator.choose`
 - `Vocabulary.kt` — `class Vocabulary` — fun `Vocabulary.accentVariantsOf`, `Vocabulary.accentedCanonical`, `Vocabulary.empty`, `Vocabulary.forTest`, `Vocabulary.hasWordPrefix`, `Vocabulary.languagesOf`, `Vocabulary.load`, `Vocabulary.rankOf` — val/var `Vocabulary.words`
 - **Tests:** 7 file(s) — `CorrectionDetectorTest.kt`, `DiacriticsTest.kt`, `GestureDecoderTest.kt`, `GestureGeometryTest.kt`, `LegacyMigrationTest.kt`, `TypingRulesTest.kt`, `VocabularyAccentTest.kt`
 
@@ -1006,6 +1006,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `ProperCaser::case` | method — `featherkey-propercase` |
 | `ProperCaser::new` | method — `featherkey-propercase` |
 | `PunctuationRules` | kotlin object — `:ime-service` |
+| `PunctuationRules.collapsesPrecedingSpace` | kotlin fun — `:ime-service` |
 | `PunctuationRules.doubleSpaceMakesPeriod` | kotlin fun — `:ime-service` |
 | `rank` | fn — `featherkey-candidate-ranker` |
 | `rank_by` | fn — `featherkey-candidate-ranker` |
