@@ -28,19 +28,22 @@ const BLOB_KEY: &[u8] = b"v1";
 /// The shortest token worth learning. Words with fewer than this many characters
 /// are a weak signal (articles, stray letters) and are skipped, mirroring the
 /// Kotlin `ContextModel`.
-const MIN_TOKEN_CHARS: usize = 2;
+pub const MIN_TOKEN_CHARS: usize = 2;
 
 /// A token is storable only if it is free of the codec's line/field separators
 /// (`\n`, `\t`). A token containing one would corrupt the encoded blob (making
 /// the model unloadable) or silently split into two tokens on load. Typed tokens
 /// never contain these; this guards the import path and misuse, exactly like
 /// `personalization`'s `is_storable`.
-fn is_storable(token: &str) -> bool {
+pub fn is_storable(token: &str) -> bool {
     !token.contains(['\n', '\t'])
 }
 
 /// `true` if a token is long enough and clean enough to learn.
-fn is_learnable(token: &str) -> bool {
+/// A token is learnable if it contains at least [`MIN_TOKEN_CHARS`] characters
+/// and is free of codec separators (`\n`, `\t`). This predicate ensures that
+/// only storable, meaningful tokens are recorded in the context model.
+pub fn is_learnable(token: &str) -> bool {
     token.chars().count() >= MIN_TOKEN_CHARS && is_storable(token)
 }
 
@@ -255,6 +258,14 @@ mod tests {
         assert!(c.next_words("nope", 5).is_empty());
         assert!(c.next_counts("nope").is_empty());
         assert!(c.is_empty());
+    }
+
+    #[test]
+    fn learnable_predicate_is_public_and_matches_record_rules() {
+        assert!(is_learnable("cat"));
+        assert!(!is_learnable("a")); // < MIN_TOKEN_CHARS
+        assert!(!is_learnable("bad\ttok")); // separator
+        assert_eq!(MIN_TOKEN_CHARS, 2);
     }
 }
 

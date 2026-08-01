@@ -508,6 +508,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "featherkey-neural-lm"
+version = "0.0.0"
+dependencies = [
+ "featherkey-context",
+ "featherkey-contracts",
+ "featherkey-nn",
+]
+
+[[package]]
 name = "featherkey-neural-ranker"
 version = "0.0.0"
 dependencies = [

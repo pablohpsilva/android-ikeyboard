@@ -123,6 +123,90 @@ class RustFileScan(unittest.TestCase):
                                  "SecureStore::helper"})
         self.assertNotIn("Internal::hidden", names, "a private trait is not surface")
 
+    def test_cfg_test_field_does_not_swallow_the_rest_of_the_file(self) -> None:
+        """`#[cfg(test)]` doesn't always decorate a brace-opening item: it can
+        gate a brace-less leaf, e.g. a test-only struct field, or a matching
+        field in a struct literal (the `NextWordLm::freeze_embeddings`
+        pattern used by the neural-lm crate's contamination-guard twin). Such
+        a line has no closing brace of its own for the depth tracker to wait
+        for, so a naive scanner gets stuck in "skip test code" mode for the
+        rest of the file — silently dropping every real `pub fn` declared
+        after it, which is exactly the false negative this index exists to
+        prevent."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = _write(
+                Path(tmp),
+                "lib.rs",
+                "pub struct Real {\n"
+                "    pub field: bool,\n"
+                "    #[cfg(test)]\n"
+                "    only_for_tests: bool,\n"
+                "}\n"
+                "\n"
+                "impl Real {\n"
+                "    pub fn new() -> Self {\n"
+                "        Self {\n"
+                "            field: true,\n"
+                "            #[cfg(test)]\n"
+                "            only_for_tests: false,\n"
+                "        }\n"
+                "    }\n"
+                "\n"
+                "    pub fn after_the_cfg_field(&self) -> bool {\n"
+                "        self.field\n"
+                "    }\n"
+                "}\n",
+            )
+            _, methods = codemap._scan_rust_file(src, "")
+        names = {m["name"] for m in methods}
+        self.assertEqual(names, {"Real::new", "Real::after_the_cfg_field"})
+
+    def test_cfg_test_mod_survives_a_leading_use_statement(self) -> None:
+        """The repo's dominant test-module shape is `#[cfg(test)] mod tests {
+        use super::*; ... }` — a brace-less, semicolon-terminated `use`
+        statement as (typically) the first line inside the skipped module.
+        The brace-less-leaf-exit fix (for `#[cfg(test)]` struct fields, see
+        `test_cfg_test_field_does_not_swallow_the_rest_of_the_file`) must not
+        fire here: `use super::*;` sits one level *deeper* than the
+        `#[cfg(test)]` attribute (inside `mod tests {`'s already-open brace),
+        not at the same depth the attribute was seen at. A leaf-exit that
+        ignores depth would prematurely flip out of skip-mode on this line
+        and leak the rest of the test module into the index.
+
+        The fixture below deliberately writes the `mod tests { ... }` body
+        at column 0 (not real-world style, but syntactically valid Rust —
+        whitespace is not significant here) so that an `impl` and its method
+        *would* be indexed by the column-based item/method heuristics if the
+        skip ended early — isolating the depth-tracking bug under test from
+        the (separate, already-covered) column-indentation heuristic."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = _write(
+                Path(tmp),
+                "lib.rs",
+                "pub struct Real;\n"
+                "\n"
+                "#[cfg(test)]\n"
+                "mod tests {\n"
+                "use super::*;\n"
+                "\n"
+                "struct FakeHelper;\n"
+                "\n"
+                "impl FakeHelper {\n"
+                "    pub fn leaked() -> bool { true }\n"
+                "}\n"
+                "}\n"
+                "\n"
+                "pub struct AfterTests;\n",
+            )
+            items, methods = codemap._scan_rust_file(src, "")
+        names = {i["name"] for i in items}
+        method_names = {m["name"] for m in methods}
+        self.assertIn("Real", names)
+        self.assertNotIn(
+            "FakeHelper::leaked", method_names, "use super::*; must not end the skip early"
+        )
+        self.assertIn("AfterTests", names, "scanning must resume after the test module")
+
     def test_inherent_methods_are_captured_but_trait_impls_are_not(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             src = _write(

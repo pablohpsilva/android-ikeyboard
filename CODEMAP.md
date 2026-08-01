@@ -40,7 +40,7 @@ silence about something real is the one answer this index must never give.
 
 ## 1. Rust core — crate map
 
-27 crates in the `core/` Cargo workspace. Layers run inward:
+28 crates in the `core/` Cargo workspace. Layers run inward:
 `foundation` → `port` → `domain` → `adapter` → `composition`; a crate may
 only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 
@@ -62,9 +62,10 @@ only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 | `featherkey-language-momentum` | domain | Recency-weighted per-language momentum: which language the user is writing in now. | — |
 | `featherkey-layout-engine` | domain | Provide keyboard-key layout geometry (alpha/numeric/symbol pages, key rectangles and centers) with an RTL-ready direction marker (ADR-16). | kernel |
 | `featherkey-locale-manager` | domain | Track the ordered set of active languages and identify, per word, which active language it belongs to (lightweight statistical language-ID). | dictionary |
+| `featherkey-neural-lm` | domain | Own the bounded per-user `Vocab` (word ↔ index map) that a tiny on-device embedding next-word LM trains and predicts over. | context, contracts, nn |
 | `featherkey-neural-ranker` | domain | Tiny neural re-ranker: an 8-slot feature vector and a cold-start prior that reproduces the linear candidate ranking. | contracts, nn |
 | `featherkey-neural-tap` | domain | Learn a per-user coordinate warp — a bounded `(Δx, Δy)` pixel shift over a normalized tap position `(nx, ny)` in `[-1,1]` — that generalizes a person's systematic tap bias across keys, rather than per-key. | contracts, nn |
-| `featherkey-nn` | domain | Tiny dependency-free neural substrate: 1-hidden-layer MLP with forward, SGD, linear-prior init, and versioned serialization. | — |
+| `featherkey-nn` | domain | Tiny, dependency-free neural substrate — 1-hidden-layer MLP | — |
 | `featherkey-personalization` | domain | Learn the user's vocabulary/whitelist and own the user dictionary — the sole writer of the lexical learned-data domain (`Namespace::UserDict`, ADR-14). | contracts |
 | `featherkey-prediction` | domain | Rank prefix-completion suggestions from the active-language lexicons behind the `Predictor` port. | context, contracts, dictionary, fold |
 | `featherkey-sensitive-context` | domain | Decide whether the current editor field is sensitive and must therefore suppress learning and prediction (the BR-26 gate). | contracts |
@@ -128,6 +129,8 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **One job:** On-device next-word (bigram) model, persisted encrypted under PersonalLm via the SecureStore port.
 - **Depends on:** `featherkey-contracts`
 - **Structs:** `Context`
+- **Free functions:** `is_learnable`, `is_storable`
+- **Constants:** `MIN_TOKEN_CHARS`
 - **Methods:** `Context::import`, `Context::is_empty`, `Context::load`, `Context::new`, `Context::next_counts`, `Context::next_words`, `Context::persist`, `Context::record`
 - ⚠️ **No README.md** — add one (ARCHITECTURE.md §5.2 crate anatomy).
 
@@ -263,6 +266,16 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Methods:** `LangId::as_str`, `LangId::new`, `LocaleManager::active`, `LocaleManager::detect`, `LocaleManager::new`, `LocaleManager::set_active`
 - **Integration tests:** `tests/detection.rs`
 
+### featherkey-neural-lm
+
+- **Path:** `core/crates/neural-lm` — **Layer:** domain
+- **One job:** Own the bounded per-user `Vocab` (word ↔ index map) that a tiny on-device embedding next-word LM trains and predicts over.
+- **Depends on:** `featherkey-context`, `featherkey-contracts`, `featherkey-nn`
+- **Serves:** BR-10, BR-11
+- **Structs:** `NextWordLm`, `Vocab`
+- **Constants:** `BOS` *(internal)*, `MAX_VOCAB` *(internal)*, `UNK` *(internal)*
+- **Methods:** `NextWordLm::confidence`, `NextWordLm::load`, `NextWordLm::new`, `NextWordLm::observe`, `NextWordLm::persist`, `NextWordLm::rank_next`, `NextWordLm::score_next`, `Vocab::index_of`, `Vocab::intern`, `Vocab::is_empty`, `Vocab::len`, `Vocab::new`, `Vocab::word_of`
+
 ### featherkey-neural-ranker
 
 - **Path:** `core/crates/neural-ranker` — **Layer:** domain
@@ -286,12 +299,12 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 ### featherkey-nn
 
 - **Path:** `core/crates/nn` — **Layer:** domain
-- **One job:** Tiny dependency-free neural substrate: 1-hidden-layer MLP with forward, SGD, linear-prior init, and versioned serialization.
+- **One job:** Tiny, dependency-free neural substrate — 1-hidden-layer MLP
 - **Depends on:** nothing (leaf)
-- **Structs:** `Mlp`
+- **Serves:** BR-7, BR-10, BR-11, BR-12
+- **Structs:** `Mlp`, `MlpMulti`
 - **Enums:** `NnError`
-- **Methods:** `Mlp::forward`, `Mlp::from_bytes`, `Mlp::from_linear`, `Mlp::inputs`, `Mlp::to_bytes`, `Mlp::train_step`, `Mlp::with_weights`
-- ⚠️ **No README.md** — add one (ARCHITECTURE.md §5.2 crate anatomy).
+- **Methods:** `Mlp::forward`, `Mlp::from_bytes`, `Mlp::from_linear`, `Mlp::inputs`, `Mlp::to_bytes`, `Mlp::train_step`, `Mlp::with_weights`, `MlpMulti::forward`, `MlpMulti::from_bytes`, `MlpMulti::hidden`, `MlpMulti::inputs`, `MlpMulti::outputs`, `MlpMulti::reset_output_row`, `MlpMulti::softmax`, `MlpMulti::to_bytes`, `MlpMulti::train_step`, `MlpMulti::with_weights`
 
 ### featherkey-personalization
 
@@ -459,6 +472,7 @@ Behaviour specs in `core/features/`, tagged to requirement IDs and gated by
 | `locale-manager.feature` | Concurrent multilingual typing with automatic per-word detection | 5 | BR-16, BR-17, BR-18, BR-19 |
 | `neural-reranker.feature` | The suggestion strip learns which word I mean | 1 | BR-11 |
 | `neural-tap-decoder.feature` | The tap decoder learns the user's systematic aim and generalizes it | 4 | BR-7 |
+| `neural_lm.feature` | On-device neural next-word language model (foundation) | 4 | BR-10, BR-11 |
 | `personalization.feature` | On-device personal vocabulary learning | 3 | BR-7, BR-13 |
 | `prediction.feature` | Relevant autocomplete completions for the in-progress word | 4 | BR-10 |
 | `secure-store.feature` | Encrypted persistence of personal data | 4 | BR-8, BR-23, BR-62 |
@@ -502,6 +516,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `AutocorrectOutcome` | enum — `featherkey-core::correct`; kotlin enum class — `:ffi-bridge` |
 | `AvailableCorrection` | struct — `featherkey-autocorrect::rank` |
 | `BEAM` | const — `featherkey-tap-sequence` |
+| `BOS` | const — `featherkey-neural-lm::vocab` *(internal)* |
 | `BRANCH` | const — `featherkey-tap-sequence` |
 | `C::capacity` | method — `featherkey-diagnostics` |
 | `C::is_empty` | method — `featherkey-diagnostics` |
@@ -723,6 +738,8 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `InputDecoder` | trait — `featherkey-input-decoder` |
 | `InputDecoder::decode` | method — `featherkey-input-decoder` |
 | `INPUTS` | const — `featherkey-autocorrect-gate`; const — `featherkey-neural-ranker`; const — `featherkey-neural-tap` |
+| `is_learnable` | fn — `featherkey-context` |
+| `is_storable` | fn — `featherkey-context` |
 | `Key` | struct — `featherkey-layout-engine` |
 | `Key::center` | method — `featherkey-layout-engine` |
 | `Key::new` | method — `featherkey-layout-engine` |
@@ -890,6 +907,8 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `MAX_COMPLETIONS` | const — `featherkey-dictionary` |
 | `MAX_SUGGESTIONS` | const — `featherkey-prediction` |
 | `MAX_TAPS` | const — `featherkey-tap-sequence` |
+| `MAX_VOCAB` | const — `featherkey-neural-lm::vocab` *(internal)* |
+| `MIN_TOKEN_CHARS` | const — `featherkey-context` |
 | `Mlp` | struct — `featherkey-nn` |
 | `Mlp::forward` | method — `featherkey-nn` |
 | `Mlp::from_bytes` | method — `featherkey-nn` |
@@ -898,6 +917,17 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `Mlp::to_bytes` | method — `featherkey-nn` |
 | `Mlp::train_step` | method — `featherkey-nn` |
 | `Mlp::with_weights` | method — `featherkey-nn` |
+| `MlpMulti` | struct — `featherkey-nn::multi` |
+| `MlpMulti::forward` | method — `featherkey-nn` |
+| `MlpMulti::from_bytes` | method — `featherkey-nn` |
+| `MlpMulti::hidden` | method — `featherkey-nn` |
+| `MlpMulti::inputs` | method — `featherkey-nn` |
+| `MlpMulti::outputs` | method — `featherkey-nn` |
+| `MlpMulti::reset_output_row` | method — `featherkey-nn` |
+| `MlpMulti::softmax` | method — `featherkey-nn` |
+| `MlpMulti::to_bytes` | method — `featherkey-nn` |
+| `MlpMulti::train_step` | method — `featherkey-nn` |
+| `MlpMulti::with_weights` | method — `featherkey-nn` |
 | `Momentum` | struct — `featherkey-language-momentum` |
 | `Momentum::new` | method — `featherkey-language-momentum` |
 | `Momentum::observe` | method — `featherkey-language-momentum` |
@@ -915,6 +945,14 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `NeuralRanker::persist` | method — `featherkey-neural-ranker` |
 | `NeuralRanker::reinforce` | method — `featherkey-neural-ranker` |
 | `NeuralRanker::score` | method — `featherkey-neural-ranker` |
+| `NextWordLm` | struct — `featherkey-neural-lm::model` |
+| `NextWordLm::confidence` | method — `featherkey-neural-lm` |
+| `NextWordLm::load` | method — `featherkey-neural-lm` |
+| `NextWordLm::new` | method — `featherkey-neural-lm` |
+| `NextWordLm::observe` | method — `featherkey-neural-lm` |
+| `NextWordLm::persist` | method — `featherkey-neural-lm` |
+| `NextWordLm::rank_next` | method — `featherkey-neural-lm` |
+| `NextWordLm::score_next` | method — `featherkey-neural-lm` |
 | `NnError` | enum — `featherkey-nn::error` |
 | `NoClobberCorrector` | struct — `featherkey-autocorrect` |
 | `NoClobberCorrector::assess` | method — `featherkey-autocorrect` |
@@ -1030,6 +1068,14 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `TouchPoint::new` | method — `featherkey-kernel` |
 | `TypingContext` | struct — `featherkey-contracts` |
 | `TypingError` | enum — `featherkey-smart-typing` |
+| `UNK` | const — `featherkey-neural-lm::vocab` *(internal)* |
+| `Vocab` | struct — `featherkey-neural-lm::vocab` |
+| `Vocab::index_of` | method — `featherkey-neural-lm` |
+| `Vocab::intern` | method — `featherkey-neural-lm` |
+| `Vocab::is_empty` | method — `featherkey-neural-lm` |
+| `Vocab::len` | method — `featherkey-neural-lm` |
+| `Vocab::new` | method — `featherkey-neural-lm` |
+| `Vocab::word_of` | method — `featherkey-neural-lm` |
 | `Vocabulary` | kotlin class — `:ime-service` |
 | `Vocabulary.accentedCanonical` | kotlin fun — `:ime-service` |
 | `Vocabulary.accentVariantsOf` | kotlin fun — `:ime-service` |
