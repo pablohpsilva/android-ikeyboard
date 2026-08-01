@@ -272,9 +272,9 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **One job:** Own the bounded per-user `Vocab` (word ↔ index map) that a tiny on-device embedding next-word LM trains and predicts over.
 - **Depends on:** `featherkey-context`, `featherkey-contracts`, `featherkey-nn`
 - **Serves:** BR-10, BR-11
-- **Structs:** `NextWordLm`, `Vocab`
+- **Structs:** `LmScores`, `NextWordLm`, `Vocab`
 - **Constants:** `BOS` *(internal)*, `MAX_VOCAB` *(internal)*, `UNK` *(internal)*
-- **Methods:** `NextWordLm::confidence`, `NextWordLm::load`, `NextWordLm::log_uniform`, `NextWordLm::new`, `NextWordLm::observe`, `NextWordLm::persist`, `NextWordLm::rank_next`, `NextWordLm::score_next`, `Vocab::index_of`, `Vocab::intern`, `Vocab::is_empty`, `Vocab::len`, `Vocab::new`, `Vocab::word_of`
+- **Methods:** `NextWordLm::confidence`, `NextWordLm::load`, `NextWordLm::log_uniform`, `NextWordLm::logprob_in`, `NextWordLm::new`, `NextWordLm::observe`, `NextWordLm::persist`, `NextWordLm::rank_next`, `NextWordLm::score_next`, `NextWordLm::scores`, `Vocab::index_of`, `Vocab::intern`, `Vocab::is_empty`, `Vocab::len`, `Vocab::new`, `Vocab::word_of`
 
 ### featherkey-neural-ranker
 
@@ -282,7 +282,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **One job:** Tiny neural re-ranker: a 9-slot feature vector (including the confidence-gated lm_logprob LM term) and a cold-start prior that reproduces the linear candidate ranking.
 - **Depends on:** `featherkey-contracts`, `featherkey-nn`
 - **Structs:** `NeuralRanker`, `RankFeatures`
-- **Constants:** `INPUTS`
+- **Constants:** `FEATURE_BOUND`, `INPUTS`
 - **Methods:** `NeuralRanker::from_prior`, `NeuralRanker::load`, `NeuralRanker::persist`, `NeuralRanker::reinforce`, `NeuralRanker::score`, `RankFeatures::to_array`
 - ⚠️ **No README.md** — add one (ARCHITECTURE.md §5.2 crate anatomy).
 
@@ -696,6 +696,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `FeatherKeyImeService.onStartInput` | kotlin fun — `:ime-service` |
 | `FeatherKeyImeService.onStartInputView` | kotlin fun — `:ime-service` |
 | `FeatherKeyTheme` | kotlin fun — `:settings-ui` |
+| `FEATURE_BOUND` | const — `featherkey-neural-ranker` |
 | `FfiAutocorrectOutcome` | enum — `featherkey-core::ffi::ffi_types` *(internal)* |
 | `FfiCandidate` | struct — `featherkey-core::ffi::ffi_types` *(internal)* |
 | `FfiCorrection` | struct — `featherkey-core::ffi::ffi_types` *(internal)* |
@@ -898,6 +899,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `Lexicons` | kotlin object — `:ime-service` |
 | `Lexicons.load` | kotlin fun — `:ime-service` |
 | `LM_WEIGHT_LANG` | const — `featherkey-candidate-ranker` |
+| `LmScores` | struct — `featherkey-neural-lm::model` |
 | `LocaleError` | enum — `featherkey-locale-manager` |
 | `LocaleManager` | struct — `featherkey-locale-manager` |
 | `LocaleManager::active` | method — `featherkey-locale-manager` |
@@ -950,11 +952,13 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `NextWordLm::confidence` | method — `featherkey-neural-lm` |
 | `NextWordLm::load` | method — `featherkey-neural-lm` |
 | `NextWordLm::log_uniform` | method — `featherkey-neural-lm` |
+| `NextWordLm::logprob_in` | method — `featherkey-neural-lm` |
 | `NextWordLm::new` | method — `featherkey-neural-lm` |
 | `NextWordLm::observe` | method — `featherkey-neural-lm` |
 | `NextWordLm::persist` | method — `featherkey-neural-lm` |
 | `NextWordLm::rank_next` | method — `featherkey-neural-lm` |
 | `NextWordLm::score_next` | method — `featherkey-neural-lm` |
+| `NextWordLm::scores` | method — `featherkey-neural-lm` |
 | `NnError` | enum — `featherkey-nn::error` |
 | `NoClobberCorrector` | struct — `featherkey-autocorrect` |
 | `NoClobberCorrector::assess` | method — `featherkey-autocorrect` |

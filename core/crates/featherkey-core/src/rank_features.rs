@@ -9,16 +9,10 @@
 
 use featherkey_candidate_ranker::positional_score;
 use featherkey_contracts::{Candidate, RankedCandidate, Source};
-use featherkey_neural_ranker::RankFeatures;
+use featherkey_neural_lm::LmScores;
+use featherkey_neural_ranker::{RankFeatures, FEATURE_BOUND};
 
 use crate::FeatherKeyCore;
-
-/// Clamp bound for the `lm_logprob` feature slot, mirroring the neural
-/// ranker's own private `FEATURE_BOUND` (`neural-ranker/src/lib.rs`): keeping
-/// the LM term inside `[-20, 20]` keeps it in the same linear region every
-/// other feature already lives in, so `PRIOR_OFFSET_C = 64`'s margin
-/// (`|coeff| * FEATURE_BOUND < PRIOR_OFFSET_C`) still holds for the 9th slot.
-const LM_FEATURE_BOUND: f32 = 20.0;
 
 /// The most recent ranked query's shown set: the `prefix` (lowercased, matching
 /// how `observe_strip_pick` keys corrections) and, per shown word, the exact
@@ -35,9 +29,14 @@ pub(crate) struct RankSnapshot {
 
 impl FeatherKeyCore {
     /// Assemble the ranking feature vector for one candidate completing `prefix`,
-    /// given this query's `spatial` hypotheses `(word, log-prob)` and the 2-word
-    /// `context` preceding it (oldest-first; `&[]` at a sentence boundary or
-    /// when the caller has none to offer).
+    /// given this query's `spatial` hypotheses `(word, log-prob)` and,
+    /// `lm_scores`, the LM's next-word distribution for the 2-word context
+    /// preceding it — computed **once per query** by
+    /// [`Self::rank_suggestions`] (via [`NextWordLm::scores`](featherkey_neural_lm::NextWordLm::scores))
+    /// and shared across every candidate, rather than re-running the LM's
+    /// forward pass per candidate. `None` at cold start
+    /// (`NextWordLm::confidence() == 0.0`, see below) or at a sentence
+    /// boundary with no context to offer.
     ///
     /// Built so the cold-start prior ([`PRIOR_COEFFS`](crate::rank::PRIOR_COEFFS))
     /// reproduces the classic linear score exactly: each slot is the raw signal
@@ -49,19 +48,20 @@ impl FeatherKeyCore {
     /// where `lm_logprob` is exactly `0.0` (see below).
     ///
     /// `lm_logprob` is gated by [`NextWordLm::confidence`](featherkey_neural_lm::NextWordLm::confidence):
-    /// at cold start (`confidence() == 0.0`) it is the literal `0.0`, never a
-    /// near-zero float — the shortcut that keeps [`Self::rank_suggestions`]
-    /// byte-identical to its pre-LM order. Once warm, it is the candidate's
-    /// next-word log-probability under `context`, centered against the uniform
-    /// baseline ([`NextWordLm::log_uniform`](featherkey_neural_lm::NextWordLm::log_uniform))
+    /// at cold start (`confidence() == 0.0`, so `lm_scores` is `None`) it is
+    /// the literal `0.0`, never a near-zero float — the shortcut that keeps
+    /// [`Self::rank_suggestions`] byte-identical to its pre-LM order. Once
+    /// warm, it is the candidate's next-word log-probability looked up in
+    /// `lm_scores`, centered against the uniform baseline
+    /// ([`NextWordLm::log_uniform`](featherkey_neural_lm::NextWordLm::log_uniform))
     /// so an untrained-but-warm class doesn't carry a spurious bias, scaled by
-    /// confidence, and clamped to [`LM_FEATURE_BOUND`].
+    /// confidence, and clamped to [`FEATURE_BOUND`].
     pub(crate) fn rank_features(
         &self,
         cand: &Candidate,
         prefix: &str,
         spatial: &[(String, f32)],
-        context: &[&str],
+        lm_scores: Option<&LmScores>,
     ) -> RankFeatures {
         let (promote, demote) = self.correction_parts(prefix, &cand.word);
         RankFeatures {
@@ -83,13 +83,11 @@ impl FeatherKeyCore {
                 .iter()
                 .find(|(w, _)| *w == cand.word)
                 .map_or(0.0, |(_, s)| *s),
-            lm_logprob: {
-                let c = self.lm.confidence();
-                if c == 0.0 {
-                    0.0
-                } else {
-                    let centered = self.lm.score_next(context, &cand.word) - self.lm.log_uniform();
-                    (c * centered).clamp(-LM_FEATURE_BOUND, LM_FEATURE_BOUND)
+            lm_logprob: match lm_scores {
+                None => 0.0,
+                Some(scores) => {
+                    let centered = self.lm.logprob_in(scores, &cand.word) - self.lm.log_uniform();
+                    (self.lm.confidence() * centered).clamp(-FEATURE_BOUND, FEATURE_BOUND)
                 }
             },
         }
@@ -98,17 +96,17 @@ impl FeatherKeyCore {
     /// Build the [`RankSnapshot`] for one ranked query: pair each shown word with
     /// the exact features that scored it (found back in `cands`), keyed by the
     /// lowercased `prefix`. Words dropped by the top-`k`/dedup cut are not shown,
-    /// so they are not recorded. `context` is forwarded unchanged to
-    /// [`Self::rank_features`] — the same 2-word context the query was ranked
-    /// with, so a replayed pairwise update trains against exactly what scored
-    /// the shown set.
+    /// so they are not recorded. `lm_scores` is forwarded unchanged to
+    /// [`Self::rank_features`] — the same once-per-query LM distribution the
+    /// query was ranked with, so a replayed pairwise update trains against
+    /// exactly what scored the shown set.
     pub(crate) fn snapshot_shown(
         &self,
         prefix: &str,
         ranked: &[RankedCandidate],
         cands: &[Candidate],
         spatial: &[(String, f32)],
-        context: &[&str],
+        lm_scores: Option<&LmScores>,
     ) -> RankSnapshot {
         let shown = ranked
             .iter()
@@ -116,7 +114,7 @@ impl FeatherKeyCore {
                 cands.iter().find(|c| c.word == rc.word).map(|c| {
                     (
                         rc.word.clone(),
-                        self.rank_features(c, prefix, spatial, context),
+                        self.rank_features(c, prefix, spatial, lm_scores),
                     )
                 })
             })
@@ -193,7 +191,7 @@ mod tests {
             source_rank: 2,
         };
         let spatial = vec![("cat".to_string(), 0.5_f32)];
-        let f = core.rank_features(&cand, "ca", &spatial, &[]);
+        let f = core.rank_features(&cand, "ca", &spatial, None);
         // Source flags are one-hot for a lexicon candidate; correction history is
         // empty; spatial matches the candidate word.
         assert_eq!(f.is_lexicon, 1.0);
@@ -216,7 +214,7 @@ mod tests {
             source_rank: 0,
         };
         let spatial = vec![("cat".to_string(), 0.9_f32)];
-        let f = core.rank_features(&cand, "he", &spatial, &[]);
+        let f = core.rank_features(&cand, "he", &spatial, None);
         assert_eq!(f.is_lexicon, 0.0);
         assert_eq!(f.is_device, 1.0);
         assert_eq!(f.spatial, 0.0);
@@ -234,7 +232,7 @@ mod tests {
             source: Source::Lexicon,
             source_rank: 0,
         };
-        let f = core.rank_features(&cand, "ca", &[], &[]);
+        let f = core.rank_features(&cand, "ca", &[], None);
         assert_eq!(f.lm_logprob, 0.0);
     }
 

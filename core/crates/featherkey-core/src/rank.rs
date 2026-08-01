@@ -17,6 +17,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use featherkey_candidate_ranker::{LM_WEIGHT_LANG, SOURCE_PRIOR_DEVICE, SOURCE_PRIOR_LEXICON};
 use featherkey_contracts::{Candidate, RankedCandidate, Source, TypingContext};
 use featherkey_dictionary::Dictionary;
+use featherkey_neural_lm::LmScores;
 use featherkey_prediction::{StatisticalPredictor, MAX_SUGGESTIONS};
 
 use crate::{FeatherKeyCore, CORRECTION_STICKY_WEIGHT, CORRECTION_UNWANTED_WEIGHT};
@@ -116,23 +117,36 @@ impl FeatherKeyCore {
                 });
             }
         }
-        // Computed once per query: the LM's 2-word context for `preceding`, owned
-        // here so `rank_by`'s closure and `snapshot_shown` can both borrow it as
-        // `&[&str]` without re-deriving it per candidate.
+        // The LM's 2-word context for `preceding`, computed once per query.
         let ctx_owned = self.recent.two_word_context(preceding);
         let ctx: Vec<&str> = ctx_owned.iter().map(String::as_str).collect();
         // Word-boundary seeding (Task 6) — see `lm_seed_candidates` docs.
         if prefix.is_empty() {
             cands.extend(self.lm_seed_candidates(&ctx, &cands));
         }
+        // Shared by every candidate below — see `lm_scores_for` docs.
+        let lm_scores = self.lm_scores_for(&ctx);
         let ranked = featherkey_candidate_ranker::rank_by(&cands, MAX_SUGGESTIONS, |c| {
             self.neural_ranker
-                .score(&self.rank_features(c, prefix, &spatial, &ctx))
+                .score(&self.rank_features(c, prefix, &spatial, lm_scores.as_ref()))
         });
         // Cache the shown set so a later strip pick can train the net against what
         // the user saw (Task 12); bounded to one snapshot, overwritten each query.
-        self.last_ranked = Some(self.snapshot_shown(prefix, &ranked, &cands, &spatial, &ctx));
+        self.last_ranked =
+            Some(self.snapshot_shown(prefix, &ranked, &cands, &spatial, lm_scores.as_ref()));
         self.guarantee_fold_variant(prefix, ranked)
+    }
+
+    /// The LM's next-word distribution for `ctx`, computed with a SINGLE
+    /// forward pass ready to share across every candidate in this query
+    /// (`rank_by`'s closure and `snapshot_shown`) — instead of each candidate
+    /// re-running [`NextWordLm::score_next`](featherkey_neural_lm::NextWordLm::score_next)
+    /// (and therefore the full `MlpMulti::forward` + softmax) against the
+    /// identical context. `None` at cold start (`confidence() == 0.0`), which
+    /// keeps [`Self::rank_features`]'s `lm_logprob` guarantee (`0.0`, never
+    /// computed) intact.
+    fn lm_scores_for(&self, ctx: &[&str]) -> Option<LmScores> {
+        (self.lm.confidence() > 0.0).then(|| self.lm.scores(ctx))
     }
 
     /// The correction score split into its two non-negative components:

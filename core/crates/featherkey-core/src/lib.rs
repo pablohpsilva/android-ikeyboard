@@ -176,13 +176,14 @@ pub struct FeatherKeyCore {
     latin_override: Option<LatinLayout>,
     /// The tiny on-device next-word embedding model, cold-started and
     /// persisted under `PersonalLm` (alongside `context`'s bigram model, under
-    /// a distinct key). Not yet trained or consulted for ranking (Tasks 5/7);
-    /// held here so it survives language switches like every other learned
-    /// model.
+    /// a distinct key). Trained on the commit path by `learn_word` and
+    /// consulted for ranking in `rank_features`/`lm_seed_candidates`; held
+    /// here so it survives language switches like every other learned model.
     lm: NextWordLm,
     /// Ephemeral 2-word context buffer for the LM (never persisted, no
-    /// `Namespace` — matches `taps`). Not yet wired into `push`/
-    /// `two_word_context` call sites (Task 5/7).
+    /// `Namespace` — matches `taps`). Wired at both call sites: pushed on the
+    /// commit path alongside `lm.observe`, and read in `rank_suggestions` to
+    /// build the LM's next-word context.
     recent: RecentWords,
 }
 

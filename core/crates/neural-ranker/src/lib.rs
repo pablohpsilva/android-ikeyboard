@@ -13,8 +13,11 @@ pub const INPUTS: usize = 9;
 
 /// The linear-region half-width the prior is built to cover. Every feature this
 /// crate produces stays well inside `[-BOUND, BOUND]`; `PRIOR_OFFSET_C` is set
-/// with a comfortable margin over it (see [`NeuralRanker::from_prior`]).
-const FEATURE_BOUND: f32 = 20.0;
+/// with a comfortable margin over it (see [`NeuralRanker::from_prior`]). `pub`
+/// so a caller clamping its own feature slot before it reaches this crate
+/// (e.g. `featherkey-core`'s `lm_logprob`) shares this exact bound rather than
+/// re-declaring the same `20.0` as a second source of truth.
+pub const FEATURE_BOUND: f32 = 20.0;
 
 /// Output-region offset handed to [`Mlp::from_linear`]. Deliberately small:
 /// `from_linear` cancels a per-unit constant of `w2[j]·offset_c` against `b2`,
