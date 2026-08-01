@@ -6,9 +6,14 @@
 /// an FFI interface change.
 #[derive(Debug, Clone)]
 pub struct RecentWords {
-    /// The oldest of the two words (entered first)
+    /// The oldest of the two words (entered first). Only read outside tests
+    /// once `push`/`two_word_context` are wired into `FeatherKeyCore` (Task
+    /// 5/7); until then this field is write-only in production builds.
+    #[cfg_attr(not(test), allow(dead_code))]
     older: Option<String>,
-    /// The newest of the two words (entered most recently)
+    /// The newest of the two words (entered most recently). Same
+    /// not-yet-wired note as `older`.
+    #[cfg_attr(not(test), allow(dead_code))]
     newer: Option<String>,
 }
 
@@ -24,6 +29,12 @@ impl RecentWords {
 
     /// Advance the 2-word window: the previous "newer" becomes "older", `word`
     /// becomes "newer".
+    ///
+    /// Not yet called from `FeatherKeyCore` (Task 4 owns the buffer but does
+    /// not wire it into the commit path — that is Task 5/7); the
+    /// `not(test)` allow keeps this crate's `-D warnings` clippy gate green
+    /// in the interim, matching `correct.rs`'s `LastCorrection` fields.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn push(&mut self, word: &str) {
         self.older = self.newer.take();
         self.newer = Some(word.to_string());
@@ -36,6 +47,9 @@ impl RecentWords {
     /// - `[older, preceding]` if the buffer's newest word matches `preceding`
     ///   and an older word exists (coherent 2-word context).
     /// - `[preceding]` otherwise (safe k=1 degradation — never a WRONG 2-word context).
+    ///
+    /// Not yet called from `FeatherKeyCore` (Task 5/7); see `push`'s note.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn two_word_context(&self, preceding: &str) -> Vec<String> {
         // Empty preceding is a boundary — no context
         if preceding.is_empty() {
@@ -56,6 +70,11 @@ impl RecentWords {
     }
 
     /// Clear both word slots.
+    ///
+    /// Not yet called from `FeatherKeyCore` or exercised by this module's own
+    /// tests (Task 5/7 wires the caller); unconditional allow, unlike `push`/
+    /// `two_word_context` which the tests below already exercise.
+    #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.older = None;
         self.newer = None;

@@ -61,6 +61,7 @@ use featherkey_input_decoder::{InputDecoder, NearestKeyDecoder};
 use featherkey_kernel::TouchPoint;
 use featherkey_language_momentum::Momentum;
 use featherkey_locale_manager::LangId;
+use featherkey_neural_lm::NextWordLm;
 use featherkey_neural_ranker::NeuralRanker;
 use featherkey_neural_tap::TapWarp;
 use featherkey_personalization::Personalization;
@@ -69,6 +70,7 @@ use crate::correct::LastCorrection;
 use crate::packs::{build_packs, primary_tag, Pack};
 use crate::rank::PRIOR_COEFFS;
 use crate::rank_features::RankSnapshot;
+use crate::recent::RecentWords;
 use featherkey_prediction::StatisticalPredictor;
 use featherkey_sensitive_context::SensitivityPolicy;
 use featherkey_tap_sequence::{TapDistribution, TapSequence};
@@ -172,6 +174,16 @@ pub struct FeatherKeyCore {
     /// default ("Auto"). Held across language switches so a switch never drops
     /// the choice (design §4.2). Latin-only: non-Latin scripts ignore it.
     latin_override: Option<LatinLayout>,
+    /// The tiny on-device next-word embedding model, cold-started and
+    /// persisted under `PersonalLm` (alongside `context`'s bigram model, under
+    /// a distinct key). Not yet trained or consulted for ranking (Tasks 5/7);
+    /// held here so it survives language switches like every other learned
+    /// model.
+    lm: NextWordLm,
+    /// Ephemeral 2-word context buffer for the LM (never persisted, no
+    /// `Namespace` — matches `taps`). Not yet wired into `push`/
+    /// `two_word_context` call sites (Task 5/7).
+    recent: RecentWords,
 }
 
 impl FeatherKeyCore {
@@ -209,6 +221,8 @@ impl FeatherKeyCore {
             momentum: Momentum::new(&primary, &tags),
             taps: TapSequence::new(),
             latin_override: None,
+            lm: NextWordLm::new(),
+            recent: RecentWords::new(),
         })
     }
 
@@ -372,6 +386,13 @@ impl FeatherKeyCore {
     #[cfg(test)]
     pub(crate) fn tap_warp(&self) -> &TapWarp {
         &self.tap_warp
+    }
+
+    /// The held next-word LM. Test-only accessor for persist/restore probes;
+    /// production ranking does not yet reach it (Task 5).
+    #[cfg(test)]
+    pub(crate) fn lm(&self) -> &NextWordLm {
+        &self.lm
     }
 
     /// The active layout. Test-only accessor for decode-path probes.

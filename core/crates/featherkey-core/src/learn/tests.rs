@@ -352,6 +352,33 @@ fn the_autocorrect_gate_survives_persist_and_restore() {
 }
 
 #[test]
+fn a_cold_lm_survives_persist_then_restore() {
+    // Task 4: ownership + lifecycle only — the LM is not trained or consulted
+    // for ranking yet (Tasks 5/7), so this round-trips a cold model (via the
+    // `lm()` test accessor, mirroring `tap_warp()`/`neural_ranker()`) and
+    // proves persist/restore leaves `rank_suggestions` output unchanged.
+    let store = mem_store();
+    let mut fk = core();
+    fk.persist(&store).expect("persist");
+
+    let mut restored = core();
+    restored.restore(&store).expect("restore");
+
+    assert_eq!(restored.lm().confidence(), fk.lm().confidence());
+    assert_eq!(
+        restored.lm().score_next(&[], "tea"),
+        fk.lm().score_next(&[], "tea")
+    );
+
+    let before = fk.rank_suggestions("", "te", no_device());
+    let after = restored.rank_suggestions("", "te", no_device());
+    assert_eq!(
+        after, before,
+        "persist -> restore of a cold LM must not change suggestion ranking"
+    );
+}
+
+#[test]
 fn revert_suppresses_a_repeatedly_reverted_correction() {
     let mut fk = correction_core();
     let _ = fk.choose_correction("xat", &[], vec![]).expect("ok");
