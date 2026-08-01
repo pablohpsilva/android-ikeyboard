@@ -22,9 +22,11 @@ app ─┬─ ime-service ─┬─ ffi-bridge ── (UniFFI bindings → feath
 ```
 
 The Rust→Kotlin surface is exported with **proc-macro UniFFI** on `featherkey-core`
-(ADR-18). Its code lives in `ffi-bridge/rust-overlay/` and is applied into
-`core/crates/featherkey-core/` on your machine (§3) — it is kept out of the verified
-workspace so the sandbox build stays green and offline.
+(ADR-18). Its code — `src/ffi.rs`, `src/ffi/ffi_types.rs`, `build.rs`, `uniffi.toml`,
+and the `uniffi`/`crate-type`/bin entries in `Cargo.toml` — is **committed in-tree** on
+`core/crates/featherkey-core/`. There is **nothing to apply**: a fresh clone already
+has the shim. See §3 for why `ffi-bridge/rust-overlay/` still exists and why you must
+NOT copy it over the committed sources.
 
 ## 1. Prerequisites
 
@@ -41,36 +43,62 @@ gradle wrapper --gradle-version 8.11
 (The `android-shell` CI job is gated on `apps/android/gradlew` existing, so it stays
 dormant until this is done and pushed.)
 
-## 3. Apply the Rust UniFFI overlay
+## 3. The Rust UniFFI shim is committed — do NOT apply the overlay
 
-Follow `ffi-bridge/rust-overlay/APPLY.md` exactly. In short:
-1. Copy `ffi.rs`, `build.rs`, `uniffi.toml` into `core/crates/featherkey-core/`.
-2. Add `#[cfg(feature = "uniffi")] mod ffi;` to `lib.rs`.
-3. Add the `uniffi`/`thiserror` optional deps, the `uniffi` feature, `crate-type
-   = ["lib","cdylib"]`, and the `uniffi-bindgen` bin to `Cargo.toml`.
-4. Relax `featherkey-core`'s lint from workspace-inherited `unsafe_code = forbid`
-   to its own `deny` (UniFFI scaffolding needs FFI `unsafe`; confine it to this
-   one seam crate and record it as **ADR-19**).
-5. **Sanity-check the verified core is still green:** `tools/ci-local.sh` (default
-   features must stay unaffected — the `uniffi` feature is off by default).
+> ⚠️ **Do not copy `ffi-bridge/rust-overlay/*` over the core crate.** The shim is
+> already committed in-tree (see below). The overlay is a **stale historical seed**
+> (its `ffi.rs` is an early 14-method snapshot); copying it clobbers the real,
+> tested shim and breaks the build (`decode` needs `&mut`, no `correct` method,
+> `learn_word` arity). If a `git ls-files` check ever makes you think a file is
+> untracked, include the **full path** (`core/crates/featherkey-core/src/ffi.rs`,
+> not `…/featherkey-core/ffi.rs`) before concluding anything is missing.
+
+The following are committed on `master` and present in every fresh clone — nothing
+to apply, no manual step:
+
+- `core/crates/featherkey-core/src/ffi.rs` — the UniFFI `KeyboardCore` shim (with
+  its inline test modules)
+- `core/crates/featherkey-core/src/ffi/ffi_types.rs` — the FFI value types
+- `#[cfg(feature = "uniffi")] mod ffi;` in `src/lib.rs`
+- `build.rs`, `uniffi.toml`
+- `Cargo.toml`: the `uniffi`/`thiserror` optional deps, the `uniffi` feature,
+  `crate-type = ["lib", "cdylib"]`, and the `uniffi-bindgen` bin
+- the crate's own `unsafe_code = "deny"` relaxation (**ADR-19**) — UniFFI
+  scaffolding needs FFI `unsafe`, confined to this one seam crate
+
+The `uniffi` feature is **off by default**, so the verified core stays green and
+offline without it. Sanity-check any time with `tools/ci-local.sh` (from `core/`).
+
+`ffi-bridge/rust-overlay/` and its `APPLY.md` are retained only as the historical
+record of how the shim was first introduced — treat them as read-only documentation,
+never as a build step.
 
 ## 4. Build the native library + bindings
 
-From `core/crates/featherkey-core/` (with the overlay applied):
+From `core/crates/featherkey-core/` (no overlay step — the shim is already in-tree,
+§3). The convenience script `apps/android/ffi-bridge/build-jni.sh` runs the ABI build
+for you; the commands below are the manual equivalent:
 ```
 # Build the .so for each ABI into apps/android/ffi-bridge/src/main/jniLibs/<abi>/
 cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 \
   -o ../../../apps/android/ffi-bridge/src/main/jniLibs \
   build --release --features uniffi
 
-# Generate the Kotlin bindings from the built library
+# Generate the Kotlin bindings from the built library.
+# NOTE: the workspace target dir is core/target/, NOT this crate's own dir — pass an
+# ABSOLUTE --library path (a relative target/... resolves wrong and fails to open).
 cargo run --features uniffi --bin uniffi-bindgen -- generate \
-  --library target/aarch64-linux-android/release/libfeatherkey_core.so \
+  --library "$(git rev-parse --show-toplevel)/core/target/aarch64-linux-android/release/libfeatherkey_core.so" \
   --language kotlin \
   --out-dir ../../../apps/android/ffi-bridge/src/main/kotlin
 ```
-Then **reconcile** `ffi-bridge/.../FeatherKeyBridge.kt` against the actual
-generated symbol names (constructor, error type, foreign-trait method casing).
+Then **diff the regenerated bindings against the committed
+`ffi-bridge/.../generated/featherkey_core.kt`**: they must be **byte-identical**.
+UniFFI method checksums embed the `///` doc-comment text verbatim, so any wording
+drift breaks the checksum → dead bridge → no typing. A clean diff is the correctness
+gate for a `.so` rebuild; if it differs, the committed Kotlin bindings won't link
+against the new `.so`. Then reconcile the hand-written `FeatherKeyBridge.kt` wrapper
+only if the generated symbol names actually changed.
 
 ## 5. Build, install, enable, verify
 
