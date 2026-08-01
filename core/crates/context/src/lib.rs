@@ -263,7 +263,7 @@ mod tests {
     #[test]
     fn learnable_predicate_is_public_and_matches_record_rules() {
         assert!(is_learnable("cat"));
-        assert!(!is_learnable("a"));        // < MIN_TOKEN_CHARS
+        assert!(!is_learnable("a")); // < MIN_TOKEN_CHARS
         assert!(!is_learnable("bad\ttok")); // separator
         assert_eq!(MIN_TOKEN_CHARS, 2);
     }

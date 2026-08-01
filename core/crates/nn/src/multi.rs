@@ -112,7 +112,13 @@ impl MlpMulti {
         let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         let exps: Vec<f32> = logits
             .iter()
-            .map(|&l| if max.is_finite() { (l - max).exp() } else { 1.0 })
+            .map(|&l| {
+                if max.is_finite() {
+                    (l - max).exp()
+                } else {
+                    1.0
+                }
+            })
             .collect();
         let sum: f32 = exps.iter().sum();
         if sum.is_finite() && sum > 0.0 {
@@ -137,7 +143,9 @@ mod tests {
             vec![0.0, 0.0],           // b1
             vec![1.0, 0.0, 0.0, 2.0], // W2: o0=h0, o1=2*h1
             vec![0.5, -1.0],          // b2
-            2, 2, 2,
+            2,
+            2,
+            2,
         );
         // x=[3,-4] -> h=relu([3,-4])=[3,0] -> out=[1*3+0.5, 2*0-1.0]=[3.5,-1.0]
         let o = m.forward(&[3.0, -4.0]);

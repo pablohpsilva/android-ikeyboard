@@ -31,7 +31,13 @@ impl MlpMulti {
         out.extend_from_slice(&(self.inputs() as u16).to_le_bytes());
         out.extend_from_slice(&(self.hidden() as u16).to_le_bytes());
         out.extend_from_slice(&(self.outputs() as u16).to_le_bytes());
-        for &v in self.w1.iter().chain(&self.b1).chain(&self.w2).chain(&self.b2) {
+        for &v in self
+            .w1
+            .iter()
+            .chain(&self.b1)
+            .chain(&self.w2)
+            .chain(&self.b2)
+        {
             out.extend_from_slice(&v.to_le_bytes());
         }
         out
@@ -170,15 +176,7 @@ mod tests {
 
     #[test]
     fn from_bytes_rejects_trailing_garbage() {
-        let m = MlpMulti::with_weights(
-            vec![1.0, 2.0],
-            vec![0.0],
-            vec![1.0],
-            vec![0.0],
-            2,
-            1,
-            1,
-        );
+        let m = MlpMulti::with_weights(vec![1.0, 2.0], vec![0.0], vec![1.0], vec![0.0], 2, 1, 1);
         let mut b = m.to_bytes();
         b.push(0x00);
         assert_eq!(MlpMulti::from_bytes(&b).unwrap_err(), NnError::Blob);

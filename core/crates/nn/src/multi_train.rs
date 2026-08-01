@@ -168,14 +168,25 @@ mod tests {
             let mut xm = x;
             xm[i] -= eps;
             let num = (ce_loss(&m, &xp, 1) - ce_loss(&m, &xm, 1)) / (2.0 * eps);
-            assert!((grad[i] - num).abs() < 1e-2, "grad[{i}]={} num={num}", grad[i]);
+            assert!(
+                (grad[i] - num).abs() < 1e-2,
+                "grad[{i}]={} num={num}",
+                grad[i]
+            );
         }
     }
 
     #[test]
     fn target_out_of_range_is_error_not_panic() {
-        let mut m =
-            MlpMulti::with_weights(vec![1.0], vec![0.0], vec![0.0, 0.0], vec![0.0, 0.0], 1, 1, 2);
+        let mut m = MlpMulti::with_weights(
+            vec![1.0],
+            vec![0.0],
+            vec![0.0, 0.0],
+            vec![0.0, 0.0],
+            1,
+            1,
+            2,
+        );
         assert_eq!(m.train_step(&[1.0], 2, 0.1).unwrap_err(), NnError::Shape);
     }
 }
