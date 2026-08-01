@@ -278,7 +278,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Path:** `core/crates/neural-tap` — **Layer:** domain
 - **One job:** Learn a per-user coordinate warp — a bounded `(Δx, Δy)` pixel shift over a normalized tap position `(nx, ny)` in `[-1,1]` — that generalizes a person's systematic tap bias across keys, rather than per-key.
 - **Depends on:** `featherkey-contracts`, `featherkey-nn`
-- **Serves:** BR-11, BR-13
+- **Serves:** BR-7, BR-8
 - **Structs:** `TapWarp`
 - **Constants:** `INPUTS`, `WARP_BOUND`, `WARP_LR`
 - **Methods:** `TapWarp::from_prior`, `TapWarp::load`, `TapWarp::persist`, `TapWarp::reinforce`, `TapWarp::warp`

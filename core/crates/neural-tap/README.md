@@ -8,7 +8,7 @@
 
 ## Ports
 
-Depends on `featherkey-nn` (the tiny MLP substrate the warp is built on) and `featherkey-contracts` (for the `SecureStore` port and the learned-data `Namespace` this crate will own as sole writer, once persistence lands — see Deferred).
+Depends on `featherkey-nn` (the tiny MLP substrate the warp is built on) and `featherkey-contracts` (for the `SecureStore` port and the learned-data `Namespace::TapWarpModel` this crate owns as sole writer).
 
 ## What it does
 
@@ -17,6 +17,7 @@ Depends on `featherkey-nn` (the tiny MLP substrate the warp is built on) and `fe
 - `from_prior() -> Self` — cold start: each axis gets a centred signed-pair prior (two hidden units per input, symmetric positive/negative readers around centre `0.0`, identical construction to `AutocorrectGate::from_prior`). The prior's output is ≈0 across the whole `[-1,1]²` grid (proven within `< 0.05` for a 5×5 sample grid including the corners), yet every input weight sits on a live gradient path — a `TapWarp` is trainable from the very first `reinforce` call, not frozen until some threshold.
 - `warp(&self, nx: f32, ny: f32) -> (f32, f32)` — the learned `(Δx, Δy)` for a normalized tap, each axis independently clamped to `±WARP_BOUND` (40 logical px) so a warp can nudge a tap toward the intended key but never fling it across the keyboard.
 - `reinforce(&mut self, nx: f32, ny: f32, tx: f32, ty: f32, lr: f32)` — one squared-error SGD step per axis toward a target shift `(tx, ty)`. The target and its derivation (what "the intended shift was" means for a given tap/commit) are a caller concern; this crate only takes the target as given and moves toward it.
+- `persist(&self, store: &dyn SecureStore)` and `load(store: &dyn SecureStore) -> Result<Self, _>` — encrypted round-trip storage under `Namespace::TapWarpModel`. A corrupt, absent, or wrong-shape blob silently falls back to the cold-start prior, so a model-format change or damaged record degrades to the near-zero prior rather than an error. Both MLPs persist as one blob. Purged by whole-store wipe.
 
 ## Invariants
 
@@ -27,13 +28,13 @@ Depends on `featherkey-nn` (the tiny MLP substrate the warp is built on) and `fe
 
 ## Limitations / Deferred
 
-- **Persistence is not in this crate yet.** `TapWarp` today has no `persist`/`load` — encrypted round-trip through the injected `SecureStore` (the pattern `featherkey-autocorrect-gate` uses) is the next slice of this feature. `featherkey-contracts` is already a dependency in anticipation of that port; it is currently unused by `src/lib.rs` on its own.
-- **The correction/target signal is deferred by design.** This crate defines what a warp *is* and how it trains given `(tx, ty)`; it says nothing about how a caller derives that target from an actual tap-vs-committed-key observation. That derivation (and any per-key vs. cross-key aggregation policy) belongs to the consumer that will wire `TapWarp` into the tap-decode path, not to this substrate.
+- **Negative training signal is deferred by design.** This crate trains the warp via `reinforce` when a tap lands — the successful commit is a positive signal. A correction loop (negative training, e.g. when the user deletes a mistype and retypes) would require new state (per-keystroke intent), new FFI, and a new consumer contract; it is out of scope of this slice. See the design doc §8.
+- **The target-derivation policy is deferred by design.** This crate defines what a warp *is* and how it trains given a target `(tx, ty)`; it says nothing about how a caller derives that target from an actual tap-vs-committed-key observation. That derivation (and any per-key vs. cross-key aggregation policy) belongs to the consumer that will wire `TapWarp` into the tap-decode path, not to this substrate.
 
 ## Serves (BRs)
 
-BR-11-family neural roadmap, app #3 (tap-warp) — per-user coordinate-bias correction as a generalization of the tap-decoder's per-key covariance model, fully on-device (BR-13).
+**BR-7** (primary): Learn the individual user's typing style over time and become measurably more accurate for that user. **BR-8**: All personalization/learning must occur on-device, with no typing content leaving the device without explicit consent. This crate is app #3 of the neural roadmap (tap-warp) — per-user coordinate-bias correction as a generalization of the tap-decoder's per-key covariance model.
 
 ## Tests
 
-Inline `#[cfg(test)]` module in `src/lib.rs`: cold-start near-zero across a 5×5 grid, bounded+finite output under an extreme training stream, movement toward a systematic offset target, and no drift under a zero-mean target stream. 4 tests, 100% line coverage (`cargo llvm-cov -p featherkey-neural-tap --summary-only`).
+Four tests in `src/lib.rs` (`#[cfg(test)]` module): cold-start near-zero across a 5×5 grid, bounded+finite output under an extreme training stream, movement toward a systematic offset target, and no drift under a zero-mean target stream. Three tests in `src/persist.rs`: round-trip encode/decode, absent/corrupt blob → prior, valid-but-wrong-shape blob → prior. Total 7 tests, 100% line coverage (`cargo llvm-cov -p featherkey-neural-tap --summary-only`).

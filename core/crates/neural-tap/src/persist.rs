@@ -2,7 +2,7 @@
 //! are written as one blob under [`Namespace::TapWarpModel`] through the
 //! injected [`SecureStore`] port (the sole writer of that namespace);
 //! encryption and I/O live in `secure-store`, reached only through the port
-//! (ADR-12 Dependency Rule). Nothing leaves the device (BR-13).
+//! (ADR-12 Dependency Rule). Nothing leaves the device (BR-8).
 //!
 //! A corrupt, stale, or wrong-shape blob is **not** an error the caller must
 //! handle: `load` silently falls back to the cold-start prior, so a
