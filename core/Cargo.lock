@@ -518,6 +518,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "featherkey-neural-tap"
+version = "0.0.0"
+dependencies = [
+ "featherkey-contracts",
+ "featherkey-nn",
+]
+
+[[package]]
 name = "featherkey-nn"
 version = "0.0.0"
 

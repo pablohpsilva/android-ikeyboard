@@ -40,7 +40,7 @@ silence about something real is the one answer this index must never give.
 
 ## 1. Rust core — crate map
 
-26 crates in the `core/` Cargo workspace. Layers run inward:
+27 crates in the `core/` Cargo workspace. Layers run inward:
 `foundation` → `port` → `domain` → `adapter` → `composition`; a crate may
 only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 
@@ -63,6 +63,7 @@ only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 | `featherkey-layout-engine` | domain | Provide keyboard-key layout geometry (alpha/numeric/symbol pages, key rectangles and centers) with an RTL-ready direction marker (ADR-16). | kernel |
 | `featherkey-locale-manager` | domain | Track the ordered set of active languages and identify, per word, which active language it belongs to (lightweight statistical language-ID). | dictionary |
 | `featherkey-neural-ranker` | domain | Tiny neural re-ranker: an 8-slot feature vector and a cold-start prior that reproduces the linear candidate ranking. | contracts, nn |
+| `featherkey-neural-tap` | domain | Learn a per-user coordinate warp — a bounded `(Δx, Δy)` pixel shift over a normalized tap position `(nx, ny)` in `[-1,1]` — that generalizes a person's systematic tap bias across keys, rather than per-key. | contracts, nn |
 | `featherkey-nn` | domain | Tiny dependency-free neural substrate: 1-hidden-layer MLP with forward, SGD, linear-prior init, and versioned serialization. | — |
 | `featherkey-personalization` | domain | Learn the user's vocabulary/whitelist and own the user dictionary — the sole writer of the lexical learned-data domain (`Namespace::UserDict`, ADR-14). | contracts |
 | `featherkey-prediction` | domain | Rank prefix-completion suggestions from the active-language lexicons behind the `Predictor` port. | context, contracts, dictionary, fold |
@@ -271,6 +272,16 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Constants:** `INPUTS`
 - **Methods:** `NeuralRanker::from_prior`, `NeuralRanker::load`, `NeuralRanker::persist`, `NeuralRanker::reinforce`, `NeuralRanker::score`, `RankFeatures::to_array`
 - ⚠️ **No README.md** — add one (ARCHITECTURE.md §5.2 crate anatomy).
+
+### featherkey-neural-tap
+
+- **Path:** `core/crates/neural-tap` — **Layer:** domain
+- **One job:** Learn a per-user coordinate warp — a bounded `(Δx, Δy)` pixel shift over a normalized tap position `(nx, ny)` in `[-1,1]` — that generalizes a person's systematic tap bias across keys, rather than per-key.
+- **Depends on:** `featherkey-contracts`, `featherkey-nn`
+- **Serves:** BR-11, BR-13
+- **Structs:** `TapWarp`
+- **Constants:** `INPUTS`, `WARP_BOUND`, `WARP_LR`
+- **Methods:** `TapWarp::from_prior`, `TapWarp::reinforce`, `TapWarp::warp`
 
 ### featherkey-nn
 
@@ -711,7 +722,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `InitialPage` | kotlin enum class — `:keyboard-view` |
 | `InputDecoder` | trait — `featherkey-input-decoder` |
 | `InputDecoder::decode` | method — `featherkey-input-decoder` |
-| `INPUTS` | const — `featherkey-autocorrect-gate`; const — `featherkey-neural-ranker` |
+| `INPUTS` | const — `featherkey-autocorrect-gate`; const — `featherkey-neural-ranker`; const — `featherkey-neural-tap` |
 | `Key` | struct — `featherkey-layout-engine` |
 | `Key::center` | method — `featherkey-layout-engine` |
 | `Key::new` | method — `featherkey-layout-engine` |
@@ -997,6 +1008,10 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `TapSequence::push` | method — `featherkey-tap-sequence` |
 | `TapSequence::taps` | method — `featherkey-tap-sequence` |
 | `TapSequence::truncate` | method — `featherkey-tap-sequence` |
+| `TapWarp` | struct — `featherkey-neural-tap` |
+| `TapWarp::from_prior` | method — `featherkey-neural-tap` |
+| `TapWarp::reinforce` | method — `featherkey-neural-tap` |
+| `TapWarp::warp` | method — `featherkey-neural-tap` |
 | `Token` | struct — `featherkey-contracts` |
 | `TouchModel` | struct — `featherkey-touch-model` |
 | `TouchModel::covariance` | method — `featherkey-touch-model` |
@@ -1023,5 +1038,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `Vocabulary.load` | kotlin fun — `:ime-service` |
 | `Vocabulary.rankOf` | kotlin fun — `:ime-service` |
 | `Vocabulary.words` | kotlin val/var — `:ime-service` |
+| `WARP_BOUND` | const — `featherkey-neural-tap` |
+| `WARP_LR` | const — `featherkey-neural-tap` |
 | `word_left` | fn — `featherkey-editing::cursor` |
 | `word_right` | fn — `featherkey-editing::cursor` |
