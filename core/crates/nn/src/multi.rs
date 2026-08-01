@@ -68,6 +68,24 @@ impl MlpMulti {
         self.output_layer(&h)
     }
 
+    /// Zero out class `class`'s output row (`w2[class*hidden..(class+1)*hidden]`)
+    /// and bias (`b2[class]`) — the same state [`MlpMulti::with_weights`]
+    /// cold-starts the whole output layer to. A caller (e.g. a bounded
+    /// vocabulary reusing a freed class index for a new word) uses this so
+    /// the reused class starts fresh rather than inheriting whatever the
+    /// previous occupant trained into it. `class >= outputs` is a no-op, not
+    /// a panic: there is no row to reset.
+    pub fn reset_output_row(&mut self, class: usize) {
+        let hidden = self.hidden.max(1);
+        let start = class.saturating_mul(hidden);
+        if let Some(row) = self.w2.get_mut(start..start.saturating_add(hidden)) {
+            row.fill(0.0);
+        }
+        if let Some(bias) = self.b2.get_mut(class) {
+            *bias = 0.0;
+        }
+    }
+
     /// Output layer over already-computed hidden activations `h`. Split out
     /// of `forward` so `multi_train::train_step` can reuse it without
     /// recomputing the hidden pass a second time.
@@ -174,5 +192,34 @@ mod tests {
         let m = MlpMulti::with_weights(vec![1.0, 1.0], vec![0.0], vec![1.0], vec![0.0], 2, 1, 1);
         // Too-short input must not panic (mirrors Mlp::forward).
         let _ = m.forward(&[1.0]);
+    }
+
+    #[test]
+    fn reset_output_row_zeroes_only_the_targeted_class() {
+        // 2 inputs, 1 hidden, 3 outputs; every weight trained non-zero. b1=0
+        // and x=[0,0] -> h=[0], so each output is exactly its own bias,
+        // making the "only class 1 changed" assertion easy to read.
+        let mut m = MlpMulti::with_weights(
+            vec![1.0, 1.0],
+            vec![0.0],
+            vec![2.0, 3.0, 4.0], // w2: one row per output (hidden=1)
+            vec![5.0, 6.0, 7.0], // b2
+            2,
+            1,
+            3,
+        );
+        m.reset_output_row(1);
+        // Class 1's row/bias are zeroed...
+        assert_eq!(m.forward(&[0.0, 0.0])[1], 0.0);
+        // ...but classes 0 and 2 are untouched (still their trained bias).
+        assert_eq!(m.forward(&[0.0, 0.0])[0], 5.0);
+        assert_eq!(m.forward(&[0.0, 0.0])[2], 7.0);
+    }
+
+    #[test]
+    fn reset_output_row_out_of_range_is_a_safe_no_op() {
+        let mut m = MlpMulti::with_weights(vec![1.0], vec![0.0], vec![1.0], vec![9.0], 1, 1, 1);
+        m.reset_output_row(50); // no such class -> no panic, no mutation
+        assert_eq!(m.forward(&[0.0])[0], 9.0);
     }
 }

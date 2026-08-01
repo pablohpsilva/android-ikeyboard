@@ -31,16 +31,20 @@ impl NextWordLm {
     ///    `Vocab`'s `is_learnable` gate — too short, or a codec separator)
     ///    interns to [`UNK`]; a `<unk>` target teaches the model nothing
     ///    useful and would only pollute the output layer's `UNK` row, so this
-    ///    step is skipped entirely — no network step, no `warmup` bump. (A
+    ///    step is skipped entirely — no network step, no `warmup` bump. A
     ///    full-vocab eviction does *not* take this path: it still returns a
-    ///    real, reused index — see `Vocab::intern`.)
+    ///    real, reused index — but that index's embedding row and output row
+    ///    are reset first (see [`NextWordLm::reset_evicted_index`]), so the
+    ///    new word doesn't inherit the evicted word's learned state.
     /// 2. Assembles the `K`-slot context embedding, capturing which vocab
     ///    index formed each slot. Unlike `score_next`/`rank_next` (which must
     ///    never mutate `vocab` as a side effect of a query), this interns
     ///    each context word — a word that is only ever seen as context (never
     ///    independently trained as a `next_word` target) still needs a
     ///    stable index of its own, or it collapses onto `UNK` and becomes
-    ///    indistinguishable from every other never-a-target context word.
+    ///    indistinguishable from every other never-a-target context word. Any
+    ///    eviction this causes is reset the same way, before that index's row
+    ///    is read into this step's input.
     /// 3. One `MlpMulti::train_step` (cross-entropy + SGD on `w1/b1/w2/b2`).
     ///    A [`featherkey_nn::NnError::Shape`] (the target index outgrew the
     ///    network's fixed output width — not reachable today since `OUTPUTS`
@@ -51,9 +55,12 @@ impl NextWordLm {
     ///    the step under test's `freeze_embeddings` escape hatch.
     /// 5. Bumps `warmup`, which drives [`NextWordLm::confidence`].
     pub fn observe(&mut self, context: &[&str], next_word: &str) {
-        let target = self.vocab.intern(next_word);
+        let (target, evicted_target) = self.vocab.intern(next_word);
         if target == UNK {
             return;
+        }
+        if let Some(freed) = evicted_target {
+            self.reset_evicted_index(freed);
         }
 
         let (input, indices) = self.assemble_for_training(context);

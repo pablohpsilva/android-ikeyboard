@@ -303,7 +303,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Depends on:** nothing (leaf)
 - **Structs:** `Mlp`, `MlpMulti`
 - **Enums:** `NnError`
-- **Methods:** `Mlp::forward`, `Mlp::from_bytes`, `Mlp::from_linear`, `Mlp::inputs`, `Mlp::to_bytes`, `Mlp::train_step`, `Mlp::with_weights`, `MlpMulti::forward`, `MlpMulti::from_bytes`, `MlpMulti::hidden`, `MlpMulti::inputs`, `MlpMulti::outputs`, `MlpMulti::softmax`, `MlpMulti::to_bytes`, `MlpMulti::train_step`, `MlpMulti::with_weights`
+- **Methods:** `Mlp::forward`, `Mlp::from_bytes`, `Mlp::from_linear`, `Mlp::inputs`, `Mlp::to_bytes`, `Mlp::train_step`, `Mlp::with_weights`, `MlpMulti::forward`, `MlpMulti::from_bytes`, `MlpMulti::hidden`, `MlpMulti::inputs`, `MlpMulti::outputs`, `MlpMulti::reset_output_row`, `MlpMulti::softmax`, `MlpMulti::to_bytes`, `MlpMulti::train_step`, `MlpMulti::with_weights`
 - ⚠️ **No README.md** — add one (ARCHITECTURE.md §5.2 crate anatomy).
 
 ### featherkey-personalization
@@ -923,6 +923,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `MlpMulti::hidden` | method — `featherkey-nn` |
 | `MlpMulti::inputs` | method — `featherkey-nn` |
 | `MlpMulti::outputs` | method — `featherkey-nn` |
+| `MlpMulti::reset_output_row` | method — `featherkey-nn` |
 | `MlpMulti::softmax` | method — `featherkey-nn` |
 | `MlpMulti::to_bytes` | method — `featherkey-nn` |
 | `MlpMulti::train_step` | method — `featherkey-nn` |

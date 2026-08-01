@@ -79,6 +79,20 @@ fn det_val(seed: u64) -> f32 {
     (frac - 0.5) * 0.2 // [-0.1, 0.1)
 }
 
+/// The deterministic cold-start embedding row for vocab `index` — the exact
+/// `D` values [`NextWordLm::new`] seeds that row with when it builds the
+/// whole table. Shared by `new` (bulk init, every index) and
+/// [`NextWordLm::reset_evicted_index`] (a single index, after an eviction),
+/// so "what a fresh row looks like" has exactly one definition.
+fn det_embed_row(index: usize) -> [f32; D] {
+    let start = index.saturating_mul(D);
+    let mut row = [0.0_f32; D];
+    for (d, cell) in row.iter_mut().enumerate() {
+        *cell = det_val(start.saturating_add(d) as u64);
+    }
+    row
+}
+
 /// A tiny per-user embedding next-word language model. Cold-starts to a
 /// uniform, honest-confidence-zero state (see the module docs); `observe`
 /// (in the sibling `learn` module) trains it online.
@@ -114,7 +128,10 @@ impl NextWordLm {
     /// embeddings/`w1`/`b1` (see module docs for why the split matters).
     #[must_use]
     pub fn new() -> Self {
-        let embed = (0..OUTPUTS * D).map(|i| det_val(i as u64)).collect();
+        let mut embed = Vec::with_capacity(OUTPUTS * D);
+        for index in 0..OUTPUTS {
+            embed.extend_from_slice(&det_embed_row(index));
+        }
         let w1 = (0..H * INPUTS)
             .map(|i| det_val(W1_SEED_BASE + i as u64))
             .collect();
@@ -141,6 +158,18 @@ impl NextWordLm {
     pub(crate) fn new_frozen_embeddings_for_test() -> Self {
         let mut lm = Self::new();
         lm.freeze_embeddings = true;
+        lm
+    }
+
+    /// Test-only twin of [`NextWordLm::new`] with a small `Vocab` learned
+    /// ceiling (mirrors [`Vocab::with_capacity_for_test`]), so eviction —
+    /// and therefore [`NextWordLm::reset_evicted_index`] — can be exercised
+    /// without training thousands of words first. Never public API.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn new_with_vocab_ceiling_for_test(ceiling: usize) -> Self {
+        let mut lm = Self::new();
+        lm.vocab = Vocab::with_capacity_for_test(ceiling);
         lm
     }
 
@@ -216,11 +245,38 @@ impl NextWordLm {
     /// "going to work") still gets a stable, distinct vocab index and
     /// therefore a distinct, trainable embedding row. Without this, every
     /// never-a-target context word would collapse onto the same `UNK` row and
-    /// the model could never tell two such contexts apart.
+    /// the model could never tell two such contexts apart. When interning a
+    /// context word evicts another, [`NextWordLm::reset_evicted_index`] runs
+    /// *before* the freed index's row is read into the assembled input, so
+    /// this step's own input never contains a stale, evicted-word vector.
     pub(crate) fn assemble_for_training(&mut self, context: &[&str]) -> (Vec<f32>, Vec<usize>) {
         let (pad, tail) = split_context(context);
-        let indices = padded_indices(pad, tail, |word| self.vocab.intern(word));
+        let indices = padded_indices(pad, tail, |word| {
+            let (idx, evicted) = self.vocab.intern(word);
+            if let Some(freed) = evicted {
+                self.reset_evicted_index(freed);
+            }
+            idx
+        });
         (self.embed_rows(&indices), indices)
+    }
+
+    /// Reset vocab index `index`'s embedding row (back to the deterministic
+    /// cold-start value [`NextWordLm::new`] would have given it) and, via
+    /// `net`, its `MlpMulti` output row (back to zero — again matching
+    /// cold-start). Called whenever `Vocab::intern` reports `index` was just
+    /// freed by an eviction, so the new word taking over that index starts
+    /// from the same neutral state a genuinely fresh index would have,
+    /// rather than inheriting whatever the evicted word had trained there.
+    pub(crate) fn reset_evicted_index(&mut self, index: usize) {
+        let row = det_embed_row(index);
+        let start = index.saturating_mul(D);
+        for (d, &value) in row.iter().enumerate() {
+            if let Some(cell) = self.embed.get_mut(start + d) {
+                *cell = value;
+            }
+        }
+        self.net.reset_output_row(index);
     }
 
     /// Concatenate the embedding rows for `indices` into an `INPUTS`-length

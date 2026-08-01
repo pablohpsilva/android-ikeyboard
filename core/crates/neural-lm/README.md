@@ -20,17 +20,16 @@ doc comment on `model.rs`). `observe` trains the network (cross-entropy SGD
 via `featherkey_nn::MlpMulti::train_step`) and the `K` context embedding
 rows together, one step each per call — this is what lets a novel context
 generalise from what a similar one taught the model, not just memorise exact
-bigrams (see `learn/tests.rs`'s contamination guard). Encrypted persistence
-is deferred to a later task in the neural-lm-foundation plan.
-
-**Deferred:** a full-vocab eviction reuses the freed index for the new word
-(`Vocab::intern`) but does not yet reset that index's embedding row or
-`MlpMulti` output row back to a fresh cold-start value, so a newly-evicted-in
-word could start life with residual weights trained for the word it
-replaced. Not exercised by any current test (the 2000-word ceiling is far
-above what the SP1 test suite trains), and not a correctness hazard today —
-the row just retrains from wherever it was left, same as any other SGD step
-— but worth closing before eviction is expected to happen in practice.
+bigrams (see `learn/tests.rs`'s contamination guard). A full-vocab eviction
+reuses the freed index for the new word (`Vocab::intern` reports which index
+was freed); before that index is trained on, `observe` resets its embedding
+row (back to the same deterministic cold-start value `new()` would have
+given it) and, via `featherkey_nn::MlpMulti::reset_output_row`, its output
+row (back to zero) — so the new word starts from the same neutral state a
+genuinely fresh index would have, never wearing the evicted word's learned
+vector (see `learn/tests.rs::eviction_resets_the_reused_indexs_learned_state`).
+Encrypted persistence is deferred to a later task in the
+neural-lm-foundation plan.
 
 ## Ports
 

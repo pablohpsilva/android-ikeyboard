@@ -170,8 +170,17 @@ def _scan_rust_file(file: Path, module: str) -> tuple[list[dict], list[dict]]:
             # for the rest of the file. Detect that shape (no braces, not
             # another stacked attribute, ends the statement) and exit
             # immediately after it instead.
+            #
+            # This must only fire at `depth == test_depth` — i.e. the very
+            # first real line after the `#[cfg(test)]` attribute, still at
+            # the depth the attribute itself was seen at. Without that check
+            # it also matches brace-less statements *inside* a skipped
+            # `mod tests { ... }` block (e.g. `use super::*;` as the first
+            # statement), which would prematurely end the skip and leak the
+            # rest of that test module's items into the index.
             if (
-                not stripped.startswith("#[")
+                depth == test_depth
+                and not stripped.startswith("#[")
                 and "{" not in line
                 and "}" not in line
                 and stripped.endswith((",", ";"))

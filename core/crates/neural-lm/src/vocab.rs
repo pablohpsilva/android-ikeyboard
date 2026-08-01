@@ -104,34 +104,43 @@ impl Vocab {
         self.by_index.get(&index).map(String::as_str)
     }
 
-    /// Intern `word`, returning its stable index.
+    /// Intern `word`, returning its stable index and, when that index was
+    /// just freed by an eviction, `Some(index)` — the same index, repeated,
+    /// so a caller can tell "this index is reused, its previous occupant's
+    /// learned state (e.g. an embedding row) is now stale" apart from "this
+    /// index is either brand new or was already this word's, its state is
+    /// still valid" without a separate lookup. `None` in every other case:
     ///
     /// * A non-learnable token (per [`is_learnable`]) is never registered and
-    ///   always returns [`UNK`].
+    ///   always returns `(UNK, None)`.
     /// * An already-known word has its frequency bumped and its existing
-    ///   index returned (idempotent).
+    ///   index returned, unchanged (idempotent) — not an eviction.
+    /// * A new word under the ceiling gets a fresh, never-before-used index —
+    ///   not an eviction.
     /// * A new word past the ceiling evicts the least-frequent learned entry
-    ///   (ties broken by smallest index), reusing its freed index.
-    pub fn intern(&mut self, word: &str) -> usize {
+    ///   (ties broken by smallest index) and reuses its freed index — an
+    ///   eviction, so the second element is `Some` of that same index.
+    pub fn intern(&mut self, word: &str) -> (usize, Option<usize>) {
         // A zero ceiling means "learn nothing": short-circuit here so
         // `evict_least_frequent` is only ever called once at least one
         // learned entry is guaranteed to exist (see its doc comment).
         if !is_learnable(word) || self.learned_ceiling == 0 {
-            return UNK;
+            return (UNK, None);
         }
         if let Some(&(index, freq)) = self.by_word.get(word) {
             self.by_word
                 .insert(word.to_owned(), (index, freq.saturating_add(1)));
-            return index;
+            return (index, None);
         }
-        let index = if self.by_word.len() >= self.learned_ceiling {
-            self.evict_least_frequent()
+        let (index, evicted) = if self.by_word.len() >= self.learned_ceiling {
+            let index = self.evict_least_frequent();
+            (index, Some(index))
         } else {
-            FIRST_LEARNED_INDEX + self.by_word.len()
+            (FIRST_LEARNED_INDEX + self.by_word.len(), None)
         };
         self.by_word.insert(word.to_owned(), (index, 1));
         self.by_index.insert(index, word.to_owned());
-        index
+        (index, evicted)
     }
 
     /// Remove the least-frequent learned entry (ties -> smallest index) and
@@ -165,10 +174,11 @@ mod tests {
     #[test]
     fn intern_assigns_stable_indices_and_is_idempotent() {
         let mut v = Vocab::new();
-        let a = v.intern("cat");
-        assert_eq!(a, v.intern("cat")); // idempotent
+        let (a, evicted) = v.intern("cat");
+        assert_eq!(evicted, None); // a fresh index is not an eviction
+        assert_eq!((a, None), v.intern("cat")); // idempotent, still not an eviction
         assert!(a >= 2); // past reserved
-        assert_ne!(a, v.intern("dog"));
+        assert_ne!(a, v.intern("dog").0);
     }
 
     #[test]
@@ -180,21 +190,29 @@ mod tests {
     #[test]
     fn sub_two_char_and_separator_tokens_are_never_interned() {
         let mut v = Vocab::new();
-        assert_eq!(v.intern("a"), 0); // too short -> UNK, not registered
-        assert_eq!(v.intern("bad\ttok"), 0); // separator -> UNK
+        assert_eq!(v.intern("a"), (0, None)); // too short -> UNK, not registered
+        assert_eq!(v.intern("bad\ttok"), (0, None)); // separator -> UNK
     }
 
     #[test]
     fn eviction_removes_least_frequent_deterministically() {
         let mut v = Vocab::with_capacity_for_test(2); // ceiling = 2 learned
-        let rare = v.intern("aaa");
-        let common = v.intern("bbb");
+        let (rare, _) = v.intern("aaa");
+        let (common, _) = v.intern("bbb");
         v.intern("bbb"); // bump freq
-        let evicted = v.intern("ccc"); // must evict least-frequent "aaa"
+        let (evicted, freed) = v.intern("ccc"); // must evict least-frequent "aaa"
         assert_eq!(v.index_of("aaa"), 0); // gone -> UNK
         assert_eq!(evicted, rare); // reused the freed index
+        assert_eq!(freed, Some(rare)); // and reported it as an eviction
         assert!(v.index_of("bbb") >= 2 && v.index_of("ccc") >= 2);
         let _ = common;
+    }
+
+    #[test]
+    fn a_fresh_assignment_under_the_ceiling_is_not_reported_as_an_eviction() {
+        let mut v = Vocab::with_capacity_for_test(2);
+        let (_, freed) = v.intern("aaa"); // first of 2 -> room to spare
+        assert_eq!(freed, None);
     }
 
     #[test]
@@ -208,7 +226,7 @@ mod tests {
     #[test]
     fn a_zero_ceiling_registers_nothing_and_always_returns_unk() {
         let mut v = Vocab::with_capacity_for_test(0);
-        assert_eq!(v.intern("cat"), 0); // UNK, never registered
+        assert_eq!(v.intern("cat"), (0, None)); // UNK, never registered
         assert!(v.is_empty());
         assert_eq!(v.index_of("cat"), 0);
     }
@@ -225,7 +243,7 @@ mod tests {
     #[test]
     fn word_of_resolves_a_learned_index_back_to_its_word() {
         let mut v = Vocab::new();
-        let idx = v.intern("cat");
+        let (idx, _) = v.intern("cat");
         assert_eq!(v.word_of(idx), Some("cat"));
     }
 }
