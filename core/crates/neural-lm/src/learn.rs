@@ -63,6 +63,8 @@ impl NextWordLm {
             self.reset_evicted_index(freed);
         }
 
+        // At vocab ceiling, interning new context words below can evict the target just interned above.
+        // The target index is reassigned and reset (panic-free, self-correcting), but SP2 should be aware.
         let (input, indices) = self.assemble_for_training(context);
         let Ok((_loss, dinput)) = self.net.train_step(&input, target, LM_LR) else {
             return; // Shape race: target outgrew `outputs` — skip, don't panic.

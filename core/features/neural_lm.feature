@@ -14,9 +14,9 @@ Feature: On-device neural next-word language model (foundation)
 
   @BR-11
   Scenario: Generalises across similar contexts via embeddings
-    Given the model has learned "the cat", "a cat" and "the dog"
-    When I type "a"
-    Then "dog" is surfaced as a candidate after "a"
+    Given the model has learned "the cat", "an cat" and "the dog"
+    When I type "an"
+    Then "dog" is surfaced as a candidate after "an"
 
   @BR-10
   Scenario: A cold model asserts nothing
