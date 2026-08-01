@@ -103,12 +103,13 @@ impl KeyboardCore {
         prefix: String,
     ) -> Result<FfiCorrection, FfiError> {
         let _ = (&preceding, &prefix); // unused; names frozen for the bindings
-        let core = self.lock();
+        let mut core = self.lock();
         let c = core.choose_correction(&text, &[], Vec::new())?;
         Ok(FfiCorrection {
             primary: c.primary,
             alternatives: c.alternatives,
             applied: c.applied,
+            withheld: c.withheld,
         })
     }
 
@@ -291,7 +292,21 @@ impl KeyboardCore {
             primary: c.primary,
             alternatives: c.alternatives,
             applied: c.applied,
+            withheld: c.withheld,
         })
+    }
+
+    /// Train the neural autocorrect gate on the real-world `outcome` of the
+    /// last gated correction — unless `field` is sensitive (E-2 / BR-26), in
+    /// which case the gate is left untouched. A no-op if no correction has
+    /// been decided yet (core-side, mirrored from `observe_strip_pick`).
+    pub fn observe_autocorrect_outcome(
+        &self,
+        outcome: FfiAutocorrectOutcome,
+        field: std::sync::Arc<dyn SensitiveField>,
+    ) {
+        self.lock()
+            .observe_autocorrect_outcome(outcome.into(), &FieldSource(field.as_ref()));
     }
 
     /// Fold a committed word's recogniser languages into momentum. The shell must
@@ -336,5 +351,112 @@ mod tests {
         assert_eq!(c.lang, "es");
         assert_eq!(c.source, featherkey_contracts::Source::Device);
         assert_eq!(c.source_rank, 2);
+    }
+}
+
+/// Task 10: `observe_autocorrect_outcome` FFI surface + `FfiCorrection.withheld`.
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod autocorrect_outcome_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    struct Ordinary;
+    impl SensitiveField for Ordinary {
+        fn is_sensitive(&self) -> bool {
+            false
+        }
+    }
+
+    fn ordinary_ffi_field() -> Arc<dyn SensitiveField> {
+        Arc::new(Ordinary)
+    }
+
+    /// A high-confidence single-language fixture (mirrors `correct::rank_tests`):
+    /// "xat" is one substitution from the commonest word "cat", well above
+    /// `AUTOCORRECT_FLOOR`, so the gate applies it even at cold start.
+    fn ffi_core_en() -> Arc<KeyboardCore> {
+        let dir = tempfile::tempdir().expect("tempdir");
+        KeyboardCore::open(
+            dir.path().join("en.redb").to_string_lossy().into_owned(),
+            vec![7u8; 32],
+            vec![LanguagePack {
+                tag: "en".into(),
+                words: vec!["cat".into(), "dog".into(), "hat".into(), "bat".into()],
+            }],
+        )
+        .expect("open")
+    }
+
+    /// A deliberately-weak fixture (mirrors `correct::gate_tests::core_with_weak_only`)
+    /// whose winner earns no sticky bonus and sits under `AUTOCORRECT_FLOOR` once
+    /// `fr` is warmed by one observed word — so the winner is withheld.
+    fn ffi_core_weak() -> Arc<KeyboardCore> {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let core = KeyboardCore::open(
+            dir.path().join("weak.redb").to_string_lossy().into_owned(),
+            vec![7u8; 32],
+            vec![
+                LanguagePack {
+                    tag: "en".into(),
+                    words: vec!["hello".into()],
+                },
+                LanguagePack {
+                    tag: "de".into(),
+                    words: vec!["xoq".into()],
+                },
+                LanguagePack {
+                    tag: "fr".into(),
+                    words: vec!["xöz".into()],
+                },
+            ],
+        )
+        .expect("open");
+        core.observe_language(vec!["fr".into()]);
+        core
+    }
+
+    #[test]
+    fn ffi_forwards_the_autocorrect_outcome() {
+        let core = ffi_core_en();
+        let got = core
+            .choose_correction("xat".into(), vec![], vec![])
+            .expect("ok");
+        assert!(got.applied);
+        assert!(
+            got.withheld.is_none(),
+            "an applied correction withholds nothing"
+        );
+        // no panic; behaviour covered by the core test — this pins the FFI surface.
+        core.observe_autocorrect_outcome(FfiAutocorrectOutcome::Reverted, ordinary_ffi_field());
+    }
+
+    #[test]
+    fn a_withheld_correction_surfaces_the_withheld_word() {
+        let core = ffi_core_weak();
+        let got = core
+            .choose_correction("xöq".into(), vec![], vec![])
+            .expect("ok");
+        assert!(!got.applied);
+        assert_eq!(got.withheld.as_deref(), Some("xöz"));
+        // The outcome wrapper must not panic against a withheld decision either.
+        core.observe_autocorrect_outcome(FfiAutocorrectOutcome::Kept, ordinary_ffi_field());
+    }
+
+    #[test]
+    fn ffi_autocorrect_outcome_enum_maps_onto_the_core_outcome_1to1() {
+        use crate::correct::AutocorrectOutcome;
+        assert_eq!(
+            AutocorrectOutcome::from(FfiAutocorrectOutcome::Reverted),
+            AutocorrectOutcome::Reverted
+        );
+        assert_eq!(
+            AutocorrectOutcome::from(FfiAutocorrectOutcome::Kept),
+            AutocorrectOutcome::Kept
+        );
+        assert_eq!(
+            AutocorrectOutcome::from(FfiAutocorrectOutcome::Reached),
+            AutocorrectOutcome::Reached
+        );
     }
 }

@@ -1,0 +1,18 @@
+[package]
+name = "featherkey-autocorrect-gate"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Tiny per-user neural gate deciding whether to trust an autocorrect (bounded MLP residual over structural features)."
+
+[package.metadata.featherkey]
+layer = "domain"
+
+[lints]
+workspace = true
+
+[dependencies]
+featherkey-nn = { path = "../nn" }
+featherkey-contracts = { path = "../contracts" }

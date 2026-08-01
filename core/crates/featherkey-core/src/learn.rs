@@ -12,6 +12,7 @@
 //! not passive learning, so they are intentionally *not* gated — the user asked
 //! for that word to be remembered.
 
+use featherkey_autocorrect_gate::{AutocorrectGate, GATE_LR};
 use featherkey_context::Context;
 use featherkey_contracts::{SecureStore, SensitiveContextSource};
 use featherkey_corrections::Corrections;
@@ -20,6 +21,7 @@ use featherkey_neural_ranker::{NeuralRanker, RankFeatures};
 use featherkey_personalization::Personalization;
 use featherkey_touch_model::TouchModel;
 
+use crate::correct::{AutocorrectOutcome, KEPT_TARGET, REACHED_TARGET, REVERT_TARGET};
 use crate::error::FeatherKeyError;
 use crate::rank::PRIOR_COEFFS;
 use crate::FeatherKeyCore;
@@ -110,6 +112,27 @@ impl FeatherKeyCore {
             return;
         }
         self.corrections.note_unwanted(word);
+    }
+
+    /// Train the gate on `outcome` for the last correction — gated (BR-26).
+    pub fn observe_autocorrect_outcome(
+        &mut self,
+        outcome: AutocorrectOutcome,
+        field: &dyn SensitiveContextSource,
+    ) {
+        if self.sensitivity.should_suppress(field) {
+            return;
+        }
+        let Some(last) = self.last_correction.as_ref() else {
+            return;
+        };
+        let target = match outcome {
+            AutocorrectOutcome::Reverted => REVERT_TARGET,
+            AutocorrectOutcome::Kept => KEPT_TARGET,
+            AutocorrectOutcome::Reached => REACHED_TARGET,
+        };
+        self.autocorrect_gate
+            .reinforce(&last.features, target, GATE_LR);
     }
 
     /// Bulk-load pre-computed `(prev, next, count)` bigram transitions into the
@@ -226,6 +249,7 @@ impl FeatherKeyCore {
         self.context.persist(store)?;
         self.corrections.persist(store)?;
         self.neural_ranker.persist(store)?;
+        self.autocorrect_gate.persist(store)?;
         Ok(())
     }
 
@@ -241,6 +265,7 @@ impl FeatherKeyCore {
         self.context = Context::load(store)?;
         self.corrections = Corrections::load(store)?;
         self.neural_ranker = NeuralRanker::load(store, &PRIOR_COEFFS)?;
+        self.autocorrect_gate = AutocorrectGate::load(store)?;
         Ok(())
     }
 }
@@ -249,6 +274,7 @@ impl FeatherKeyCore {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use featherkey_autocorrect_gate::GateFeatures;
     use featherkey_contracts::Candidate;
     use featherkey_neural_ranker::RankFeatures;
 
@@ -257,6 +283,21 @@ mod tests {
         fn is_sensitive(&self) -> bool {
             false
         }
+    }
+
+    struct Sensitive;
+    impl SensitiveContextSource for Sensitive {
+        fn is_sensitive(&self) -> bool {
+            true
+        }
+    }
+
+    fn correction_core() -> FeatherKeyCore {
+        FeatherKeyCore::new(vec![(
+            "en".into(),
+            vec!["cat".into(), "dog".into(), "hat".into(), "bat".into()],
+        )])
+        .expect("core")
     }
 
     /// A core whose "te…" completions are `tea` < `team` < `teach`.
@@ -288,6 +329,18 @@ mod tests {
 
     fn probe_score(core: &FeatherKeyCore) -> f64 {
         core.neural_ranker().score(&probe())
+    }
+
+    /// A representative feature vector for the autocorrect gate (arbitrary
+    /// values that exercise every slot, so a weight change moves the residual).
+    fn gate_probe() -> GateFeatures {
+        GateFeatures {
+            edit_distance: 1.0,
+            winner_confidence: 0.6,
+            dict_rank_norm: 0.3,
+            typed_len_norm: 0.4,
+            momentum_weight: 0.1,
+        }
     }
 
     #[test]
@@ -391,5 +444,56 @@ mod tests {
         fk.reinforce_from_pick("te", "team");
 
         assert_eq!(before, probe_score(&fk), "no snapshot means no training");
+    }
+
+    #[test]
+    fn the_autocorrect_gate_survives_persist_and_restore() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = crate::RedbSecureStore::open(dir.path().join("gate.redb"), [11u8; 32])
+            .expect("open store");
+
+        // Drive one suppression so the gate diverges from its cold-start prior
+        // (Task 9 wires the real observe call; here the crate-internal field is
+        // reached directly, mirroring how the neural-ranker restore test reaches
+        // `neural_ranker()`).
+        let mut fk = core();
+        let f = gate_probe();
+        for _ in 0..50 {
+            fk.autocorrect_gate.reinforce(&f, -1.0, 0.05);
+        }
+        fk.persist(&store).expect("persist");
+
+        let mut restored = core();
+        restored.restore(&store).expect("restore");
+        assert!(
+            (restored.autocorrect_gate.residual(&f) - fk.autocorrect_gate.residual(&f)).abs()
+                < 1e-6,
+            "the gate's learned residual must survive persist -> restore"
+        );
+    }
+
+    #[test]
+    fn revert_suppresses_a_repeatedly_reverted_correction() {
+        let mut fk = correction_core();
+        let _ = fk.choose_correction("xat", &[], vec![]).expect("ok");
+        // The feature-sensitive prior converges smoothly: a strong correction
+        // crosses the floor in ~4 reverts (product-approved 3–5); 8 is the margin.
+        for _ in 0..8 {
+            let _ = fk.choose_correction("xat", &[], vec![]).expect("ok");
+            fk.observe_autocorrect_outcome(AutocorrectOutcome::Reverted, &Ordinary);
+        }
+        let got = fk.choose_correction("xat", &[], vec![]).expect("ok");
+        assert!(!got.applied, "the user's reverts pushed it under the floor");
+    }
+
+    #[test]
+    fn a_sensitive_field_records_nothing() {
+        let mut fk = correction_core();
+        let _ = fk.choose_correction("xat", &[], vec![]).expect("ok");
+        let features = fk.last_correction.as_ref().expect("cached").features;
+        let before = fk.autocorrect_gate.residual(&features);
+        fk.observe_autocorrect_outcome(AutocorrectOutcome::Reverted, &Sensitive);
+        let after = fk.autocorrect_gate.residual(&features);
+        assert_eq!(before, after, "gate must not change");
     }
 }

@@ -40,6 +40,9 @@ pub enum Namespace {
     /// Per-user neural re-ranker weights (sole writer: `featherkey-neural-ranker`
     /// via the composition root).
     RankerModel,
+    /// Neural autocorrect-gate model (sole writer: `featherkey-neural-autocorrect`
+    /// via the composition root).
+    AutocorrectGate,
 }
 
 impl Namespace {
@@ -53,6 +56,7 @@ impl Namespace {
             Namespace::Clipboard => "clipboard",
             Namespace::Corrections => "corrections",
             Namespace::RankerModel => "ranker_model",
+            Namespace::AutocorrectGate => "autocorrect_gate",
         }
     }
 }
@@ -159,6 +163,11 @@ pub struct Correction {
     pub alternatives: Vec<String>,
     /// Whether the primary differs from the typed token.
     pub applied: bool,
+    /// When a gate withheld an otherwise-available correction (`applied ==
+    /// false` but a winner existed), the winner it declined to apply — carried
+    /// to the shell for the counterfactual learning signal. `None` when nothing
+    /// was withheld (a correction applied, or there was no candidate to gate).
+    pub withheld: Option<String>,
 }
 
 /// What the **shell** knows about a token that the core cannot see: the device
@@ -233,6 +242,7 @@ mod tests {
             Namespace::Clipboard,
             Namespace::Corrections,
             Namespace::RankerModel,
+            Namespace::AutocorrectGate,
         ];
         let keys: Vec<&str> = all.iter().map(|n| n.as_str()).collect();
         assert_eq!(
@@ -243,7 +253,8 @@ mod tests {
                 "personal_lm",
                 "clipboard",
                 "corrections",
-                "ranker_model"
+                "ranker_model",
+                "autocorrect_gate"
             ]
         );
         // Distinct table names — no two namespaces collide in storage.
@@ -257,6 +268,11 @@ mod tests {
     #[test]
     fn ranker_model_namespace_key_is_stable() {
         assert_eq!(Namespace::RankerModel.as_str(), "ranker_model");
+    }
+
+    #[test]
+    fn autocorrect_gate_namespace_has_a_stable_key() {
+        assert_eq!(Namespace::AutocorrectGate.as_str(), "autocorrect_gate");
     }
 
     #[test]
@@ -333,6 +349,7 @@ mod tests {
                 primary: token.text.clone(),
                 alternatives: Vec::new(),
                 applied: false,
+                withheld: None,
             }
         }
     }
@@ -418,6 +435,7 @@ mod tests {
             primary: String::from("x"),
             alternatives: alloc::vec![String::from("y")],
             applied: true,
+            withheld: None,
         };
         assert_eq!(cor, cor.clone());
         assert_ne!(
@@ -425,7 +443,8 @@ mod tests {
             Correction {
                 primary: String::from("x"),
                 alternatives: Vec::new(),
-                applied: true
+                applied: true,
+                withheld: None
             }
         );
 

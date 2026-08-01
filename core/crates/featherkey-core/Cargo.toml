@@ -43,6 +43,7 @@ featherkey-secure-store = { path = "../secure-store" }
 featherkey-language-momentum = { path = "../language-momentum" }
 featherkey-candidate-ranker = { path = "../candidate-ranker" }
 featherkey-neural-ranker = { path = "../neural-ranker" }
+featherkey-autocorrect-gate = { path = "../autocorrect-gate" }
 
 [lints.rust]
 unsafe_code = "deny"

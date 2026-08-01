@@ -36,7 +36,7 @@ use featherkey_personalization::Personalization;
 
 mod rank;
 
-pub use rank::CORE_FUZZY_PRIOR;
+pub use rank::{AvailableCorrection, CorrectionAssessment, CORE_FUZZY_PRIOR};
 
 /// One active language's lexical substrate: its tag, its lexicon, and the
 /// **bundled frequency rank** of each word (`0` = commonest).
@@ -125,38 +125,83 @@ fn unchanged(word: &str) -> Correction {
         primary: word.to_owned(),
         alternatives: Vec::new(),
         applied: false,
+        withheld: None,
     }
 }
 
-impl AutoCorrect for NoClobberCorrector {
-    fn correct(&self, token: &Token, _ctx: &TypingContext, device: &DeviceHints) -> Correction {
+impl NoClobberCorrector {
+    /// Decide the same outcome as [`correct`](AutoCorrect::correct), but also
+    /// surface the winning candidate's own confidence, edit distance, language,
+    /// and bundled rank — the detail an autocorrect *gate* needs to weigh
+    /// whether to actually apply what `correct` would otherwise do
+    /// unconditionally. `correct` is a thin delegation to this method precisely
+    /// so the two can never drift.
+    #[must_use]
+    pub fn assess(
+        &self,
+        token: &Token,
+        _ctx: &TypingContext,
+        device: &DeviceHints,
+    ) -> CorrectionAssessment {
         let word = token.text.as_str();
-        // (1) BR-12: a word the user clearly intended is never clobbered.
+        // (1) BR-12: a word the user clearly intended is never clobbered, and
+        // there is nothing to gate.
         if self.is_intended(word, &device.known) {
-            return unchanged(word);
+            return CorrectionAssessment {
+                correction: unchanged(word),
+                available: None,
+            };
         }
         // (2) Candidates: all-language fuzzy (per-language frequency rank) ∪ the
         // device's own candidates.
         let cands = rank::gather_candidates(&self.packs, word, device.candidates.clone());
         if cands.is_empty() {
             // Nothing to offer: leave the token as typed rather than guess,
-            // keeping the no-clobber promise even for a non-word.
-            return unchanged(word);
+            // keeping the no-clobber promise even for a non-word. Again
+            // nothing to gate.
+            return CorrectionAssessment {
+                correction: unchanged(word),
+                available: None,
+            };
         }
         // (3) Score with the sticky-fix bonus, then take the winner + alternatives.
         let scored = rank::score_with_sticky(&cands, &self.packs, &self.momentum);
-        let winner = cands[scored[0].0].word.clone();
+        let winner_index = scored[0].0;
+        let winner = cands[winner_index].word.clone();
         let applied = winner != word;
         let alternatives = if applied {
             rank::distinct_alternatives(&scored, &cands, &winner)
         } else {
             Vec::new()
         };
-        Correction {
-            primary: if applied { winner } else { word.to_owned() },
+        // `applied == (winner != word)`, so when nothing is applied `winner`
+        // already equals the typed word — one clone serves both cases. `assess`
+        // /`correct` never withhold; the composition-root gate is what does.
+        let correction = Correction {
+            primary: winner.clone(),
             alternatives,
             applied,
+            withheld: None,
+        };
+        let available = applied.then(|| {
+            rank::available_correction(
+                &self.packs,
+                word,
+                &winner,
+                cands[winner_index].lang.clone(),
+                scored[0].1,
+            )
+        });
+        CorrectionAssessment {
+            correction,
+            available,
         }
+    }
+}
+
+impl AutoCorrect for NoClobberCorrector {
+    fn correct(&self, token: &Token, ctx: &TypingContext, device: &DeviceHints) -> Correction {
+        self.assess(token, ctx, device).correction
     }
 }
 
@@ -167,11 +212,18 @@ mod tests {
     use featherkey_locale_manager::LangId;
     use proptest::prelude::*;
 
-    /// A pack whose bundled rank follows the fixture's own order.
+    /// A pack whose bundled rank follows the fixture's own (frequency) order,
+    /// even when that differs from byte order: `dict` needs byte-sorted input
+    /// ([`Dictionary::from_sorted_words`]'s contract), so it is built from a
+    /// sorted copy, while `rank` is keyed off `words`' original position —
+    /// exactly mirroring how the real composition root treats bundled asset
+    /// order (`LexiconPack`'s own doc comment) versus the byte-sorted `fst`.
     fn pack(tag: &str, words: &[&str]) -> LexiconPack {
+        let mut sorted: Vec<&str> = words.to_vec();
+        sorted.sort_unstable();
         LexiconPack {
             lang: tag.to_owned(),
-            dict: dict(words),
+            dict: dict(&sorted),
             rank: words
                 .iter()
                 .enumerate()
@@ -352,6 +404,34 @@ mod tests {
         // missing_debug_implementations is a workspace lint; prove Debug renders.
         let c = corrector_over(&["cat"]);
         assert!(format!("{c:?}").contains("NoClobberCorrector"));
+    }
+
+    // --- assess(): surfacing the winner's confidence for the gate ------------
+
+    #[test]
+    fn assess_reports_no_available_correction_for_a_known_word() {
+        let c = corrector_over(&["hello"]);
+        let a = c.assess(
+            &token("hello"),
+            &TypingContext::default(),
+            &DeviceHints::default(),
+        );
+        assert!(a.available.is_none());
+        assert!(!a.correction.applied);
+    }
+
+    #[test]
+    fn assess_reports_the_winner_and_a_finite_confidence_for_a_typo() {
+        let c = corrector_over(&["cat", "hat", "bat"]);
+        let a = c.assess(
+            &token("xat"),
+            &TypingContext::default(),
+            &DeviceHints::default(),
+        );
+        let av = a.available.expect("a correction is available");
+        assert_eq!(av.winner, "cat");
+        assert!(av.winner_confidence.is_finite());
+        assert_eq!(av.edit_distance, 1);
     }
 
     // --- MANDATORY property test (ARCH §8): the BR-12 no-clobber invariant -----

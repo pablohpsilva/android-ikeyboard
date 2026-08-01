@@ -16,8 +16,7 @@
 //! actual `#[uniffi::export]` scaffolding and Kotlin-binding generation are
 //! applied in Wave 5 (ADR-18): the workspace forbids `unsafe`, which UniFFI's
 //! generated scaffolding requires, and binding generation needs the Android NDK.
-//! Keeping the surface FFI-shaped now means Wave 5 annotates, it does not
-//! redesign.
+//! Keeping the surface FFI-shaped now means Wave 5 annotates, it does not redesign.
 //!
 //! # E-2 — sensitive-context ordering (BR-26)
 //! Every learning entry point ([`FeatherKeyCore::learn_word`],
@@ -40,6 +39,7 @@ mod ffi;
 #[cfg(feature = "uniffi")]
 uniffi::setup_scaffolding!();
 
+pub use crate::correct::AutocorrectOutcome;
 pub use crate::error::FeatherKeyError;
 
 // Re-exported so the shell depends only on this façade, never on the internal
@@ -51,6 +51,7 @@ pub use featherkey_contracts::{
 pub use featherkey_layout_engine::{LatinLayout, Layout, LayoutKind};
 pub use featherkey_secure_store::RedbSecureStore;
 
+use featherkey_autocorrect_gate::AutocorrectGate;
 use featherkey_context::Context;
 use featherkey_contracts::Predictor;
 use featherkey_corrections::Corrections;
@@ -62,6 +63,7 @@ use featherkey_locale_manager::LangId;
 use featherkey_neural_ranker::NeuralRanker;
 use featherkey_personalization::Personalization;
 
+use crate::correct::LastCorrection;
 use crate::packs::{build_packs, primary_tag, Pack};
 use crate::rank::PRIOR_COEFFS;
 use crate::rank_features::RankSnapshot;
@@ -141,10 +143,15 @@ pub struct FeatherKeyCore {
     /// survives language switches; scores the suggestion strip in
     /// [`rank_suggestions`](Self::rank_suggestions).
     neural_ranker: NeuralRanker,
+    /// The tiny per-user autocorrect gate (cold-start prior, persisted under
+    /// `AutocorrectGate`); `pub(crate)` so the correction use-case reaches it.
+    pub(crate) autocorrect_gate: AutocorrectGate,
     /// The most recent ranked query's shown set (words + the features that ranked
     /// them), bounded to one snapshot. Written by every `rank_suggestions`; read
     /// by the pairwise trainer (reinforce-from-pick) in `learn.rs`.
     last_ranked: Option<RankSnapshot>,
+    /// The most recent gated correction decision, read by the gate trainer.
+    last_correction: Option<LastCorrection>,
     /// Active languages, each with its validated lexicon, in preference order.
     packs: Vec<Pack>,
     sensitivity: SensitivityPolicy,
@@ -188,7 +195,9 @@ impl FeatherKeyCore {
             context: Context::new(),
             corrections: Corrections::new(),
             neural_ranker: NeuralRanker::from_prior(&PRIOR_COEFFS),
+            autocorrect_gate: AutocorrectGate::from_prior(),
             last_ranked: None,
+            last_correction: None,
             packs,
             sensitivity: SensitivityPolicy::new(),
             momentum: Momentum::new(&primary, &tags),
