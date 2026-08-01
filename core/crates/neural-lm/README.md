@@ -9,10 +9,15 @@ no I/O, no clock, no RNG, no global state of its own.
 
 ## Status
 
-This slice (SP1) builds only `Vocab`: a deterministic, capacity-bounded
-word↔index map with reserved `UNK`/`BOS` indices and least-frequent
-eviction. The `NextWordLm` itself, and its persistence, are deferred to
-later tasks in the neural-lm-foundation plan.
+This slice (SP1) has `Vocab` — a deterministic, capacity-bounded word↔index
+map with reserved `UNK`/`BOS` indices and least-frequent eviction — and
+`NextWordLm`'s cold-start init plus next-word inference (`score_next`,
+`rank_next`, `confidence`). A fresh model is uniform and asserts nothing:
+only the output layer (`w2`/`b2`) is zero-initialised; the embedding table
+and `w1`/`b1` are non-zero and deterministic so the model stays trainable
+(see the cold-start doc comment on `model.rs`). Online training (`observe`)
+and encrypted persistence are deferred to later tasks in the
+neural-lm-foundation plan.
 
 ## Ports
 

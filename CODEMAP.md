@@ -272,9 +272,9 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **One job:** Own the bounded per-user `Vocab` (word ↔ index map) that a tiny on-device embedding next-word LM trains and predicts over.
 - **Depends on:** `featherkey-context`, `featherkey-contracts`, `featherkey-nn`
 - **Serves:** BR-11
-- **Structs:** `Vocab`
+- **Structs:** `NextWordLm`, `Vocab`
 - **Constants:** `BOS` *(internal)*, `MAX_VOCAB` *(internal)*, `UNK` *(internal)*
-- **Methods:** `Vocab::index_of`, `Vocab::intern`, `Vocab::is_empty`, `Vocab::len`, `Vocab::new`, `Vocab::word_of`
+- **Methods:** `NextWordLm::confidence`, `NextWordLm::new`, `NextWordLm::rank_next`, `NextWordLm::score_next`, `Vocab::index_of`, `Vocab::intern`, `Vocab::is_empty`, `Vocab::len`, `Vocab::new`, `Vocab::word_of`
 
 ### featherkey-neural-ranker
 
@@ -944,6 +944,11 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `NeuralRanker::persist` | method — `featherkey-neural-ranker` |
 | `NeuralRanker::reinforce` | method — `featherkey-neural-ranker` |
 | `NeuralRanker::score` | method — `featherkey-neural-ranker` |
+| `NextWordLm` | struct — `featherkey-neural-lm::model` |
+| `NextWordLm::confidence` | method — `featherkey-neural-lm` |
+| `NextWordLm::new` | method — `featherkey-neural-lm` |
+| `NextWordLm::rank_next` | method — `featherkey-neural-lm` |
+| `NextWordLm::score_next` | method — `featherkey-neural-lm` |
 | `NnError` | enum — `featherkey-nn::error` |
 | `NoClobberCorrector` | struct — `featherkey-autocorrect` |
 | `NoClobberCorrector::assess` | method — `featherkey-autocorrect` |
