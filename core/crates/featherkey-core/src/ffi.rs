@@ -17,6 +17,7 @@ use std::sync::Mutex;
 
 use featherkey_secure_store::RedbSecureStore;
 
+use crate::packs::LangInput;
 use crate::FeatherKeyCore;
 
 mod ffi_types;
@@ -64,8 +65,15 @@ impl KeyboardCore {
     ) -> Result<std::sync::Arc<Self>, FfiError> {
         let key: [u8; 32] = device_key.try_into().map_err(|_| FfiError::BadKeyLength)?;
         let store = RedbSecureStore::open(&db_path, key).map_err(|_| FfiError::StoreOpen)?;
-        let langs = languages.into_iter().map(|p| (p.tag, p.words)).collect();
-        let mut core = FeatherKeyCore::new(langs)?;
+        let langs = languages
+            .into_iter()
+            .map(|p| LangInput {
+                tag: p.tag,
+                words: p.words,
+                proper: p.proper,
+            })
+            .collect();
+        let mut core = FeatherKeyCore::new_with_proper(langs)?;
         // Best-effort reload; an absent blob is a clean first run (returns Ok).
         core.restore(&store)?;
         Ok(std::sync::Arc::new(Self {
@@ -124,6 +132,13 @@ impl KeyboardCore {
     ) {
         let mut core = self.lock();
         core.learn_word(&preceding, &word, &FieldSource(field.as_ref()));
+    }
+
+    /// The canonical proper-noun spelling to apply for `word` at a word boundary,
+    /// or `None` to leave it as typed (BR-69). `is_sentence_start` hands the
+    /// position to auto-capitalization.
+    pub fn proper_case(&self, word: String, is_sentence_start: bool) -> Option<String> {
+        self.lock().proper_case(&word, is_sentence_start)
     }
 
     /// The whole suggestion-strip blend, core-owned: predictor completions +
@@ -253,8 +268,15 @@ impl KeyboardCore {
 
     /// Replace the active language set atomically.
     pub fn set_active_languages(&self, languages: Vec<LanguagePack>) -> Result<(), FfiError> {
-        let langs = languages.into_iter().map(|p| (p.tag, p.words)).collect();
-        self.lock().set_active_languages(langs)?;
+        let langs = languages
+            .into_iter()
+            .map(|p| LangInput {
+                tag: p.tag,
+                words: p.words,
+                proper: p.proper,
+            })
+            .collect();
+        self.lock().set_active_languages_with_proper(langs)?;
         Ok(())
     }
 
@@ -383,6 +405,7 @@ mod autocorrect_outcome_tests {
             vec![LanguagePack {
                 tag: "en".into(),
                 words: vec!["cat".into(), "dog".into(), "hat".into(), "bat".into()],
+                proper: vec![],
             }],
         )
         .expect("open")
@@ -400,14 +423,17 @@ mod autocorrect_outcome_tests {
                 LanguagePack {
                     tag: "en".into(),
                     words: vec!["hello".into()],
+                    proper: vec![],
                 },
                 LanguagePack {
                     tag: "de".into(),
                     words: vec!["xoq".into()],
+                    proper: vec![],
                 },
                 LanguagePack {
                     tag: "fr".into(),
                     words: vec!["xöz".into()],
+                    proper: vec![],
                 },
             ],
         )

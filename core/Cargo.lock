@@ -422,6 +422,7 @@ dependencies = [
  "featherkey-neural-tap",
  "featherkey-personalization",
  "featherkey-prediction",
+ "featherkey-propercase",
  "featherkey-secure-store",
  "featherkey-sensitive-context",
  "featherkey-tap-sequence",
@@ -555,6 +556,13 @@ dependencies = [
  "featherkey-context",
  "featherkey-contracts",
  "featherkey-dictionary",
+ "featherkey-fold",
+]
+
+[[package]]
+name = "featherkey-propercase"
+version = "0.0.0"
+dependencies = [
  "featherkey-fold",
 ]
 

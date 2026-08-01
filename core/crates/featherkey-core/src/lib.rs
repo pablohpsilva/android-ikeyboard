@@ -29,6 +29,7 @@ mod correct;
 mod error;
 mod learn;
 mod packs;
+mod propercase;
 mod rank;
 mod rank_features;
 mod recent;
@@ -67,7 +68,7 @@ use featherkey_neural_tap::TapWarp;
 use featherkey_personalization::Personalization;
 
 use crate::correct::LastCorrection;
-use crate::packs::{build_packs, primary_tag, Pack};
+use crate::packs::{build_packs, primary_tag, LangInput, Pack};
 use crate::rank::PRIOR_COEFFS;
 use crate::rank_features::RankSnapshot;
 use crate::recent::RecentWords;
@@ -185,6 +186,9 @@ pub struct FeatherKeyCore {
     /// commit path alongside `lm.observe`, and read in `rank_suggestions` to
     /// build the LM's next-word context.
     recent: RecentWords,
+    /// Cached merged proper-noun set (bundled + personal), rebuilt lazily and
+    /// invalidated on language or personal-set changes (BR-69).
+    proper_caser: Option<featherkey_propercase::ProperCaser>,
 }
 
 impl FeatherKeyCore {
@@ -202,6 +206,16 @@ impl FeatherKeyCore {
     /// - [`FeatherKeyError::NoLanguages`] if `languages` is empty.
     /// - [`FeatherKeyError::Locale`] if two languages share a tag.
     pub fn new(languages: Vec<(String, Vec<String>)>) -> Result<Self, FeatherKeyError> {
+        Self::new_with_proper(languages.into_iter().map(LangInput::from).collect())
+    }
+
+    /// As [`Self::new`], but each language may also carry a canonical-cased
+    /// proper-noun list (BR-69). The FFI constructor uses this; the plain
+    /// `(tag, words)` [`Self::new`] delegates here with empty proper lists.
+    ///
+    /// # Errors
+    /// Same conditions as [`Self::new`].
+    pub(crate) fn new_with_proper(languages: Vec<LangInput>) -> Result<Self, FeatherKeyError> {
         let packs = build_packs(languages)?;
         let primary = primary_tag(&packs);
         let tags: Vec<String> = packs.iter().map(|p| p.lang.as_str().to_owned()).collect();
@@ -224,6 +238,7 @@ impl FeatherKeyCore {
             latin_override: None,
             lm: NextWordLm::new(),
             recent: RecentWords::new(),
+            proper_caser: None,
         })
     }
 
@@ -237,7 +252,21 @@ impl FeatherKeyCore {
         &mut self,
         languages: Vec<(String, Vec<String>)>,
     ) -> Result<(), FeatherKeyError> {
+        self.set_active_languages_with_proper(languages.into_iter().map(LangInput::from).collect())
+    }
+
+    /// As [`Self::set_active_languages`], with per-language canonical-cased
+    /// proper-noun lists (BR-69). Invalidates the cached proper-noun set.
+    ///
+    /// # Errors
+    /// Same conditions as [`Self::new`].
+    pub(crate) fn set_active_languages_with_proper(
+        &mut self,
+        languages: Vec<LangInput>,
+    ) -> Result<(), FeatherKeyError> {
         self.packs = build_packs(languages)?;
+        // The bundled proper-noun set changed with the language set.
+        self.proper_caser = None;
         // The alpha script follows the (new) primary language.
         let primary = primary_tag(&self.packs);
         let tags: Vec<String> = self

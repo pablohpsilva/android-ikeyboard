@@ -13,7 +13,10 @@ fn common(words: &'static [&'static str]) -> impl Fn(&str) -> bool {
 #[test]
 fn known_proper_noun_typed_lowercase_is_capitalized() {
     let c = ProperCaser::new(["Paris"], std::iter::empty::<&str>());
-    assert_eq!(c.case("paris", false, &common(&[])), Some("Paris".to_owned()));
+    assert_eq!(
+        c.case("paris", false, &common(&[])),
+        Some("Paris".to_owned())
+    );
 }
 
 // @BR-69 — A word that is also a common lowercase word is left alone

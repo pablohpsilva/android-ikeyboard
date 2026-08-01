@@ -16,6 +16,8 @@ pub struct LanguagePack {
     pub tag: String,
     /// Words in non-decreasing (sorted) order — see `Dictionary` contract.
     pub words: Vec<String>,
+    /// Canonical-cased proper nouns for this language (BR-69). Unordered.
+    pub proper: Vec<String>,
 }
 
 /// A decoded key candidate for the shell to render.

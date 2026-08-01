@@ -94,8 +94,12 @@ fn is_eligible(word: &str, lower: &str) -> bool {
 mod tests {
     use super::*;
 
-    fn never(_: &str) -> bool { false }
-    fn always(_: &str) -> bool { true }
+    fn never(_: &str) -> bool {
+        false
+    }
+    fn always(_: &str) -> bool {
+        true
+    }
 
     fn caser(words: &[&str]) -> ProperCaser {
         ProperCaser::new(words.iter().copied(), std::iter::empty::<&str>())

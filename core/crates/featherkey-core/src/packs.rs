@@ -31,6 +31,30 @@ pub(crate) struct Pack {
     pub(crate) dict: Dictionary,
     /// `word -> rank` (`0` = commonest). A word absent here sorts last.
     pub(crate) rank: HashMap<String, u32>,
+    /// Canonical-cased proper nouns for this language (BR-69). Kept verbatim
+    /// (not sorted into the `fst`) — the propercase lookup folds them itself.
+    pub(crate) proper: Vec<String>,
+}
+
+/// One active language as handed to the core builder: tag + frequency-ordered
+/// lexicon words + canonical-cased proper nouns (BR-69). A plain `(tag, words)`
+/// pair converts in with an empty proper list, so existing callers are
+/// unaffected.
+#[derive(Debug, Clone)]
+pub(crate) struct LangInput {
+    pub(crate) tag: String,
+    pub(crate) words: Vec<String>,
+    pub(crate) proper: Vec<String>,
+}
+
+impl From<(String, Vec<String>)> for LangInput {
+    fn from((tag, words): (String, Vec<String>)) -> Self {
+        Self {
+            tag,
+            words,
+            proper: Vec::new(),
+        }
+    }
 }
 
 /// Validate a `(tag, words)` language list into lexicon packs, recording each
@@ -43,11 +67,9 @@ pub(crate) struct Pack {
 /// bundled commonness survives sorting. A repeated word keeps its earliest (most
 /// frequent) position. The set is still validated as non-empty with no duplicate
 /// tag; ordering is no longer a rejection reason (the core sorts internally).
-pub(crate) fn build_packs(
-    languages: Vec<(String, Vec<String>)>,
-) -> Result<Vec<Pack>, FeatherKeyError> {
+pub(crate) fn build_packs(languages: Vec<LangInput>) -> Result<Vec<Pack>, FeatherKeyError> {
     let mut packs = Vec::with_capacity(languages.len());
-    for (tag, words) in languages {
+    for LangInput { tag, words, proper } in languages {
         let mut rank: HashMap<String, u32> = HashMap::with_capacity(words.len());
         for (position, word) in words.iter().enumerate() {
             // First (most-frequent) occurrence wins; `position` never exceeds the
@@ -64,6 +86,7 @@ pub(crate) fn build_packs(
             lang: LangId::new(tag),
             dict,
             rank,
+            proper,
         });
     }
     // Build a real LocaleManager purely to validate the set — it rejects an

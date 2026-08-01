@@ -790,6 +790,8 @@ internal open class UniffiVTableCallbackInterfaceSensitiveField(
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -848,6 +850,8 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_featherkey_core_fn_method_keyboardcore_persist(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_featherkey_core_fn_method_keyboardcore_proper_case(`ptr`: Pointer,`word`: RustBuffer.ByValue,`isSentenceStart`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_featherkey_core_fn_method_keyboardcore_rank(`ptr`: Pointer,`candidates`: RustBuffer.ByValue,`k`: Int,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_featherkey_core_fn_method_keyboardcore_rank_suggestions(`ptr`: Pointer,`preceding`: RustBuffer.ByValue,`prefix`: RustBuffer.ByValue,`device`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1018,6 +1022,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_persist(
     ): Short
+    fun uniffi_featherkey_core_checksum_method_keyboardcore_proper_case(
+    ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_rank(
     ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_rank_suggestions(
@@ -1103,6 +1109,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_persist() != 3164.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_proper_case() != 65062.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_rank() != 44508.toShort()) {
@@ -1593,6 +1602,13 @@ public interface KeyboardCoreInterface {
     fun `persist`()
     
     /**
+     * The canonical proper-noun spelling to apply for `word` at a word boundary,
+     * or `None` to leave it as typed (BR-69). `is_sentence_start` hands the
+     * position to auto-capitalization.
+     */
+    fun `properCase`(`word`: kotlin.String, `isSentenceStart`: kotlin.Boolean): kotlin.String?
+    
+    /**
      * Rank shell-gathered candidates with current language momentum.
      */
     fun `rank`(`candidates`: List<FfiRankCandidate>, `k`: kotlin.UInt): List<FfiRanked>
@@ -1975,6 +1991,23 @@ open class KeyboardCore: Disposable, AutoCloseable, KeyboardCoreInterface {
 }
     }
     
+    
+
+    
+    /**
+     * The canonical proper-noun spelling to apply for `word` at a word boundary,
+     * or `None` to leave it as typed (BR-69). `is_sentence_start` hands the
+     * position to auto-capitalization.
+     */override fun `properCase`(`word`: kotlin.String, `isSentenceStart`: kotlin.Boolean): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_featherkey_core_fn_method_keyboardcore_proper_case(
+        it, FfiConverterString.lower(`word`),FfiConverterBoolean.lower(`isSentenceStart`),_status)
+}
+    }
+    )
+    }
     
 
     
@@ -2883,7 +2916,11 @@ data class LanguagePack (
     /**
      * Words in non-decreasing (sorted) order — see `Dictionary` contract.
      */
-    var `words`: List<kotlin.String>
+    var `words`: List<kotlin.String>, 
+    /**
+     * Canonical-cased proper nouns for this language (BR-69). Unordered.
+     */
+    var `proper`: List<kotlin.String>
 ) {
     
     companion object
@@ -2897,17 +2934,20 @@ public object FfiConverterTypeLanguagePack: FfiConverterRustBuffer<LanguagePack>
         return LanguagePack(
             FfiConverterString.read(buf),
             FfiConverterSequenceString.read(buf),
+            FfiConverterSequenceString.read(buf),
         )
     }
 
     override fun allocationSize(value: LanguagePack) = (
             FfiConverterString.allocationSize(value.`tag`) +
-            FfiConverterSequenceString.allocationSize(value.`words`)
+            FfiConverterSequenceString.allocationSize(value.`words`) +
+            FfiConverterSequenceString.allocationSize(value.`proper`)
     )
 
     override fun write(value: LanguagePack, buf: ByteBuffer) {
             FfiConverterString.write(value.`tag`, buf)
             FfiConverterSequenceString.write(value.`words`, buf)
+            FfiConverterSequenceString.write(value.`proper`, buf)
     }
 }
 
