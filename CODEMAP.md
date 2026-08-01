@@ -281,7 +281,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Serves:** BR-11, BR-13
 - **Structs:** `TapWarp`
 - **Constants:** `INPUTS`, `WARP_BOUND`, `WARP_LR`
-- **Methods:** `TapWarp::from_prior`, `TapWarp::reinforce`, `TapWarp::warp`
+- **Methods:** `TapWarp::from_prior`, `TapWarp::load`, `TapWarp::persist`, `TapWarp::reinforce`, `TapWarp::warp`
 
 ### featherkey-nn
 
@@ -1010,6 +1010,8 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `TapSequence::truncate` | method — `featherkey-tap-sequence` |
 | `TapWarp` | struct — `featherkey-neural-tap` |
 | `TapWarp::from_prior` | method — `featherkey-neural-tap` |
+| `TapWarp::load` | method — `featherkey-neural-tap` |
+| `TapWarp::persist` | method — `featherkey-neural-tap` |
 | `TapWarp::reinforce` | method — `featherkey-neural-tap` |
 | `TapWarp::warp` | method — `featherkey-neural-tap` |
 | `Token` | struct — `featherkey-contracts` |

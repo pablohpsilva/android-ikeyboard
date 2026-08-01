@@ -3,6 +3,8 @@
 
 use featherkey_nn::Mlp;
 
+mod persist;
+
 /// Position inputs: normalized (x, y).
 pub const INPUTS: usize = 2;
 /// Max per-axis shift in logical px — a warp can never fling a tap across keys.
