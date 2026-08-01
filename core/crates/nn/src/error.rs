@@ -10,12 +10,16 @@ use core::fmt;
 pub enum NnError {
     /// The serialized model blob is corrupt or unreadable.
     Blob,
+    /// A caller-supplied shape (e.g. a `target` class index) does not fit
+    /// the model's declared dimensions.
+    Shape,
 }
 
 impl fmt::Display for NnError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Blob => f.write_str("neural model blob is corrupt or unreadable"),
+            Self::Shape => f.write_str("shape does not match the model's dimensions"),
         }
     }
 }
@@ -33,5 +37,16 @@ mod tests {
         assert_eq!(e.clone(), NnError::Blob);
         assert_eq!(format!("{e}"), "neural model blob is corrupt or unreadable");
         assert_eq!(format!("{e:?}"), "Blob");
+    }
+
+    #[test]
+    fn shape_is_cloneable_comparable_and_displayable() {
+        let e = NnError::Shape;
+        assert_eq!(e.clone(), NnError::Shape);
+        assert_eq!(
+            format!("{e}"),
+            "shape does not match the model's dimensions"
+        );
+        assert_eq!(format!("{e:?}"), "Shape");
     }
 }

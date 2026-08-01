@@ -9,10 +9,13 @@
 /// output, `b2` is `[outputs]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MlpMulti {
-    w1: Vec<f32>, // [hidden * inputs], row-major by hidden unit
-    b1: Vec<f32>, // [hidden]
-    w2: Vec<f32>, // [outputs * hidden], row-major by output
-    b2: Vec<f32>, // [outputs]
+    // `pub(crate)`: the `multi_train` sibling module backpropagates through
+    // this net and applies SGD updates directly to these, mirroring how
+    // `Mlp::train_step` (in `train.rs`) mutates `Mlp`'s fields in place.
+    pub(crate) w1: Vec<f32>, // [hidden * inputs], row-major by hidden unit
+    pub(crate) b1: Vec<f32>, // [hidden]
+    pub(crate) w2: Vec<f32>, // [outputs * hidden], row-major by output
+    pub(crate) b2: Vec<f32>, // [outputs]
     inputs: usize,
     hidden: usize,
     outputs: usize,
@@ -61,7 +64,14 @@ impl MlpMulti {
     /// truncated via zipped iteration, never a panic.
     #[must_use]
     pub fn forward(&self, x: &[f32]) -> Vec<f32> {
-        let h = self.hidden_activations(x);
+        let (h, _pre) = self.hidden_activations(x);
+        self.output_layer(&h)
+    }
+
+    /// Output layer over already-computed hidden activations `h`. Split out
+    /// of `forward` so `multi_train::train_step` can reuse it without
+    /// recomputing the hidden pass a second time.
+    pub(crate) fn output_layer(&self, h: &[f32]) -> Vec<f32> {
         self.w2
             .chunks(self.hidden.max(1))
             .zip(self.b2.iter())
@@ -73,18 +83,21 @@ impl MlpMulti {
             .collect()
     }
 
-    /// Hidden activations (ReLU). Iterates via zipped slices so a length
-    /// mismatch is truncated, never a panic.
-    fn hidden_activations(&self, x: &[f32]) -> Vec<f32> {
+    /// Hidden activations and pre-activations (`pre` reused by backprop in
+    /// `multi_train`, mirroring `Mlp::hidden_activations`). Iterates via
+    /// zipped slices so a length mismatch is truncated, never a panic.
+    pub(crate) fn hidden_activations(&self, x: &[f32]) -> (Vec<f32>, Vec<f32>) {
         let mut h = Vec::with_capacity(self.hidden);
+        let mut pre = Vec::with_capacity(self.hidden);
         for (row, &bias) in self.w1.chunks(self.inputs.max(1)).zip(self.b1.iter()) {
             let z = row
                 .iter()
                 .zip(x.iter())
                 .fold(bias, |acc, (w, xi)| acc + w * xi);
+            pre.push(z);
             h.push(if z > 0.0 { z } else { 0.0 });
         }
-        h
+        (h, pre)
     }
 
     /// Numerically-stable softmax: subtracts the max logit before `exp`, then
