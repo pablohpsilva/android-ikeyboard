@@ -104,6 +104,12 @@ class FeatherKeyBridge private constructor(private val core: KeyboardCore) : Aut
     fun properCase(word: String, isSentenceStart: Boolean): String? =
         core.properCase(word, isSentenceStart)
 
+    /** Record [word] as a habitual mid-sentence proper noun (BR-69). The core
+     *  gates it on consent + field sensitivity, so this is safe to call for
+     *  every committed word. */
+    fun observeProperNoun(word: String, isSentenceStart: Boolean, field: FieldSensitivity) =
+        core.observeProperNoun(word, isSentenceStart, field.asForeign())
+
     /**
      * Rank the suggestion strip in one core call. With a non-empty [prefix] the
      * core returns predictor completions + [device] candidates blended by

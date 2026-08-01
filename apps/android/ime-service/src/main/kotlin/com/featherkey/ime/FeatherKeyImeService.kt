@@ -787,7 +787,11 @@ class FeatherKeyImeService : InputMethodService() {
             // im → I'm); only if that finds nothing do we fall back to the core's
             // edit-distance typo fix — otherwise a contraction like "ive" would be
             // "corrected" to a near lexicon word ("ice") before it could become "I've".
-            val out = properCase(ic, word) ?: accentUpgrade(word) ?: correctedWord(word) ?: word
+            // Compute the word's sentence position ONCE, before any delete/commit
+            // mutates the field — reused for both the proper-case decision and the
+            // habit-learning signal below.
+            val sentenceStart = precedingIsSentenceStart(ic, word)
+            val out = properCase(word, sentenceStart) ?: accentUpgrade(word) ?: correctedWord(word) ?: word
             if (out != word) {
                 ic.deleteSurroundingText(word.length, 0)
                 ic.commitText(out, 1)
@@ -806,6 +810,13 @@ class FeatherKeyImeService : InputMethodService() {
                 if (reached != null) emitOutcome(reached)
             }
             learnWord(out)
+            // Learn the committed form as a habitual proper noun if the user
+            // capitalized it mid-sentence (BR-69). The core re-checks title-case,
+            // sentence position, common-word, and sensitivity; the shell mirrors
+            // the learnWord gate to skip a needless FFI call when learning is off.
+            if (!field.isSensitive() && learningEnabled) {
+                runCatching { bridge?.observeProperNoun(out, sentenceStart, field) }
+            }
         }
         ic.commitText(" ", 1)
         pending.clear()
@@ -865,9 +876,8 @@ class FeatherKeyImeService : InputMethodService() {
      * began a sentence so auto-caps keeps that position. Null-safe: any bridge
      * error leaves the word untouched.
      */
-    private fun properCase(ic: InputConnection, word: String): String? {
+    private fun properCase(word: String, sentenceStart: Boolean): String? {
         if (word.isEmpty()) return null
-        val sentenceStart = precedingIsSentenceStart(ic, word)
         val out = runCatching { bridge?.properCase(word, sentenceStart) }.getOrNull() ?: return null
         return if (out != word) out else null
     }

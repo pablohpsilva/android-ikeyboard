@@ -405,7 +405,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 ### :ffi-bridge
 
 - **Path:** `apps/android/ffi-bridge`
-- `FeatherKeyBridge.kt` — `class Language`; `class LayoutKeyDto`; `enum class LayoutPage`; `enum class LatinLayout`; `enum class AutocorrectOutcome`; `fun interface FieldSensitivity`; `class FeatherKeyBridge` — fun `FeatherKeyBridge.activeLanguages`, `FeatherKeyBridge.addToDictionary`, `FeatherKeyBridge.chooseCorrection`, `FeatherKeyBridge.close`, `FeatherKeyBridge.decode`, `FeatherKeyBridge.importContext`, `FeatherKeyBridge.importFrequencies`, `FeatherKeyBridge.layoutKeys`, `FeatherKeyBridge.learnWord`, `FeatherKeyBridge.learnedFrequencies`, `FeatherKeyBridge.observeAutocorrectOutcome`, `FeatherKeyBridge.observeDeleteRetype`, `FeatherKeyBridge.observeLanguage`, `FeatherKeyBridge.observeStripPick`, `FeatherKeyBridge.observeTap`, `FeatherKeyBridge.open`, `FeatherKeyBridge.persist`, `FeatherKeyBridge.properCase`, `FeatherKeyBridge.rank`, `FeatherKeyBridge.rankSuggestions`, `FeatherKeyBridge.setActiveLanguages`, `FeatherKeyBridge.setLatinLayout`, `FeatherKeyBridge.setPage`, `FeatherKeyBridge.suggest`, `FeatherKeyBridge.tapOffsets`, `FieldSensitivity.isSensitive` — val/var `LayoutKeyDto.height`, `LayoutKeyDto.label`, `LayoutKeyDto.width`, `LayoutKeyDto.x`, `LayoutKeyDto.y`
+- `FeatherKeyBridge.kt` — `class Language`; `class LayoutKeyDto`; `enum class LayoutPage`; `enum class LatinLayout`; `enum class AutocorrectOutcome`; `fun interface FieldSensitivity`; `class FeatherKeyBridge` — fun `FeatherKeyBridge.activeLanguages`, `FeatherKeyBridge.addToDictionary`, `FeatherKeyBridge.chooseCorrection`, `FeatherKeyBridge.close`, `FeatherKeyBridge.decode`, `FeatherKeyBridge.importContext`, `FeatherKeyBridge.importFrequencies`, `FeatherKeyBridge.layoutKeys`, `FeatherKeyBridge.learnWord`, `FeatherKeyBridge.learnedFrequencies`, `FeatherKeyBridge.observeAutocorrectOutcome`, `FeatherKeyBridge.observeDeleteRetype`, `FeatherKeyBridge.observeLanguage`, `FeatherKeyBridge.observeProperNoun`, `FeatherKeyBridge.observeStripPick`, `FeatherKeyBridge.observeTap`, `FeatherKeyBridge.open`, `FeatherKeyBridge.persist`, `FeatherKeyBridge.properCase`, `FeatherKeyBridge.rank`, `FeatherKeyBridge.rankSuggestions`, `FeatherKeyBridge.setActiveLanguages`, `FeatherKeyBridge.setLatinLayout`, `FeatherKeyBridge.setPage`, `FeatherKeyBridge.suggest`, `FeatherKeyBridge.tapOffsets`, `FieldSensitivity.isSensitive` — val/var `LayoutKeyDto.height`, `LayoutKeyDto.label`, `LayoutKeyDto.width`, `LayoutKeyDto.x`, `LayoutKeyDto.y`
 
 ### :ime-service
 
@@ -656,6 +656,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `FeatherKeyBridge.observeAutocorrectOutcome` | kotlin fun — `:ffi-bridge` |
 | `FeatherKeyBridge.observeDeleteRetype` | kotlin fun — `:ffi-bridge` |
 | `FeatherKeyBridge.observeLanguage` | kotlin fun — `:ffi-bridge` |
+| `FeatherKeyBridge.observeProperNoun` | kotlin fun — `:ffi-bridge` |
 | `FeatherKeyBridge.observeStripPick` | kotlin fun — `:ffi-bridge` |
 | `FeatherKeyBridge.observeTap` | kotlin fun — `:ffi-bridge` |
 | `FeatherKeyBridge.open` | kotlin fun — `:ffi-bridge` |
