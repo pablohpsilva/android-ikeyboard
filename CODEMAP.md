@@ -128,6 +128,8 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **One job:** On-device next-word (bigram) model, persisted encrypted under PersonalLm via the SecureStore port.
 - **Depends on:** `featherkey-contracts`
 - **Structs:** `Context`
+- **Free functions:** `is_learnable`, `is_storable`
+- **Constants:** `MIN_TOKEN_CHARS`
 - **Methods:** `Context::import`, `Context::is_empty`, `Context::load`, `Context::new`, `Context::next_counts`, `Context::next_words`, `Context::persist`, `Context::record`
 - ⚠️ **No README.md** — add one (ARCHITECTURE.md §5.2 crate anatomy).
 
@@ -724,6 +726,8 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `InputDecoder` | trait — `featherkey-input-decoder` |
 | `InputDecoder::decode` | method — `featherkey-input-decoder` |
 | `INPUTS` | const — `featherkey-autocorrect-gate`; const — `featherkey-neural-ranker`; const — `featherkey-neural-tap` |
+| `is_learnable` | fn — `featherkey-context` |
+| `is_storable` | fn — `featherkey-context` |
 | `Key` | struct — `featherkey-layout-engine` |
 | `Key::center` | method — `featherkey-layout-engine` |
 | `Key::new` | method — `featherkey-layout-engine` |
@@ -891,6 +895,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `MAX_COMPLETIONS` | const — `featherkey-dictionary` |
 | `MAX_SUGGESTIONS` | const — `featherkey-prediction` |
 | `MAX_TAPS` | const — `featherkey-tap-sequence` |
+| `MIN_TOKEN_CHARS` | const — `featherkey-context` |
 | `Mlp` | struct — `featherkey-nn` |
 | `Mlp::forward` | method — `featherkey-nn` |
 | `Mlp::from_bytes` | method — `featherkey-nn` |
