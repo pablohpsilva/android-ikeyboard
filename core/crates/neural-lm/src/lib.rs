@@ -6,6 +6,7 @@
 
 mod learn;
 mod model;
+mod persist;
 mod vocab;
 
 pub use model::NextWordLm;

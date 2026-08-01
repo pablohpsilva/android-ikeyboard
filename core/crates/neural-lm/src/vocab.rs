@@ -143,6 +143,40 @@ impl Vocab {
         (index, evicted)
     }
 
+    /// All learned entries as `(word, index, freq)`, in ascending word order
+    /// (mirrors `by_word`'s `BTreeMap` iteration) — used by `persist`'s
+    /// `vocab_codec` to encode a deterministic blob.
+    pub(crate) fn entries(&self) -> impl Iterator<Item = (&str, usize, u32)> {
+        self.by_word
+            .iter()
+            .map(|(word, &(index, freq))| (word.as_str(), index, freq))
+    }
+
+    /// Rebuild a `Vocab` (the real ceiling, [`MAX_VOCAB`]) from previously
+    /// persisted `(word, index, freq)` entries. Used by `persist::load`.
+    ///
+    /// Rejects (`None`) rather than silently building an inconsistent
+    /// `by_word`/`by_index` pair: an index outside the valid learned range
+    /// (`< FIRST_LEARNED_INDEX` or `>= FIRST_LEARNED_INDEX + MAX_VOCAB`), or a
+    /// duplicate word or index. The caller (`persist::load`) treats `None` as
+    /// a corrupt blob and falls back to cold-start.
+    pub(crate) fn from_entries(
+        entries: impl IntoIterator<Item = (String, usize, u32)>,
+    ) -> Option<Self> {
+        let mut vocab = Self::new();
+        for (word, index, freq) in entries {
+            if !(FIRST_LEARNED_INDEX..FIRST_LEARNED_INDEX + MAX_VOCAB).contains(&index) {
+                return None;
+            }
+            if vocab.by_word.contains_key(&word) || vocab.by_index.contains_key(&index) {
+                return None;
+            }
+            vocab.by_word.insert(word.clone(), (index, freq));
+            vocab.by_index.insert(index, word);
+        }
+        Some(vocab)
+    }
+
     /// Remove the least-frequent learned entry (ties -> smallest index) and
     /// return its now-free index.
     ///

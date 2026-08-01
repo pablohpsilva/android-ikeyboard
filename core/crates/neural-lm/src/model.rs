@@ -22,12 +22,20 @@ pub(crate) const K: usize = 2;
 /// Embedding dimension per word. `pub(crate)`: `learn.rs` slices `dInput`
 /// into `K` chunks of this width, one per context slot.
 pub(crate) const D: usize = 16;
-/// Hidden layer width.
-const H: usize = 32;
+/// Hidden layer width. `pub(crate)`: `persist.rs` validates a loaded net's
+/// shape against it before trusting the blob.
+pub(crate) const H: usize = 32;
 /// Output classes: one per vocab index (reserved `UNK`/`BOS` + learned words).
-const OUTPUTS: usize = 2 + MAX_VOCAB;
-/// `MlpMulti` input width: the concatenated context embedding.
-const INPUTS: usize = K * D;
+/// `pub(crate)`: `persist.rs` validates a loaded net's shape against it, and
+/// derives [`EMBED_LEN`] from it.
+pub(crate) const OUTPUTS: usize = 2 + MAX_VOCAB;
+/// `MlpMulti` input width: the concatenated context embedding. `pub(crate)`:
+/// `persist.rs` validates a loaded net's shape against it.
+pub(crate) const INPUTS: usize = K * D;
+/// Total length of [`NextWordLm::embed`] — fixed by the model's shape, not
+/// per-instance — so `persist.rs` can slice the embedding sub-blob without a
+/// length prefix.
+pub(crate) const EMBED_LEN: usize = OUTPUTS * D;
 
 /// `observe` steps (Task 8) needed for `confidence` to reach 0.5.
 const WARMUP_HALF: f32 = 50.0;
@@ -171,6 +179,22 @@ impl NextWordLm {
         let mut lm = Self::new();
         lm.vocab = Vocab::with_capacity_for_test(ceiling);
         lm
+    }
+
+    /// Rebuild a `NextWordLm` from its already-validated parts. `pub(crate)`:
+    /// the sole caller is `persist::decode`, which has already checked the
+    /// `vocab`/`embed`/`net` shapes against this module's constants before
+    /// calling this — a fallible `load` never constructs a value here that it
+    /// isn't sure of, so this constructor itself can stay infallible.
+    pub(crate) fn from_parts(vocab: Vocab, embed: Vec<f32>, net: MlpMulti, warmup: u32) -> Self {
+        Self {
+            vocab,
+            embed,
+            net,
+            warmup,
+            #[cfg(test)]
+            freeze_embeddings: false,
+        }
     }
 
     /// Log-probability of `word` following `context`: `ln(softmax(forward)[idx])`,
