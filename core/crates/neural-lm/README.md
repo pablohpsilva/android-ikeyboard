@@ -1,7 +1,6 @@
 # featherkey-neural-lm
 
-**Its ONE job:** Own the bounded per-user `Vocab` (word ↔ index map) that a
-tiny on-device embedding next-word LM trains and predicts over.
+**Its ONE job:** Own the bounded per-user `Vocab` (word ↔ index map) that a tiny on-device embedding next-word LM trains and predicts over.
 
 ## Layer
 

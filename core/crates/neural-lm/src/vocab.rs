@@ -113,7 +113,10 @@ impl Vocab {
     /// * A new word past the ceiling evicts the least-frequent learned entry
     ///   (ties broken by smallest index), reusing its freed index.
     pub fn intern(&mut self, word: &str) -> usize {
-        if !is_learnable(word) {
+        // A zero ceiling means "learn nothing": short-circuit here so
+        // `evict_least_frequent` is only ever called once at least one
+        // learned entry is guaranteed to exist (see its doc comment).
+        if !is_learnable(word) || self.learned_ceiling == 0 {
             return UNK;
         }
         if let Some(&(index, freq)) = self.by_word.get(word) {
@@ -132,23 +135,25 @@ impl Vocab {
     }
 
     /// Remove the least-frequent learned entry (ties -> smallest index) and
-    /// return its now-free index. Only called when at the ceiling, which
-    /// implies at least one learned entry exists.
+    /// return its now-free index.
+    ///
+    /// Precondition, upheld by `intern`: only called when
+    /// `by_word.len() >= self.learned_ceiling` and `learned_ceiling >= 1`
+    /// (`intern` short-circuits `learned_ceiling == 0` before ever reaching
+    /// this call), so `by_word` always has at least one entry here. The
+    /// `UNK` default below is therefore unreachable in practice; it exists
+    /// only so this stays panic-free if that invariant is ever violated.
     fn evict_least_frequent(&mut self) -> usize {
         let victim = self
             .by_word
             .iter()
             .map(|(word, &(index, freq))| (freq, index, word.clone()))
             .min_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
-        let Some((_, index, word)) = victim else {
-            // Only reachable with a degenerate zero ceiling (nothing to
-            // evict). Errors are values: fall back to the smallest learned
-            // index rather than panic.
-            return FIRST_LEARNED_INDEX;
-        };
-        self.by_word.remove(&word);
-        self.by_index.remove(&index);
-        index
+        victim.map_or(UNK, |(_, index, word)| {
+            self.by_word.remove(&word);
+            self.by_index.remove(&index);
+            index
+        })
     }
 }
 
@@ -198,5 +203,29 @@ mod tests {
         v.intern("cat");
         assert_eq!(v.word_of(UNK), None);
         assert_eq!(v.word_of(BOS), None);
+    }
+
+    #[test]
+    fn a_zero_ceiling_registers_nothing_and_always_returns_unk() {
+        let mut v = Vocab::with_capacity_for_test(0);
+        assert_eq!(v.intern("cat"), 0); // UNK, never registered
+        assert!(v.is_empty());
+        assert_eq!(v.index_of("cat"), 0);
+    }
+
+    #[test]
+    fn len_tracks_learned_entries_and_default_matches_new() {
+        let mut v = Vocab::default();
+        assert_eq!(v.len(), 0);
+        v.intern("cat");
+        v.intern("dog");
+        assert_eq!(v.len(), 2);
+    }
+
+    #[test]
+    fn word_of_resolves_a_learned_index_back_to_its_word() {
+        let mut v = Vocab::new();
+        let idx = v.intern("cat");
+        assert_eq!(v.word_of(idx), Some("cat"));
     }
 }
