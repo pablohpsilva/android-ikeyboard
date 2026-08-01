@@ -34,10 +34,38 @@ neural-lm-foundation plan.
 ## Ports
 
 Depends on `featherkey-nn` (the tiny MLP substrate the LM will be built on),
-`featherkey-contracts` (for the `SecureStore` port `NextWordLm` persistence
-will use), and `featherkey-context` (reuses its `is_learnable` predicate so
+`featherkey-contracts` (for the `SecureStore` port and the
+`Namespace::PersonalLm` key `b"lm_v1"` `NextWordLm::persist`/`load` use —
+distinct from `featherkey-context`'s `b"v1"` key in the same namespace), and
+`featherkey-context` (reuses its `is_learnable` predicate so
 token-learnability rules have exactly one definition).
+
+## Deferred
+
+- **Per-query (softmax-margin) confidence.** `confidence` today is a single
+  warm-up-count signal (§7 of the design doc): the number of `observe` steps
+  whose context's last word is in-vocab, squashed through a saturating
+  curve. A per-query sharpness signal (e.g. the max-softmax margin at
+  inference time) would be a second, complementary confidence source, but is
+  not built now — one honest confidence source until a second is shown to
+  help (KISS).
+- **Dynamic/lazy-grown net shape.** `MlpMulti`'s output layer is fixed at
+  construction to the full vocabulary ceiling (`O = 2 + N`), so the model's
+  footprint is a bounded constant from the moment it is created, not a
+  figure it grows into. A lazily-grown, dynamically-resized net would shrink
+  the early (near-empty-vocabulary) footprint further, but adds
+  reallocation and a variable codec — recorded as a future optimization, not
+  built now.
+- **SP2 wiring.** This crate is host-testable in isolation and is not yet
+  called from anywhere in the running keyboard. Sub-project 2 (a separate,
+  later slice) wires it up: blending `NextWordLm`'s scores into
+  `StatisticalPredictor::suggest_ranked` alongside the bigram (confidence-
+  gated so the bigram leads cold), the online-`observe` call site in
+  `learn.rs`, and gating that call under BR-22 (consent) / BR-26 (sensitive-
+  context suppression) exactly where `context.record` is gated today.
 
 ## Serves (BRs)
 
-**BR-11**-adjacent: neural roadmap app #4 (embedding next-word LM), sub-project 1.
+**BR-10/BR-11**-adjacent: neural roadmap app #4 (embedding next-word LM),
+sub-project 1. SP1 delivers the enabling model in isolation; SP2 closes
+BR-10/BR-11 against the live suggestion strip.

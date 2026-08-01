@@ -65,7 +65,7 @@ only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 | `featherkey-neural-lm` | domain | Own the bounded per-user `Vocab` (word ↔ index map) that a tiny on-device embedding next-word LM trains and predicts over. | context, contracts, nn |
 | `featherkey-neural-ranker` | domain | Tiny neural re-ranker: an 8-slot feature vector and a cold-start prior that reproduces the linear candidate ranking. | contracts, nn |
 | `featherkey-neural-tap` | domain | Learn a per-user coordinate warp — a bounded `(Δx, Δy)` pixel shift over a normalized tap position `(nx, ny)` in `[-1,1]` — that generalizes a person's systematic tap bias across keys, rather than per-key. | contracts, nn |
-| `featherkey-nn` | domain | Tiny dependency-free neural substrate: 1-hidden-layer MLP with forward, SGD, linear-prior init, and versioned serialization. | — |
+| `featherkey-nn` | domain | Tiny, dependency-free neural substrate — 1-hidden-layer MLP | — |
 | `featherkey-personalization` | domain | Learn the user's vocabulary/whitelist and own the user dictionary — the sole writer of the lexical learned-data domain (`Namespace::UserDict`, ADR-14). | contracts |
 | `featherkey-prediction` | domain | Rank prefix-completion suggestions from the active-language lexicons behind the `Predictor` port. | context, contracts, dictionary, fold |
 | `featherkey-sensitive-context` | domain | Decide whether the current editor field is sensitive and must therefore suppress learning and prediction (the BR-26 gate). | contracts |
@@ -271,7 +271,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Path:** `core/crates/neural-lm` — **Layer:** domain
 - **One job:** Own the bounded per-user `Vocab` (word ↔ index map) that a tiny on-device embedding next-word LM trains and predicts over.
 - **Depends on:** `featherkey-context`, `featherkey-contracts`, `featherkey-nn`
-- **Serves:** BR-11
+- **Serves:** BR-10, BR-11
 - **Structs:** `NextWordLm`, `Vocab`
 - **Constants:** `BOS` *(internal)*, `MAX_VOCAB` *(internal)*, `UNK` *(internal)*
 - **Methods:** `NextWordLm::confidence`, `NextWordLm::load`, `NextWordLm::new`, `NextWordLm::observe`, `NextWordLm::persist`, `NextWordLm::rank_next`, `NextWordLm::score_next`, `Vocab::index_of`, `Vocab::intern`, `Vocab::is_empty`, `Vocab::len`, `Vocab::new`, `Vocab::word_of`
@@ -299,12 +299,12 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 ### featherkey-nn
 
 - **Path:** `core/crates/nn` — **Layer:** domain
-- **One job:** Tiny dependency-free neural substrate: 1-hidden-layer MLP with forward, SGD, linear-prior init, and versioned serialization.
+- **One job:** Tiny, dependency-free neural substrate — 1-hidden-layer MLP
 - **Depends on:** nothing (leaf)
+- **Serves:** BR-7, BR-10, BR-11, BR-12
 - **Structs:** `Mlp`, `MlpMulti`
 - **Enums:** `NnError`
 - **Methods:** `Mlp::forward`, `Mlp::from_bytes`, `Mlp::from_linear`, `Mlp::inputs`, `Mlp::to_bytes`, `Mlp::train_step`, `Mlp::with_weights`, `MlpMulti::forward`, `MlpMulti::from_bytes`, `MlpMulti::hidden`, `MlpMulti::inputs`, `MlpMulti::outputs`, `MlpMulti::reset_output_row`, `MlpMulti::softmax`, `MlpMulti::to_bytes`, `MlpMulti::train_step`, `MlpMulti::with_weights`
-- ⚠️ **No README.md** — add one (ARCHITECTURE.md §5.2 crate anatomy).
 
 ### featherkey-personalization
 

@@ -30,7 +30,11 @@ pub enum Namespace {
     /// The user's lexical model — learned words + whitelist, persisted as one
     /// atomic blob (sole writer: `personalization`).
     UserDict,
-    /// The on-device next-word (bigram) model (sole writer: `context`).
+    /// The on-device next-word prediction models. Shared by two sole-writer
+    /// keys within this one namespace (per-key single-writer, ADR-14): the
+    /// order-1 bigram model (`featherkey-context`, key `b"v1"`) and the
+    /// embedding next-word LM (`featherkey-neural-lm`, key `b"lm_v1"`). Each
+    /// crate owns only its own key; neither writes the other's.
     PersonalLm,
     /// Clipboard history (sole writer: `clipboard-core`).
     Clipboard,
