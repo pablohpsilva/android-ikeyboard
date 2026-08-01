@@ -48,7 +48,7 @@ only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 |---|---|---|---|
 | `featherkey-crash-guard` | adapter | Isolate panics at the FFI seam and provide safe-mode fallback. | — |
 | `featherkey-secure-store` | adapter | Encrypt and persist all personal data — implements the `SecureStore` port; redb + AES-256-GCM. | contracts |
-| `featherkey-core` | composition | Be the composition root — wire the domain crates behind the `contracts` ports and present one narrow, UniFFI-ready use-case API to the shell. | autocorrect, autocorrect-gate, candidate-ranker, context, contracts, corrections, dictionary, fold, input-decoder, kernel, language-momentum, layout-engine, locale-manager, neural-ranker, neural-tap, personalization, prediction, secure-store, sensitive-context, tap-sequence, touch-model |
+| `featherkey-core` | composition | Be the composition root — wire the domain crates behind the `contracts` ports and present one narrow, UniFFI-ready use-case API to the shell. | autocorrect, autocorrect-gate, candidate-ranker, context, contracts, corrections, dictionary, fold, input-decoder, kernel, language-momentum, layout-engine, locale-manager, neural-lm, neural-ranker, neural-tap, personalization, prediction, secure-store, sensitive-context, tap-sequence, touch-model |
 | `featherkey-autocorrect` | domain | Decide a correction for a typed token, never clobbering a word the user clearly intended (no-clobber policy, BR-12). | candidate-ranker, contracts, dictionary, language-momentum, locale-manager, personalization |
 | `featherkey-autocorrect-gate` | domain | Decide whether to trust an autocorrect — a tiny per-user neural gate over the structural features of one correction decision (`GateFeatures`). | contracts, nn |
 | `featherkey-candidate-ranker` | domain | Merge and rank candidates from all sources using language momentum. | contracts, language-momentum |
@@ -63,7 +63,7 @@ only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 | `featherkey-layout-engine` | domain | Provide keyboard-key layout geometry (alpha/numeric/symbol pages, key rectangles and centers) with an RTL-ready direction marker (ADR-16). | kernel |
 | `featherkey-locale-manager` | domain | Track the ordered set of active languages and identify, per word, which active language it belongs to (lightweight statistical language-ID). | dictionary |
 | `featherkey-neural-lm` | domain | Own the bounded per-user `Vocab` (word ↔ index map) that a tiny on-device embedding next-word LM trains and predicts over. | context, contracts, nn |
-| `featherkey-neural-ranker` | domain | Tiny neural re-ranker: an 8-slot feature vector and a cold-start prior that reproduces the linear candidate ranking. | contracts, nn |
+| `featherkey-neural-ranker` | domain | Tiny neural re-ranker: a 9-slot feature vector (including the confidence-gated lm_logprob LM term) and a cold-start prior that reproduces the linear candidate ranking. | contracts, nn |
 | `featherkey-neural-tap` | domain | Learn a per-user coordinate warp — a bounded `(Δx, Δy)` pixel shift over a normalized tap position `(nx, ny)` in `[-1,1]` — that generalizes a person's systematic tap bias across keys, rather than per-key. | contracts, nn |
 | `featherkey-nn` | domain | Tiny, dependency-free neural substrate — 1-hidden-layer MLP | — |
 | `featherkey-personalization` | domain | Learn the user's vocabulary/whitelist and own the user dictionary — the sole writer of the lexical learned-data domain (`Namespace::UserDict`, ADR-14). | contracts |
@@ -148,13 +148,13 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 
 - **Path:** `core/crates/featherkey-core` — **Layer:** composition
 - **One job:** Be the composition root — wire the domain crates behind the `contracts` ports and present one narrow, UniFFI-ready use-case API to the shell.
-- **Depends on:** `featherkey-autocorrect`, `featherkey-autocorrect-gate`, `featherkey-candidate-ranker`, `featherkey-context`, `featherkey-contracts`, `featherkey-corrections`, `featherkey-dictionary`, `featherkey-fold`, `featherkey-input-decoder`, `featherkey-kernel`, `featherkey-language-momentum`, `featherkey-layout-engine`, `featherkey-locale-manager`, `featherkey-neural-ranker`, `featherkey-neural-tap`, `featherkey-personalization`, `featherkey-prediction`, `featherkey-secure-store`, `featherkey-sensitive-context`, `featherkey-tap-sequence`, `featherkey-touch-model` — **external:** `thiserror`, `uniffi`
+- **Depends on:** `featherkey-autocorrect`, `featherkey-autocorrect-gate`, `featherkey-candidate-ranker`, `featherkey-context`, `featherkey-contracts`, `featherkey-corrections`, `featherkey-dictionary`, `featherkey-fold`, `featherkey-input-decoder`, `featherkey-kernel`, `featherkey-language-momentum`, `featherkey-layout-engine`, `featherkey-locale-manager`, `featherkey-neural-lm`, `featherkey-neural-ranker`, `featherkey-neural-tap`, `featherkey-personalization`, `featherkey-prediction`, `featherkey-secure-store`, `featherkey-sensitive-context`, `featherkey-tap-sequence`, `featherkey-touch-model` — **external:** `thiserror`, `uniffi`
 - **Serves:** BR-5, BR-7, BR-8, BR-10, BR-12, BR-16, BR-26
 - **Traits (ports):** `SensitiveField` *(internal)*
-- **Structs:** `DecodeResult`, `FeatherKeyCore`, `FfiCandidate` *(internal)*, `FfiCorrection` *(internal)*, `FfiDecode` *(internal)*, `FfiKey` *(internal)*, `FfiRankCandidate` *(internal)*, `FfiRanked` *(internal)*, `FfiSuggestion` *(internal)*, `FfiTapOffset` *(internal)*, `FfiTransition` *(internal)*, `FfiWordFreq` *(internal)*, `KeyCandidate`, `KeyboardCore` *(internal)*, `LanguagePack` *(internal)*, `LayoutKey`
+- **Structs:** `DecodeResult`, `FeatherKeyCore`, `FfiCandidate` *(internal)*, `FfiCorrection` *(internal)*, `FfiDecode` *(internal)*, `FfiKey` *(internal)*, `FfiRankCandidate` *(internal)*, `FfiRanked` *(internal)*, `FfiSuggestion` *(internal)*, `FfiTapOffset` *(internal)*, `FfiTransition` *(internal)*, `FfiWordFreq` *(internal)*, `KeyCandidate`, `KeyboardCore` *(internal)*, `LanguagePack` *(internal)*, `LayoutKey`, `RecentWords` *(internal)*
 - **Enums:** `AutocorrectOutcome`, `FeatherKeyError`, `FfiAutocorrectOutcome` *(internal)*, `FfiError` *(internal)*, `FfiLatinLayout` *(internal)*, `FfiSource` *(internal)*
 - **Free functions:** `map_latin` *(internal)*
-- **Methods:** `FeatherKeyCore::active_languages`, `FeatherKeyCore::add_to_dictionary`, `FeatherKeyCore::buffered_taps`, `FeatherKeyCore::choose_correction`, `FeatherKeyCore::context_next_words`, `FeatherKeyCore::correction_pref_count`, `FeatherKeyCore::correction_unwanted_count`, `FeatherKeyCore::decode`, `FeatherKeyCore::import_context`, `FeatherKeyCore::import_frequencies`, `FeatherKeyCore::knows_word`, `FeatherKeyCore::language_weight`, `FeatherKeyCore::layout_keys`, `FeatherKeyCore::learn_word`, `FeatherKeyCore::learned_frequencies`, `FeatherKeyCore::new`, `FeatherKeyCore::observe_autocorrect_outcome`, `FeatherKeyCore::observe_delete_retype`, `FeatherKeyCore::observe_language`, `FeatherKeyCore::observe_strip_pick`, `FeatherKeyCore::observe_tap`, `FeatherKeyCore::persist`, `FeatherKeyCore::rank_candidates`, `FeatherKeyCore::rank_suggestions`, `FeatherKeyCore::restore`, `FeatherKeyCore::set_active_languages`, `FeatherKeyCore::set_latin_layout`, `FeatherKeyCore::set_layout`, `FeatherKeyCore::suggest`, `FeatherKeyCore::tap_offsets`, `FeatherKeyCore::use_alpha_layout`, `FeatherKeyCore::use_numeric_layout`, `FeatherKeyCore::use_symbols_layout`, `FeatherKeyCore::word_frequency`, `KeyboardCore::active_languages` *(internal)*, `KeyboardCore::add_to_dictionary` *(internal)*, `KeyboardCore::choose_correction` *(internal)*, `KeyboardCore::correct` *(internal)*, `KeyboardCore::decode` *(internal)*, `KeyboardCore::import_context` *(internal)*, `KeyboardCore::import_frequencies` *(internal)*, `KeyboardCore::layout_keys` *(internal)*, `KeyboardCore::learn_word` *(internal)*, `KeyboardCore::learned_frequencies` *(internal)*, `KeyboardCore::observe_autocorrect_outcome` *(internal)*, `KeyboardCore::observe_delete_retype` *(internal)*, `KeyboardCore::observe_language` *(internal)*, `KeyboardCore::observe_strip_pick` *(internal)*, `KeyboardCore::observe_tap` *(internal)*, `KeyboardCore::open` *(internal)*, `KeyboardCore::persist` *(internal)*, `KeyboardCore::rank` *(internal)*, `KeyboardCore::rank_suggestions` *(internal)*, `KeyboardCore::set_active_languages` *(internal)*, `KeyboardCore::set_latin_layout` *(internal)*, `KeyboardCore::suggest` *(internal)*, `KeyboardCore::tap_offsets` *(internal)*, `KeyboardCore::use_alpha_layout` *(internal)*, `KeyboardCore::use_numeric_layout` *(internal)*, `KeyboardCore::use_symbols_layout` *(internal)*, `SensitiveField::is_sensitive` *(internal)*
+- **Methods:** `FeatherKeyCore::active_languages`, `FeatherKeyCore::add_to_dictionary`, `FeatherKeyCore::buffered_taps`, `FeatherKeyCore::choose_correction`, `FeatherKeyCore::context_next_words`, `FeatherKeyCore::correction_pref_count`, `FeatherKeyCore::correction_unwanted_count`, `FeatherKeyCore::decode`, `FeatherKeyCore::import_context`, `FeatherKeyCore::import_frequencies`, `FeatherKeyCore::knows_word`, `FeatherKeyCore::language_weight`, `FeatherKeyCore::layout_keys`, `FeatherKeyCore::learn_word`, `FeatherKeyCore::learned_frequencies`, `FeatherKeyCore::new`, `FeatherKeyCore::observe_autocorrect_outcome`, `FeatherKeyCore::observe_delete_retype`, `FeatherKeyCore::observe_language`, `FeatherKeyCore::observe_strip_pick`, `FeatherKeyCore::observe_tap`, `FeatherKeyCore::persist`, `FeatherKeyCore::rank_candidates`, `FeatherKeyCore::rank_suggestions`, `FeatherKeyCore::restore`, `FeatherKeyCore::set_active_languages`, `FeatherKeyCore::set_latin_layout`, `FeatherKeyCore::set_layout`, `FeatherKeyCore::suggest`, `FeatherKeyCore::tap_offsets`, `FeatherKeyCore::use_alpha_layout`, `FeatherKeyCore::use_numeric_layout`, `FeatherKeyCore::use_symbols_layout`, `FeatherKeyCore::word_frequency`, `KeyboardCore::active_languages` *(internal)*, `KeyboardCore::add_to_dictionary` *(internal)*, `KeyboardCore::choose_correction` *(internal)*, `KeyboardCore::correct` *(internal)*, `KeyboardCore::decode` *(internal)*, `KeyboardCore::import_context` *(internal)*, `KeyboardCore::import_frequencies` *(internal)*, `KeyboardCore::layout_keys` *(internal)*, `KeyboardCore::learn_word` *(internal)*, `KeyboardCore::learned_frequencies` *(internal)*, `KeyboardCore::observe_autocorrect_outcome` *(internal)*, `KeyboardCore::observe_delete_retype` *(internal)*, `KeyboardCore::observe_language` *(internal)*, `KeyboardCore::observe_strip_pick` *(internal)*, `KeyboardCore::observe_tap` *(internal)*, `KeyboardCore::open` *(internal)*, `KeyboardCore::persist` *(internal)*, `KeyboardCore::rank` *(internal)*, `KeyboardCore::rank_suggestions` *(internal)*, `KeyboardCore::set_active_languages` *(internal)*, `KeyboardCore::set_latin_layout` *(internal)*, `KeyboardCore::suggest` *(internal)*, `KeyboardCore::tap_offsets` *(internal)*, `KeyboardCore::use_alpha_layout` *(internal)*, `KeyboardCore::use_numeric_layout` *(internal)*, `KeyboardCore::use_symbols_layout` *(internal)*, `RecentWords::new` *(internal)*, `RecentWords::push` *(internal)*, `RecentWords::two_word_context` *(internal)*, `SensitiveField::is_sensitive` *(internal)*
 - **Integration tests:** `tests/autocorrect_gate.rs`, `tests/composition.rs`, `tests/e2_sensitive_ordering.rs`, `tests/neural_learning.rs`, `tests/neural_persistence.rs`, `tests/w6b_ranking_reflects_learning.rs`
 
 ### featherkey-corrections
@@ -272,17 +272,17 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **One job:** Own the bounded per-user `Vocab` (word ↔ index map) that a tiny on-device embedding next-word LM trains and predicts over.
 - **Depends on:** `featherkey-context`, `featherkey-contracts`, `featherkey-nn`
 - **Serves:** BR-10, BR-11
-- **Structs:** `NextWordLm`, `Vocab`
+- **Structs:** `LmScores`, `NextWordLm`, `Vocab`
 - **Constants:** `BOS` *(internal)*, `MAX_VOCAB` *(internal)*, `UNK` *(internal)*
-- **Methods:** `NextWordLm::confidence`, `NextWordLm::load`, `NextWordLm::new`, `NextWordLm::observe`, `NextWordLm::persist`, `NextWordLm::rank_next`, `NextWordLm::score_next`, `Vocab::index_of`, `Vocab::intern`, `Vocab::is_empty`, `Vocab::len`, `Vocab::new`, `Vocab::word_of`
+- **Methods:** `NextWordLm::confidence`, `NextWordLm::load`, `NextWordLm::log_uniform`, `NextWordLm::logprob_in`, `NextWordLm::new`, `NextWordLm::observe`, `NextWordLm::persist`, `NextWordLm::rank_next`, `NextWordLm::score_next`, `NextWordLm::scores`, `Vocab::index_of`, `Vocab::intern`, `Vocab::is_empty`, `Vocab::len`, `Vocab::new`, `Vocab::word_of`
 
 ### featherkey-neural-ranker
 
 - **Path:** `core/crates/neural-ranker` — **Layer:** domain
-- **One job:** Tiny neural re-ranker: an 8-slot feature vector and a cold-start prior that reproduces the linear candidate ranking.
+- **One job:** Tiny neural re-ranker: a 9-slot feature vector (including the confidence-gated lm_logprob LM term) and a cold-start prior that reproduces the linear candidate ranking.
 - **Depends on:** `featherkey-contracts`, `featherkey-nn`
 - **Structs:** `NeuralRanker`, `RankFeatures`
-- **Constants:** `INPUTS`
+- **Constants:** `FEATURE_BOUND`, `INPUTS`
 - **Methods:** `NeuralRanker::from_prior`, `NeuralRanker::load`, `NeuralRanker::persist`, `NeuralRanker::reinforce`, `NeuralRanker::score`, `RankFeatures::to_array`
 - ⚠️ **No README.md** — add one (ARCHITECTURE.md §5.2 crate anatomy).
 
@@ -473,6 +473,7 @@ Behaviour specs in `core/features/`, tagged to requirement IDs and gated by
 | `neural-reranker.feature` | The suggestion strip learns which word I mean | 1 | BR-11 |
 | `neural-tap-decoder.feature` | The tap decoder learns the user's systematic aim and generalizes it | 4 | BR-7 |
 | `neural_lm.feature` | On-device neural next-word language model (foundation) | 4 | BR-10, BR-11 |
+| `neural_lm_integration.feature` | Neural next-word LM wired into the live suggestion strip | 4 | BR-10, BR-11, BR-26 |
 | `personalization.feature` | On-device personal vocabulary learning | 3 | BR-7, BR-13 |
 | `prediction.feature` | Relevant autocomplete completions for the in-progress word | 4 | BR-10 |
 | `secure-store.feature` | Encrypted persistence of personal data | 4 | BR-8, BR-23, BR-62 |
@@ -695,6 +696,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `FeatherKeyImeService.onStartInput` | kotlin fun — `:ime-service` |
 | `FeatherKeyImeService.onStartInputView` | kotlin fun — `:ime-service` |
 | `FeatherKeyTheme` | kotlin fun — `:settings-ui` |
+| `FEATURE_BOUND` | const — `featherkey-neural-ranker` |
 | `FfiAutocorrectOutcome` | enum — `featherkey-core::ffi::ffi_types` *(internal)* |
 | `FfiCandidate` | struct — `featherkey-core::ffi::ffi_types` *(internal)* |
 | `FfiCorrection` | struct — `featherkey-core::ffi::ffi_types` *(internal)* |
@@ -897,6 +899,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `Lexicons` | kotlin object — `:ime-service` |
 | `Lexicons.load` | kotlin fun — `:ime-service` |
 | `LM_WEIGHT_LANG` | const — `featherkey-candidate-ranker` |
+| `LmScores` | struct — `featherkey-neural-lm::model` |
 | `LocaleError` | enum — `featherkey-locale-manager` |
 | `LocaleManager` | struct — `featherkey-locale-manager` |
 | `LocaleManager::active` | method — `featherkey-locale-manager` |
@@ -948,11 +951,14 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `NextWordLm` | struct — `featherkey-neural-lm::model` |
 | `NextWordLm::confidence` | method — `featherkey-neural-lm` |
 | `NextWordLm::load` | method — `featherkey-neural-lm` |
+| `NextWordLm::log_uniform` | method — `featherkey-neural-lm` |
+| `NextWordLm::logprob_in` | method — `featherkey-neural-lm` |
 | `NextWordLm::new` | method — `featherkey-neural-lm` |
 | `NextWordLm::observe` | method — `featherkey-neural-lm` |
 | `NextWordLm::persist` | method — `featherkey-neural-lm` |
 | `NextWordLm::rank_next` | method — `featherkey-neural-lm` |
 | `NextWordLm::score_next` | method — `featherkey-neural-lm` |
+| `NextWordLm::scores` | method — `featherkey-neural-lm` |
 | `NnError` | enum — `featherkey-nn::error` |
 | `NoClobberCorrector` | struct — `featherkey-autocorrect` |
 | `NoClobberCorrector::assess` | method — `featherkey-autocorrect` |
@@ -983,6 +989,10 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `RankedCandidate` | struct — `featherkey-contracts` |
 | `RankFeatures` | struct — `featherkey-neural-ranker` |
 | `RankFeatures::to_array` | method — `featherkey-neural-ranker` |
+| `RecentWords` | struct — `featherkey-core::recent` *(internal)* |
+| `RecentWords::new` | method — `featherkey-core` *(internal)* |
+| `RecentWords::push` | method — `featherkey-core` *(internal)* |
+| `RecentWords::two_word_context` | method — `featherkey-core` *(internal)* |
 | `RedbSecureStore` | struct — `featherkey-secure-store` |
 | `RedbSecureStore::open` | method — `featherkey-secure-store` |
 | `RenderKey` | kotlin class — `:keyboard-view` |

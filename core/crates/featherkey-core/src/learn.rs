@@ -17,6 +17,7 @@ use featherkey_context::Context;
 use featherkey_contracts::{SecureStore, SensitiveContextSource};
 use featherkey_corrections::Corrections;
 use featherkey_kernel::KeyId;
+use featherkey_neural_lm::NextWordLm;
 use featherkey_neural_ranker::{NeuralRanker, RankFeatures};
 use featherkey_neural_tap::{TapWarp, WARP_LR};
 use featherkey_personalization::Personalization;
@@ -25,6 +26,7 @@ use featherkey_touch_model::TouchModel;
 use crate::correct::{AutocorrectOutcome, KEPT_TARGET, REACHED_TARGET, REVERT_TARGET};
 use crate::error::FeatherKeyError;
 use crate::rank::PRIOR_COEFFS;
+use crate::recent::RecentWords;
 use crate::FeatherKeyCore;
 
 /// Learning rate for the online pairwise re-ranker update (Task 12). Fixed for
@@ -48,6 +50,15 @@ impl FeatherKeyCore {
         }
         self.personalization.observe(word);
         self.context.record(preceding, word);
+        // Train the next-word LM on the 2-word context of the words BEFORE
+        // this commit, then advance the buffer. Order is load-bearing:
+        // `two_word_context`/`observe` must read the pre-commit window, and
+        // `push` must run after, or the LM would train on a context that
+        // includes the very word it is trying to predict.
+        let ctx = self.recent.two_word_context(preceding);
+        let ctx_refs: Vec<&str> = ctx.iter().map(String::as_str).collect();
+        self.lm.observe(&ctx_refs, word);
+        self.recent.push(word);
         // If this commit corresponds to the still-cached shown set (i.e. the
         // committed word was one of the suggestions), train the ranker toward it
         // against that snapshot's prefix. A strip pick that already fired trains
@@ -266,6 +277,7 @@ impl FeatherKeyCore {
         self.neural_ranker.persist(store)?;
         self.autocorrect_gate.persist(store)?;
         self.tap_warp.persist(store)?;
+        self.lm.persist(store)?;
         Ok(())
     }
 
@@ -283,6 +295,8 @@ impl FeatherKeyCore {
         self.neural_ranker = NeuralRanker::load(store, &PRIOR_COEFFS)?;
         self.autocorrect_gate = AutocorrectGate::load(store)?;
         self.tap_warp = TapWarp::load(store)?;
+        self.lm = NextWordLm::load(store)?;
+        self.recent = RecentWords::new();
         Ok(())
     }
 }

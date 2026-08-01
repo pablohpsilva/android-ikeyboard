@@ -45,6 +45,7 @@ featherkey-candidate-ranker = { path = "../candidate-ranker" }
 featherkey-neural-ranker = { path = "../neural-ranker" }
 featherkey-autocorrect-gate = { path = "../autocorrect-gate" }
 featherkey-neural-tap = { path = "../neural-tap" }
+featherkey-neural-lm = { path = "../neural-lm" }
 
 [lints.rust]
 unsafe_code = "deny"

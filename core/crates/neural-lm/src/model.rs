@@ -101,6 +101,18 @@ fn det_embed_row(index: usize) -> [f32; D] {
     row
 }
 
+/// The log-prob distribution over the whole vocabulary for one context,
+/// computed by [`NextWordLm::scores`] with a single forward pass. Indexed by
+/// vocab index (`0..OUTPUTS`); look a word's log-prob up via
+/// [`NextWordLm::logprob_in`]. Sharing one `LmScores` across every candidate
+/// in a query — instead of calling [`NextWordLm::score_next`] per candidate —
+/// is what collapses N redundant forward passes into one per query.
+#[derive(Debug, Clone)]
+pub struct LmScores {
+    /// `ln(softmax(forward(context)))`, one entry per vocab index.
+    logprobs: Vec<f32>,
+}
+
 /// A tiny per-user embedding next-word language model. Cold-starts to a
 /// uniform, honest-confidence-zero state (see the module docs); `observe`
 /// (in the sibling `learn` module) trains it online.
@@ -199,11 +211,40 @@ impl NextWordLm {
 
     /// Log-probability of `word` following `context`: `ln(softmax(forward)[idx])`,
     /// with the probability clamped away from 0 so the result is always finite.
+    ///
+    /// Implemented on top of [`Self::scores`]/[`Self::logprob_in`] so there is
+    /// exactly one forward-pass path; a caller scoring many words against the
+    /// *same* context should call [`Self::scores`] once and look each word up
+    /// via [`Self::logprob_in`] instead of calling this per word (each call
+    /// here re-runs the full `MlpMulti::forward` + softmax).
     #[must_use]
     pub fn score_next(&self, context: &[&str], word: &str) -> f32 {
+        self.logprob_in(&self.scores(context), word)
+    }
+
+    /// The log-prob distribution over the whole vocabulary for one `context`,
+    /// computed with a single forward pass. Callers that need more than one
+    /// word's log-prob against the same context (the re-ranker scoring every
+    /// candidate in a query) should compute this once and look words up via
+    /// [`Self::logprob_in`], rather than calling [`Self::score_next`] per word
+    /// — which would otherwise redundantly re-run the forward pass.
+    #[must_use]
+    pub fn scores(&self, context: &[&str]) -> LmScores {
         let probs = self.predict(context);
+        LmScores {
+            logprobs: probs.iter().map(|&p| p.max(MIN_PROB).ln()).collect(),
+        }
+    }
+
+    /// Look up `word`'s log-probability within an [`LmScores`] distribution
+    /// previously computed by [`Self::scores`]. `pub` (not a method on
+    /// `LmScores` itself): resolving a word to its vocab index needs
+    /// `self.vocab`, which `LmScores` deliberately doesn't carry — it is just
+    /// the per-index distribution, reusable across every candidate word.
+    #[must_use]
+    pub fn logprob_in(&self, scores: &LmScores, word: &str) -> f32 {
         let idx = self.vocab.index_of(word);
-        probs.get(idx).copied().unwrap_or(0.0).max(MIN_PROB).ln()
+        scores.logprobs.get(idx).copied().unwrap_or(MIN_PROB.ln())
     }
 
     /// Top-`limit` `(word, log_prob)` pairs, best-first. Reserved indices
@@ -239,6 +280,16 @@ impl NextWordLm {
     pub fn confidence(&self) -> f32 {
         let n = self.warmup as f32;
         n / (n + WARMUP_HALF)
+    }
+
+    /// `ln(1 / OUTPUTS)`: the log-probability every class would have under a
+    /// perfectly uniform distribution. The single source of the output class
+    /// count (`2 + MAX_VOCAB`), so a caller centering a raw [`Self::score_next`]
+    /// (e.g. the `featherkey-core` re-ranker's `lm_logprob` feature) never
+    /// re-derives `OUTPUTS` itself.
+    #[must_use]
+    pub fn log_uniform(&self) -> f32 {
+        -((2 + MAX_VOCAB) as f32).ln()
     }
 
     /// Forward + softmax over the assembled context.

@@ -31,6 +31,7 @@ mod learn;
 mod packs;
 mod rank;
 mod rank_features;
+mod recent;
 mod spatial;
 
 #[cfg(feature = "uniffi")]
@@ -60,6 +61,7 @@ use featherkey_input_decoder::{InputDecoder, NearestKeyDecoder};
 use featherkey_kernel::TouchPoint;
 use featherkey_language_momentum::Momentum;
 use featherkey_locale_manager::LangId;
+use featherkey_neural_lm::NextWordLm;
 use featherkey_neural_ranker::NeuralRanker;
 use featherkey_neural_tap::TapWarp;
 use featherkey_personalization::Personalization;
@@ -68,6 +70,7 @@ use crate::correct::LastCorrection;
 use crate::packs::{build_packs, primary_tag, Pack};
 use crate::rank::PRIOR_COEFFS;
 use crate::rank_features::RankSnapshot;
+use crate::recent::RecentWords;
 use featherkey_prediction::StatisticalPredictor;
 use featherkey_sensitive_context::SensitivityPolicy;
 use featherkey_tap_sequence::{TapDistribution, TapSequence};
@@ -171,6 +174,17 @@ pub struct FeatherKeyCore {
     /// default ("Auto"). Held across language switches so a switch never drops
     /// the choice (design §4.2). Latin-only: non-Latin scripts ignore it.
     latin_override: Option<LatinLayout>,
+    /// The tiny on-device next-word embedding model, cold-started and
+    /// persisted under `PersonalLm` (alongside `context`'s bigram model, under
+    /// a distinct key). Trained on the commit path by `learn_word` and
+    /// consulted for ranking in `rank_features`/`lm_seed_candidates`; held
+    /// here so it survives language switches like every other learned model.
+    lm: NextWordLm,
+    /// Ephemeral 2-word context buffer for the LM (never persisted, no
+    /// `Namespace` — matches `taps`). Wired at both call sites: pushed on the
+    /// commit path alongside `lm.observe`, and read in `rank_suggestions` to
+    /// build the LM's next-word context.
+    recent: RecentWords,
 }
 
 impl FeatherKeyCore {
@@ -208,6 +222,8 @@ impl FeatherKeyCore {
             momentum: Momentum::new(&primary, &tags),
             taps: TapSequence::new(),
             latin_override: None,
+            lm: NextWordLm::new(),
+            recent: RecentWords::new(),
         })
     }
 
@@ -371,6 +387,31 @@ impl FeatherKeyCore {
     #[cfg(test)]
     pub(crate) fn tap_warp(&self) -> &TapWarp {
         &self.tap_warp
+    }
+
+    /// The held next-word LM. Test-only accessor for persist/restore probes.
+    #[cfg(test)]
+    pub(crate) fn lm(&self) -> &NextWordLm {
+        &self.lm
+    }
+
+    /// Mutable access to the held next-word LM. Test-only seam: `learn_word`
+    /// drives `NextWordLm::observe` on the commit path (Task 7), but some
+    /// tests (e.g. the `lm_logprob` re-ranker feature) want a *warm* LM
+    /// without also exercising the commit path, so they train it directly
+    /// through this accessor instead.
+    #[cfg(test)]
+    pub(crate) fn lm_mut(&mut self) -> &mut NextWordLm {
+        &mut self.lm
+    }
+
+    /// Mutable access to the ephemeral 2-word context buffer. Test-only seam:
+    /// `learn_word` advances this via `RecentWords::push` on the commit path
+    /// (Task 7), but some tests want the buffer positioned at a specific
+    /// 2-word boundary directly, without going through a commit.
+    #[cfg(test)]
+    pub(crate) fn recent_mut(&mut self) -> &mut RecentWords {
+        &mut self.recent
     }
 
     /// The active layout. Test-only accessor for decode-path probes.

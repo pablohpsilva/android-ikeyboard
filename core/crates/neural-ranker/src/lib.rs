@@ -1,4 +1,4 @@
-//! Tiny neural re-ranker. Holds an 8-slot feature vector ([`RankFeatures`]) and
+//! Tiny neural re-ranker. Holds a 9-slot feature vector ([`RankFeatures`]) and
 //! a [`NeuralRanker`] whose cold-start prior reproduces today's linear
 //! candidate ranking exactly, so enabling the net causes no regression before
 //! any training has happened. Pure math: no I/O, no clock, no RNG.
@@ -7,14 +7,17 @@ use featherkey_nn::Mlp;
 
 mod persist;
 
-/// Number of feature slots the ranker consumes: seven signals plus a constant
-/// bias slot (slot 7 == 1.0).
-pub const INPUTS: usize = 8;
+/// Number of feature slots the ranker consumes: eight signals plus a constant
+/// bias slot (slot 8 == 1.0).
+pub const INPUTS: usize = 9;
 
 /// The linear-region half-width the prior is built to cover. Every feature this
 /// crate produces stays well inside `[-BOUND, BOUND]`; `PRIOR_OFFSET_C` is set
-/// with a comfortable margin over it (see [`NeuralRanker::from_prior`]).
-const FEATURE_BOUND: f32 = 20.0;
+/// with a comfortable margin over it (see [`NeuralRanker::from_prior`]). `pub`
+/// so a caller clamping its own feature slot before it reaches this crate
+/// (e.g. `featherkey-core`'s `lm_logprob`) shares this exact bound rather than
+/// re-declaring the same `20.0` as a second source of truth.
+pub const FEATURE_BOUND: f32 = 20.0;
 
 /// Output-region offset handed to [`Mlp::from_linear`]. Deliberately small:
 /// `from_linear` cancels a per-unit constant of `w2[j]·offset_c` against `b2`,
@@ -24,10 +27,10 @@ const FEATURE_BOUND: f32 = 20.0;
 /// prior unit stays in its linear region) while keeping parity error ~1e-5.
 const PRIOR_OFFSET_C: f32 = 64.0;
 
-/// The eight ranking features for a single candidate, in slot order. `to_array`
-/// appends the constant bias slot, so the array a [`NeuralRanker`] scores is
-/// `[positional, ln_momentum, is_lexicon, is_device, correction_promote,
-/// correction_demote, spatial, 1.0]`.
+/// The eight named ranking features for a single candidate, in slot order.
+/// `to_array` appends the constant bias slot, so the array a [`NeuralRanker`]
+/// scores is `[positional, ln_momentum, is_lexicon, is_device,
+/// correction_promote, correction_demote, spatial, lm_logprob, 1.0]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RankFeatures {
     /// Monotone transform of within-source rank (0 = best); typically negative.
@@ -44,10 +47,12 @@ pub struct RankFeatures {
     pub correction_demote: f32,
     /// Spatial/geometry agreement signal (0.0 when unused).
     pub spatial: f32,
+    /// Language-model log-probability signal (0.0 when unused).
+    pub lm_logprob: f32,
 }
 
 impl RankFeatures {
-    /// Slot-ordered array fed to the net; slot 7 is the constant bias `1.0`.
+    /// Slot-ordered array fed to the net; slot 8 is the constant bias `1.0`.
     #[must_use]
     pub fn to_array(&self) -> [f32; INPUTS] {
         [
@@ -58,6 +63,7 @@ impl RankFeatures {
             self.correction_promote,
             self.correction_demote,
             self.spatial,
+            self.lm_logprob,
             1.0,
         ]
     }
@@ -146,7 +152,7 @@ mod tests {
     use featherkey_language_momentum::Momentum;
 
     /// The prior coefficients the reinforce tests share.
-    const COEFFS: [f32; INPUTS] = [1.0, 1.0, 0.2, 0.0, 1.0, -1.0, 0.35, 0.0];
+    const COEFFS: [f32; INPUTS] = [1.0, 1.0, 0.2, 0.0, 1.0, -1.0, 0.35, 0.0, 0.0];
 
     /// An all-zero feature vector, so tests can vary one slot with `..zero()`.
     fn zero() -> RankFeatures {
@@ -158,6 +164,7 @@ mod tests {
             correction_promote: 0.0,
             correction_demote: 0.0,
             spatial: 0.0,
+            lm_logprob: 0.0,
         }
     }
 
@@ -228,8 +235,52 @@ mod tests {
     }
 
     #[test]
+    fn to_array_has_nine_slots_lm_logprob_before_bias() {
+        let f = RankFeatures {
+            positional: 1.0,
+            ln_momentum: 0.2,
+            is_lexicon: 1.0,
+            is_device: 0.0,
+            correction_promote: 0.0,
+            correction_demote: 0.0,
+            spatial: 0.3,
+            lm_logprob: -0.7,
+        };
+        let a = f.to_array();
+        assert_eq!(a.len(), 9);
+        assert_eq!(a[7], -0.7); // lm_logprob
+        assert_eq!(a[8], 1.0); // bias last
+    }
+
+    #[test]
+    fn cold_prior_zero_lm_logprob_reproduces_eight_slot_score() {
+        // With lm_logprob = 0 and a 9th coeff within the offset margin, the
+        // 9-wide prior scores a candidate identically (±1e-4) to the 8-wide
+        // prior — the parity that makes enabling the feature a no-op until warm.
+        let c8 = [1.0, 1.0, 0.2, 0.0, 1.0, -1.0, 0.35];
+        let mut c9 = [0.0f32; 9];
+        c9[..7].copy_from_slice(&c8[..7]);
+        c9[7] = 1.0; // slot 7 = LM coeff
+        c9[8] = 0.0; // bias slot stays 0.0
+        let r9 = NeuralRanker::from_prior(&c9);
+        let f = RankFeatures {
+            positional: 0.5,
+            ln_momentum: 0.1,
+            is_lexicon: 1.0,
+            is_device: 0.0,
+            correction_promote: 0.0,
+            correction_demote: 0.0,
+            spatial: 0.0,
+            lm_logprob: 0.0,
+        };
+        // Reference 8-wide linear score of the same 8 signals:
+        let lin8: f32 = 0.5 * 1.0 + 0.1 * 1.0 + 1.0 * 0.2 + 0.0 + 0.0 + 0.0 + 0.0 * 0.35;
+        assert!((r9.score(&f) as f32 - lin8).abs() < 1e-3);
+    }
+
+    #[test]
     fn from_prior_reproduces_the_linear_score() {
-        let coeffs = [1.0, 1.0, 0.2, 0.0, 1.0, -1.0, 0.35, 0.0];
+        let coeffs = [1.0, 1.0, 0.2, 0.0, 1.0, -1.0, 0.35, 0.0, 0.0];
         let r = NeuralRanker::from_prior(&coeffs);
         let f = RankFeatures {
             positional: -1.1,
@@ -239,6 +290,7 @@ mod tests {
             correction_promote: 0.0,
             correction_demote: 0.0,
             spatial: 0.0,
+            lm_logprob: 0.0,
         };
         let want = coeffs[0] * f.positional + coeffs[1] * f.ln_momentum + coeffs[2] * 1.0;
         assert!((r.score(&f) - f64::from(want)).abs() < 1e-3);
@@ -254,8 +306,12 @@ mod tests {
             correction_promote: 0.3,
             correction_demote: -0.4,
             spatial: 0.5,
+            lm_logprob: 0.6,
         };
-        assert_eq!(f.to_array(), [-0.7, 0.2, 1.0, 0.0, 0.3, -0.4, 0.5, 1.0]);
+        assert_eq!(
+            f.to_array(),
+            [-0.7, 0.2, 1.0, 0.0, 0.3, -0.4, 0.5, 0.6, 1.0]
+        );
     }
 
     /// Build the exact same feature vector the cold-start prior scores as the
@@ -270,12 +326,13 @@ mod tests {
             correction_promote: 0.0,
             correction_demote: 0.0,
             spatial: 0.0,
+            lm_logprob: 0.0,
         }
     }
 
     /// Coefficients that make the prior's linear score identical to the classic
     /// ranker's blend. Slots 0/1/2/3 mirror `positional_score`, `LM_WEIGHT_LANG`,
-    /// and the per-source priors. Slots 4/5/6 multiply features that are 0 in
+    /// and the per-source priors. Slots 4/5/6/7 multiply features that are 0 in
     /// this corpus, so their exact values are irrelevant here.
     fn cold_start_coeffs() -> [f32; INPUTS] {
         use featherkey_candidate_ranker::{
@@ -289,6 +346,7 @@ mod tests {
             1.0,
             -1.0,
             0.35,
+            0.0,
             0.0,
         ]
     }

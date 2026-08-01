@@ -5,7 +5,7 @@ publish = false
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Tiny neural re-ranker: an 8-slot feature vector and a cold-start prior that reproduces the linear candidate ranking."
+description = "Tiny neural re-ranker: a 9-slot feature vector (including the confidence-gated lm_logprob LM term) and a cold-start prior that reproduces the linear candidate ranking."
 
 [package.metadata.featherkey]
 layer = "domain"

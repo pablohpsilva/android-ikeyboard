@@ -417,6 +417,7 @@ dependencies = [
  "featherkey-language-momentum",
  "featherkey-layout-engine",
  "featherkey-locale-manager",
+ "featherkey-neural-lm",
  "featherkey-neural-ranker",
  "featherkey-neural-tap",
  "featherkey-personalization",

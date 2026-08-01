@@ -31,9 +31,19 @@ vector (see `learn/tests.rs::eviction_resets_the_reused_indexs_learned_state`).
 Encrypted persistence is deferred to a later task in the
 neural-lm-foundation plan.
 
+**SP2 (live-strip integration) is now wired up.** `featherkey-core` owns a
+`NextWordLm` + `RecentWords` context buffer, blends its confidence-gated
+next-word log-probability into `featherkey-neural-ranker`'s 9th
+(`lm_logprob`) feature slot, seeds LM-ranked candidates at word boundaries,
+and calls `observe` from `learn_word` to train the model online — gated by
+the same BR-22 (consent) / BR-26 (sensitive-context suppression) rules as
+`context.record`. This crate remains a pure, host-testable domain crate with
+no knowledge of the strip; the wiring lives entirely in
+`featherkey-core::rank`/`rank_features`/`learn`.
+
 ## Ports
 
-Depends on `featherkey-nn` (the tiny MLP substrate the LM will be built on),
+Depends on `featherkey-nn` (the tiny MLP substrate the LM is built on),
 `featherkey-contracts` (for the `SecureStore` port and the
 `Namespace::PersonalLm` key `b"lm_v1"` `NextWordLm::persist`/`load` use —
 distinct from `featherkey-context`'s `b"v1"` key in the same namespace), and
@@ -56,16 +66,14 @@ token-learnability rules have exactly one definition).
   the early (near-empty-vocabulary) footprint further, but adds
   reallocation and a variable codec — recorded as a future optimization, not
   built now.
-- **SP2 wiring.** This crate is host-testable in isolation and is not yet
-  called from anywhere in the running keyboard. Sub-project 2 (a separate,
-  later slice) wires it up: blending `NextWordLm`'s scores into
-  `StatisticalPredictor::suggest_ranked` alongside the bigram (confidence-
-  gated so the bigram leads cold), the online-`observe` call site in
-  `learn.rs`, and gating that call under BR-22 (consent) / BR-26 (sensitive-
-  context suppression) exactly where `context.record` is gated today.
+- **Per-user personalization beyond online SGD.** `observe`'s one-step-per-call
+  training is the whole personalization mechanism today; anything richer
+  (e.g. periodic batch re-training, per-user hyperparameter tuning) is a
+  future optimization, not built now.
 
 ## Serves (BRs)
 
-**BR-10/BR-11**-adjacent: neural roadmap app #4 (embedding next-word LM),
-sub-project 1. SP1 delivers the enabling model in isolation; SP2 closes
-BR-10/BR-11 against the live suggestion strip.
+**BR-10/BR-11**: neural roadmap app #4 (embedding next-word LM). SP1
+delivered the enabling model in isolation; SP2 wires it into
+`featherkey-core`'s live suggestion strip (re-ranker feature + word-boundary
+seeding + online training), closing BR-10/BR-11.

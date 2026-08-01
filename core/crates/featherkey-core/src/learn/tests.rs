@@ -82,6 +82,8 @@ fn probe() -> RankFeatures {
         correction_promote: 0.1,
         correction_demote: 0.0,
         spatial: 0.3,
+        // stopgap; production never produces anything but 0.0 (Task 5 fills it in)
+        lm_logprob: 0.0,
     }
 }
 
@@ -350,6 +352,33 @@ fn the_autocorrect_gate_survives_persist_and_restore() {
 }
 
 #[test]
+fn a_cold_lm_survives_persist_then_restore() {
+    // Task 4: ownership + lifecycle only — the LM is not trained or consulted
+    // for ranking yet (Tasks 5/7), so this round-trips a cold model (via the
+    // `lm()` test accessor, mirroring `tap_warp()`/`neural_ranker()`) and
+    // proves persist/restore leaves `rank_suggestions` output unchanged.
+    let store = mem_store();
+    let mut fk = core();
+    fk.persist(&store).expect("persist");
+
+    let mut restored = core();
+    restored.restore(&store).expect("restore");
+
+    assert_eq!(restored.lm().confidence(), fk.lm().confidence());
+    assert_eq!(
+        restored.lm().score_next(&[], "tea"),
+        fk.lm().score_next(&[], "tea")
+    );
+
+    let before = fk.rank_suggestions("", "te", no_device());
+    let after = restored.rank_suggestions("", "te", no_device());
+    assert_eq!(
+        after, before,
+        "persist -> restore of a cold LM must not change suggestion ranking"
+    );
+}
+
+#[test]
 fn revert_suppresses_a_repeatedly_reverted_correction() {
     let mut fk = correction_core();
     let _ = fk.choose_correction("xat", &[], vec![]).expect("ok");
@@ -372,4 +401,51 @@ fn a_sensitive_field_records_nothing() {
     fk.observe_autocorrect_outcome(AutocorrectOutcome::Reverted, &Sensitive);
     let after = fk.autocorrect_gate.residual(&features);
     assert_eq!(before, after, "gate must not change");
+}
+
+#[test]
+fn learn_word_trains_the_lm_and_raises_confidence() {
+    let mut fk = core();
+    assert_eq!(fk.lm().confidence(), 0.0, "cold start: nothing learned yet");
+
+    // Drive the real `learn_word` path (gated, buffer-advancing) — not the
+    // `lm_mut()` test seam — repeatedly committing the same "the" -> "cat"
+    // transition. Each call's `preceding` ("the") never equals the buffer's
+    // "newer" slot (which settles on "cat" after the first push), so every
+    // call trains the same one-word context deterministically.
+    for _ in 0..30 {
+        fk.learn_word("the", "cat", &non_sensitive());
+    }
+
+    assert!(
+        fk.lm().confidence() > 0.0,
+        "committing words under consent must warm the LM"
+    );
+
+    let top = fk.lm().rank_next(&["the"], 1);
+    assert_eq!(
+        top.first().map(|(w, _)| w.as_str()),
+        Some("cat"),
+        "the repeatedly-learned transition must become the LM's top prediction"
+    );
+}
+
+#[test]
+fn a_sensitive_field_trains_no_lm() {
+    // @BR-26
+    let mut fk = core();
+    fk.learn_word("the", "cat", &sensitive());
+    fk.learn_word("cat", "sat", &sensitive());
+
+    assert_eq!(
+        fk.lm().confidence(),
+        0.0,
+        "a sensitive field must not train the LM"
+    );
+    assert_eq!(
+        fk.recent_mut().two_word_context("sat"),
+        vec!["sat".to_string()],
+        "a sensitive field must not advance the recent-words buffer either \
+         (a real advance would make this a coherent 2-word [\"cat\", \"sat\"] context)"
+    );
 }

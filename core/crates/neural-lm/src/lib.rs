@@ -9,5 +9,5 @@ mod model;
 mod persist;
 mod vocab;
 
-pub use model::NextWordLm;
+pub use model::{LmScores, NextWordLm};
 pub use vocab::Vocab;
