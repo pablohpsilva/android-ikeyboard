@@ -31,6 +31,7 @@ mod learn;
 mod packs;
 mod rank;
 mod rank_features;
+mod recent;
 mod spatial;
 
 #[cfg(feature = "uniffi")]
