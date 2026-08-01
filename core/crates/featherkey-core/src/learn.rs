@@ -18,6 +18,7 @@ use featherkey_contracts::{SecureStore, SensitiveContextSource};
 use featherkey_corrections::Corrections;
 use featherkey_kernel::KeyId;
 use featherkey_neural_ranker::{NeuralRanker, RankFeatures};
+use featherkey_neural_tap::{TapWarp, WARP_LR};
 use featherkey_personalization::Personalization;
 use featherkey_touch_model::TouchModel;
 
@@ -181,6 +182,15 @@ impl FeatherKeyCore {
     /// **unless** `field` is sensitive, in which case the tap is dropped
     /// unlearned (E-2, BR-26).
     ///
+    /// Also reinforces the neural tap-warp (design §6) toward
+    /// `t = mean_k − (dx, dy)`, where `mean_k` is the per-key [`TouchModel`]
+    /// mean read **before** this observation folds in. Reading the pre-fold
+    /// mean is what prevents double-correction: once `touch_model` has fully
+    /// converged for `key` (`mean_k == dx`), the residual target is `(0, 0)`
+    /// and the warp stops moving for that key, handing steady-state correction
+    /// to the per-key model while the warp itself keeps generalizing the
+    /// transient signal to keys never directly tapped.
+    ///
     /// # Errors
     /// [`FeatherKeyError::TouchModel`] if the offset is non-finite (the model is
     /// left unchanged).
@@ -194,7 +204,12 @@ impl FeatherKeyCore {
         if self.sensitivity.should_suppress(field) {
             return Ok(());
         }
+        let (mx, my) = self.touch_model.offset(KeyId(key));
         self.touch_model.observe(KeyId(key), dx, dy)?;
+        if let Some(center) = self.layout.center_of(key) {
+            let (nx, ny) = self.layout.normalize(center.x + dx, center.y + dy);
+            self.tap_warp.reinforce(nx, ny, mx - dx, my - dy, WARP_LR);
+        }
         Ok(())
     }
 
@@ -250,6 +265,7 @@ impl FeatherKeyCore {
         self.corrections.persist(store)?;
         self.neural_ranker.persist(store)?;
         self.autocorrect_gate.persist(store)?;
+        self.tap_warp.persist(store)?;
         Ok(())
     }
 
@@ -266,234 +282,11 @@ impl FeatherKeyCore {
         self.corrections = Corrections::load(store)?;
         self.neural_ranker = NeuralRanker::load(store, &PRIOR_COEFFS)?;
         self.autocorrect_gate = AutocorrectGate::load(store)?;
+        self.tap_warp = TapWarp::load(store)?;
         Ok(())
     }
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-mod tests {
-    use super::*;
-    use featherkey_autocorrect_gate::GateFeatures;
-    use featherkey_contracts::Candidate;
-    use featherkey_neural_ranker::RankFeatures;
-
-    struct Ordinary;
-    impl SensitiveContextSource for Ordinary {
-        fn is_sensitive(&self) -> bool {
-            false
-        }
-    }
-
-    struct Sensitive;
-    impl SensitiveContextSource for Sensitive {
-        fn is_sensitive(&self) -> bool {
-            true
-        }
-    }
-
-    fn correction_core() -> FeatherKeyCore {
-        FeatherKeyCore::new(vec![(
-            "en".into(),
-            vec!["cat".into(), "dog".into(), "hat".into(), "bat".into()],
-        )])
-        .expect("core")
-    }
-
-    /// A core whose "te…" completions are `tea` < `team` < `teach`.
-    fn core() -> FeatherKeyCore {
-        FeatherKeyCore::new(vec![(
-            "en".to_owned(),
-            vec!["tea".to_owned(), "team".to_owned(), "teach".to_owned()],
-        )])
-        .expect("valid single-language core")
-    }
-
-    fn no_device() -> Vec<Candidate> {
-        Vec::new()
-    }
-
-    /// A representative feature vector for weight-comparison probes (arbitrary
-    /// values that exercise every slot, so any weight change moves the score).
-    fn probe() -> RankFeatures {
-        RankFeatures {
-            positional: -0.7,
-            ln_momentum: 0.2,
-            is_lexicon: 1.0,
-            is_device: 0.0,
-            correction_promote: 0.1,
-            correction_demote: 0.0,
-            spatial: 0.3,
-        }
-    }
-
-    fn probe_score(core: &FeatherKeyCore) -> f64 {
-        core.neural_ranker().score(&probe())
-    }
-
-    /// A representative feature vector for the autocorrect gate (arbitrary
-    /// values that exercise every slot, so a weight change moves the residual).
-    fn gate_probe() -> GateFeatures {
-        GateFeatures {
-            edit_distance: 1.0,
-            winner_confidence: 0.6,
-            dict_rank_norm: 0.3,
-            typed_len_norm: 0.4,
-            momentum_weight: 0.1,
-        }
-    }
-
-    #[test]
-    fn a_pick_that_also_commits_trains_only_once() {
-        // Control: exactly one strip pick after one ranked query → one reinforce.
-        let mut once = core();
-        let _ = once.rank_suggestions("", "te", no_device());
-        once.observe_strip_pick("te", "team", &Ordinary);
-
-        // Test: the same pick, then the commit of the same word. The pick
-        // consumed the only snapshot, so `learn_word` finds none and trains
-        // nothing — the net weights must match the single-reinforce control.
-        let mut pick_then_commit = core();
-        let _ = pick_then_commit.rank_suggestions("", "te", no_device());
-        pick_then_commit.observe_strip_pick("te", "team", &Ordinary);
-        pick_then_commit.learn_word("", "team", &Ordinary);
-
-        let untrained = probe_score(&core());
-        assert_ne!(
-            probe_score(&once),
-            untrained,
-            "the single pick must actually train the ranker (else the test is vacuous)"
-        );
-        assert_eq!(
-            probe_score(&pick_then_commit),
-            probe_score(&once),
-            "pick + commit must train exactly once (snapshot consumed by the pick)"
-        );
-
-        // And two picks (each refreshing the snapshot) train twice — proving the
-        // equality above is the consumed snapshot, not an inert second update.
-        let mut twice = core();
-        let _ = twice.rank_suggestions("", "te", no_device());
-        twice.observe_strip_pick("te", "team", &Ordinary);
-        let _ = twice.rank_suggestions("", "te", no_device());
-        twice.observe_strip_pick("te", "team", &Ordinary);
-        assert_ne!(
-            probe_score(&twice),
-            probe_score(&once),
-            "two full pick rounds must train twice, unlike one pick + commit"
-        );
-    }
-
-    #[test]
-    fn reinforce_from_pick_consumes_the_matching_snapshot() {
-        let mut fk = core();
-        let _ = fk.rank_suggestions("", "te", no_device());
-        assert!(fk.last_ranked().is_some());
-        let before = probe_score(&fk);
-
-        fk.reinforce_from_pick("te", "team");
-
-        assert!(
-            fk.last_ranked().is_none(),
-            "a successful reinforce consumes (clears) the snapshot"
-        );
-        assert_ne!(
-            before,
-            probe_score(&fk),
-            "the matching pick trained the net"
-        );
-    }
-
-    #[test]
-    fn reinforce_from_pick_ignores_a_prefix_mismatch() {
-        let mut fk = core();
-        let _ = fk.rank_suggestions("", "te", no_device());
-        let before = probe_score(&fk);
-
-        // Snapshot prefix is "te"; a pick reported under a different prefix does
-        // not train and leaves the snapshot intact for its real prefix.
-        fk.reinforce_from_pick("xy", "team");
-
-        assert!(fk.last_ranked().is_some(), "a mismatch leaves the snapshot");
-        assert_eq!(before, probe_score(&fk), "a prefix mismatch trains nothing");
-    }
-
-    #[test]
-    fn reinforce_from_pick_ignores_a_word_not_in_the_shown_set() {
-        let mut fk = core();
-        let _ = fk.rank_suggestions("", "te", no_device());
-        let before = probe_score(&fk);
-
-        // "zzz" was never shown for this prefix: no chosen index, no training.
-        fk.reinforce_from_pick("te", "zzz");
-
-        assert!(
-            fk.last_ranked().is_some(),
-            "an unshown word leaves the snapshot"
-        );
-        assert_eq!(before, probe_score(&fk), "an unshown word trains nothing");
-    }
-
-    #[test]
-    fn reinforce_from_pick_is_a_noop_without_a_snapshot() {
-        let mut fk = core();
-        // No rank_suggestions call, so there is no cached snapshot at all.
-        assert!(fk.last_ranked().is_none());
-        let before = probe_score(&fk);
-
-        fk.reinforce_from_pick("te", "team");
-
-        assert_eq!(before, probe_score(&fk), "no snapshot means no training");
-    }
-
-    #[test]
-    fn the_autocorrect_gate_survives_persist_and_restore() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let store = crate::RedbSecureStore::open(dir.path().join("gate.redb"), [11u8; 32])
-            .expect("open store");
-
-        // Drive one suppression so the gate diverges from its cold-start prior
-        // (Task 9 wires the real observe call; here the crate-internal field is
-        // reached directly, mirroring how the neural-ranker restore test reaches
-        // `neural_ranker()`).
-        let mut fk = core();
-        let f = gate_probe();
-        for _ in 0..50 {
-            fk.autocorrect_gate.reinforce(&f, -1.0, 0.05);
-        }
-        fk.persist(&store).expect("persist");
-
-        let mut restored = core();
-        restored.restore(&store).expect("restore");
-        assert!(
-            (restored.autocorrect_gate.residual(&f) - fk.autocorrect_gate.residual(&f)).abs()
-                < 1e-6,
-            "the gate's learned residual must survive persist -> restore"
-        );
-    }
-
-    #[test]
-    fn revert_suppresses_a_repeatedly_reverted_correction() {
-        let mut fk = correction_core();
-        let _ = fk.choose_correction("xat", &[], vec![]).expect("ok");
-        // The feature-sensitive prior converges smoothly: a strong correction
-        // crosses the floor in ~4 reverts (product-approved 3–5); 8 is the margin.
-        for _ in 0..8 {
-            let _ = fk.choose_correction("xat", &[], vec![]).expect("ok");
-            fk.observe_autocorrect_outcome(AutocorrectOutcome::Reverted, &Ordinary);
-        }
-        let got = fk.choose_correction("xat", &[], vec![]).expect("ok");
-        assert!(!got.applied, "the user's reverts pushed it under the floor");
-    }
-
-    #[test]
-    fn a_sensitive_field_records_nothing() {
-        let mut fk = correction_core();
-        let _ = fk.choose_correction("xat", &[], vec![]).expect("ok");
-        let features = fk.last_correction.as_ref().expect("cached").features;
-        let before = fk.autocorrect_gate.residual(&features);
-        fk.observe_autocorrect_outcome(AutocorrectOutcome::Reverted, &Sensitive);
-        let after = fk.autocorrect_gate.residual(&features);
-        assert_eq!(before, after, "gate must not change");
-    }
-}
+mod tests;
