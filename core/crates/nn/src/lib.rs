@@ -5,6 +5,7 @@
 mod codec;
 mod error;
 mod multi;
+mod multi_codec;
 mod multi_train;
 mod prior;
 mod train;
