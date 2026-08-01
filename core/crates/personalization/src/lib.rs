@@ -34,6 +34,16 @@ mod codec;
 /// mis-parsed.
 const BLOB_KEY: &[u8] = b"v1";
 
+/// Storage key for the personal proper-noun blob (BR-69), a *separate* value
+/// under [`Namespace::UserDict`]. Kept apart from [`BLOB_KEY`] because the
+/// proper-noun encoding (folded → canonical) would be ambiguous inside the
+/// frequency/whitelist blob. An install without this key loads an empty set.
+const PROPER_KEY: &[u8] = b"proper_v1";
+
+/// Upper bound on learned personal proper nouns (BR-69). Once full, new keys are
+/// ignored (existing keys still update), so the encrypted blob stays bounded.
+const PROPER_NOUN_CAP: usize = 2000;
+
 /// A word is storable only if it is non-empty and free of the codec's line/field
 /// separators (`\n`, `\t`). A word containing one would corrupt the encoded blob
 /// (making the model unloadable) or silently split into two words on load. Typed
@@ -63,6 +73,10 @@ pub struct Personalization {
     frequencies: BTreeMap<String, u32>,
     /// Words the user has explicitly accepted, independent of frequency.
     whitelist: BTreeSet<String>,
+    /// Personal proper nouns (BR-69): folded key → canonical-cased spelling,
+    /// learned from words the user habitually capitalizes mid-sentence. Bounded
+    /// by [`PROPER_NOUN_CAP`]; persisted under [`PROPER_KEY`].
+    proper_nouns: BTreeMap<String, String>,
 }
 
 impl Personalization {
@@ -134,6 +148,28 @@ impl Personalization {
         self.whitelist.insert(word.to_owned());
     }
 
+    /// Record a personal proper noun as `folded` key → `canonical` spelling
+    /// (BR-69). Bounded: once at [`PROPER_NOUN_CAP`], a *new* key is ignored (an
+    /// existing key still updates its canonical form). Either string carrying the
+    /// codec's separators is rejected, exactly like [`observe`](Self::observe).
+    pub fn observe_proper_noun(&mut self, folded: &str, canonical: &str) {
+        if !is_storable(folded) || !is_storable(canonical) {
+            return;
+        }
+        if !self.proper_nouns.contains_key(folded) && self.proper_nouns.len() >= PROPER_NOUN_CAP {
+            return;
+        }
+        self.proper_nouns
+            .insert(folded.to_owned(), canonical.to_owned());
+    }
+
+    /// The learned personal proper-noun set (folded → canonical), read-only.
+    /// Ordered (`BTreeMap`) so any derived iteration is deterministic.
+    #[must_use]
+    pub fn proper_nouns(&self) -> &BTreeMap<String, String> {
+        &self.proper_nouns
+    }
+
     /// Encrypt-and-store the whole model through the injected store.
     ///
     /// The entire model — frequency dictionary *and* whitelist — is serialized
@@ -149,7 +185,10 @@ impl Personalization {
     /// no error of its own on the write path.
     pub fn persist(&self, store: &impl SecureStore) -> Result<(), StoreError> {
         let blob = codec::encode_model(&self.frequencies, &self.whitelist);
-        store.put(Namespace::UserDict, BLOB_KEY, &blob)
+        store.put(Namespace::UserDict, BLOB_KEY, &blob)?;
+        // Proper nouns ride in their own blob (BR-69) — see `PROPER_KEY`.
+        let proper = codec::encode_proper(&self.proper_nouns);
+        store.put(Namespace::UserDict, PROPER_KEY, &proper)
     }
 
     /// Load a model previously written by [`persist`](Personalization::persist).
@@ -168,9 +207,15 @@ impl Personalization {
             Some(bytes) => codec::decode_model(&bytes)?,
             None => (BTreeMap::new(), BTreeSet::new()),
         };
+        // A missing proper-noun blob is a clean pre-BR-69 install: empty set.
+        let proper_nouns = match store.get(Namespace::UserDict, PROPER_KEY)? {
+            Some(bytes) => codec::decode_proper(&bytes)?,
+            None => BTreeMap::new(),
+        };
         Ok(Self {
             frequencies,
             whitelist,
+            proper_nouns,
         })
     }
 }
@@ -245,6 +290,80 @@ mod tests {
         let mut p = Personalization::new();
         p.whitelist("");
         assert!(!p.is_known(""));
+    }
+
+    // --- BR-69: personal proper nouns ----------------------------------------
+
+    #[derive(Default)]
+    struct MemStore {
+        map: std::cell::RefCell<std::collections::HashMap<Vec<u8>, Vec<u8>>>,
+    }
+    impl SecureStore for MemStore {
+        fn put(&self, _ns: Namespace, key: &[u8], val: &[u8]) -> Result<(), StoreError> {
+            self.map.borrow_mut().insert(key.to_vec(), val.to_vec());
+            Ok(())
+        }
+        fn get(&self, _ns: Namespace, key: &[u8]) -> Result<Option<Vec<u8>>, StoreError> {
+            Ok(self.map.borrow().get(key).cloned())
+        }
+    }
+
+    #[test]
+    fn learns_and_reads_back_a_personal_proper_noun() {
+        let mut p = Personalization::new();
+        p.observe_proper_noun("zoe", "Zoë");
+        assert_eq!(p.proper_nouns().get("zoe").map(String::as_str), Some("Zoë"));
+    }
+
+    #[test]
+    fn proper_noun_rejects_separator_bearing_strings() {
+        let mut p = Personalization::new();
+        p.observe_proper_noun("a\tb", "X");
+        p.observe_proper_noun("k", "A\nB");
+        p.observe_proper_noun("", "X");
+        assert!(p.proper_nouns().is_empty());
+    }
+
+    #[test]
+    fn proper_noun_map_is_bounded_but_updates_existing_keys() {
+        let mut p = Personalization::new();
+        for i in 0..(PROPER_NOUN_CAP + 50) {
+            p.observe_proper_noun(&format!("k{i}"), &format!("K{i}"));
+        }
+        assert_eq!(p.proper_nouns().len(), PROPER_NOUN_CAP);
+        // An existing key still updates its canonical form even when full.
+        p.observe_proper_noun("k0", "Updated");
+        assert_eq!(
+            p.proper_nouns().get("k0").map(String::as_str),
+            Some("Updated")
+        );
+    }
+
+    #[test]
+    fn proper_nouns_survive_persist_and_load() {
+        let store = MemStore::default();
+        let mut p = Personalization::new();
+        p.observe("cat"); // the frequency blob rides alongside, untouched
+        p.observe_proper_noun("zoe", "Zoë");
+        p.persist(&store).unwrap();
+        let loaded = Personalization::load(&store).unwrap();
+        assert_eq!(
+            loaded.proper_nouns().get("zoe").map(String::as_str),
+            Some("Zoë")
+        );
+        assert_eq!(loaded.frequency("cat"), 1);
+    }
+
+    #[test]
+    fn load_without_a_proper_blob_yields_an_empty_set() {
+        let store = MemStore::default();
+        let mut p = Personalization::new();
+        p.observe_proper_noun("zoe", "Zoë");
+        p.persist(&store).unwrap();
+        // Simulate a pre-BR-69 install that never wrote the proper-noun blob.
+        store.map.borrow_mut().remove(&PROPER_KEY.to_vec());
+        let loaded = Personalization::load(&store).unwrap();
+        assert!(loaded.proper_nouns().is_empty());
     }
 
     #[test]

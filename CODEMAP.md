@@ -314,7 +314,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Depends on:** `featherkey-contracts`
 - **Serves:** BR-7, BR-9, BR-11, BR-13, BR-14, BR-57
 - **Structs:** `Personalization`
-- **Methods:** `Personalization::frequencies`, `Personalization::frequency`, `Personalization::import`, `Personalization::is_known`, `Personalization::load`, `Personalization::new`, `Personalization::observe`, `Personalization::persist`, `Personalization::whitelist`
+- **Methods:** `Personalization::frequencies`, `Personalization::frequency`, `Personalization::import`, `Personalization::is_known`, `Personalization::load`, `Personalization::new`, `Personalization::observe`, `Personalization::observe_proper_noun`, `Personalization::persist`, `Personalization::proper_nouns`, `Personalization::whitelist`
 - **Integration tests:** `tests/roundtrip.rs`
 
 ### featherkey-prediction
@@ -989,7 +989,9 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `Personalization::load` | method — `featherkey-personalization` |
 | `Personalization::new` | method — `featherkey-personalization` |
 | `Personalization::observe` | method — `featherkey-personalization` |
+| `Personalization::observe_proper_noun` | method — `featherkey-personalization` |
 | `Personalization::persist` | method — `featherkey-personalization` |
+| `Personalization::proper_nouns` | method — `featherkey-personalization` |
 | `Personalization::whitelist` | method — `featherkey-personalization` |
 | `PhysicalKeyboardLayout` | kotlin object — `:platform-services` |
 | `PhysicalKeyboardLayout.classify` | kotlin fun — `:platform-services` |

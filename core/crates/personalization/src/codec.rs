@@ -86,6 +86,43 @@ pub(crate) fn decode_model(
     Ok((freqs, whitelist))
 }
 
+/// Encode the personal proper-noun map (folded key → canonical spelling) into
+/// its own blob (BR-69), one `"<folded>\t<canonical>"` line per entry, in
+/// `BTreeMap` order. Kept separate from the frequency/whitelist blob: a
+/// tab-bearing proper-noun line would be misread as a frequency record if it
+/// shared that blob. An empty map encodes to zero bytes.
+pub(crate) fn encode_proper(map: &BTreeMap<String, String>) -> Vec<u8> {
+    let mut out = String::new();
+    let mut first = true;
+    for (folded, canonical) in map {
+        if !first {
+            out.push('\n');
+        }
+        first = false;
+        // Writing to a `String` is infallible; the result is only ever `Ok`.
+        let _ = write!(out, "{folded}{FIELD_SEP}{canonical}");
+    }
+    out.into_bytes()
+}
+
+/// Decode a proper-noun blob written by [`encode_proper`].
+///
+/// # Errors
+/// [`StoreError::Backend`] if `bytes` is not valid UTF-8, or a line is missing
+/// the field separator (a corrupt blob is a backend fault, not a value).
+pub(crate) fn decode_proper(bytes: &[u8]) -> Result<BTreeMap<String, String>, StoreError> {
+    let text = std::str::from_utf8(bytes).map_err(|_| StoreError::Backend)?;
+    let mut map = BTreeMap::new();
+    if text.is_empty() {
+        return Ok(map);
+    }
+    for line in text.split('\n') {
+        let (folded, canonical) = line.split_once(FIELD_SEP).ok_or(StoreError::Backend)?;
+        map.insert(folded.to_owned(), canonical.to_owned());
+    }
+    Ok(map)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
@@ -165,6 +202,35 @@ mod tests {
         // 2^32 does not fit in u32.
         assert_eq!(
             decode_model(b"4294967296\tw").err(),
+            Some(StoreError::Backend)
+        );
+    }
+
+    #[test]
+    fn proper_map_round_trips() {
+        let mut m = BTreeMap::new();
+        m.insert("joao".to_owned(), "João".to_owned());
+        m.insert("zoe".to_owned(), "Zoë".to_owned());
+        let bytes = encode_proper(&m);
+        assert_eq!(decode_proper(&bytes).unwrap(), m);
+    }
+
+    #[test]
+    fn empty_proper_map_encodes_to_no_bytes_and_back() {
+        let bytes = encode_proper(&BTreeMap::new());
+        assert!(bytes.is_empty());
+        assert_eq!(decode_proper(&bytes).unwrap(), BTreeMap::new());
+    }
+
+    #[test]
+    fn decode_proper_rejects_non_utf8() {
+        assert_eq!(decode_proper(&[0xff]).err(), Some(StoreError::Backend));
+    }
+
+    #[test]
+    fn decode_proper_rejects_a_line_without_a_separator() {
+        assert_eq!(
+            decode_proper(b"noseparator").err(),
             Some(StoreError::Backend)
         );
     }
