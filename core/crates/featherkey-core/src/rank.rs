@@ -26,9 +26,13 @@ use crate::{FeatherKeyCore, CORRECTION_STICKY_WEIGHT, CORRECTION_UNWANTED_WEIGHT
 /// decide.
 const SPATIAL_WEIGHT: f64 = 0.35;
 
-/// Cold-start weight of the `lm_logprob` feature slot. `lm_logprob` is a
-/// stopgap literal `0.0` until Task 5 fills in the real value, so this
-/// coefficient has no observable effect yet; kept within
+/// Cold-start weight of the `lm_logprob` feature slot: the LM's confidence-
+/// gated, uniform-centered next-word log-probability (see
+/// [`FeatherKeyCore::rank_features`](crate::rank_features)). At cold start
+/// (`NextWordLm::confidence() == 0.0`) the feature itself is the literal
+/// `0.0`, so this coefficient has no effect until the LM has warmed up;
+/// once warm, it weights the term at unit strength alongside the other
+/// linear-parity slots. Kept within
 /// `|coeff| * FEATURE_BOUND(20) < PRIOR_OFFSET_C(64)`.
 const LM_LOGPROB_COEFF: f32 = 1.0;
 

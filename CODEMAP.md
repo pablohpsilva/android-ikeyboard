@@ -63,7 +63,7 @@ only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 | `featherkey-layout-engine` | domain | Provide keyboard-key layout geometry (alpha/numeric/symbol pages, key rectangles and centers) with an RTL-ready direction marker (ADR-16). | kernel |
 | `featherkey-locale-manager` | domain | Track the ordered set of active languages and identify, per word, which active language it belongs to (lightweight statistical language-ID). | dictionary |
 | `featherkey-neural-lm` | domain | Own the bounded per-user `Vocab` (word ↔ index map) that a tiny on-device embedding next-word LM trains and predicts over. | context, contracts, nn |
-| `featherkey-neural-ranker` | domain | Tiny neural re-ranker: an 8-slot feature vector and a cold-start prior that reproduces the linear candidate ranking. | contracts, nn |
+| `featherkey-neural-ranker` | domain | Tiny neural re-ranker: a 9-slot feature vector (including the confidence-gated lm_logprob LM term) and a cold-start prior that reproduces the linear candidate ranking. | contracts, nn |
 | `featherkey-neural-tap` | domain | Learn a per-user coordinate warp — a bounded `(Δx, Δy)` pixel shift over a normalized tap position `(nx, ny)` in `[-1,1]` — that generalizes a person's systematic tap bias across keys, rather than per-key. | contracts, nn |
 | `featherkey-nn` | domain | Tiny, dependency-free neural substrate — 1-hidden-layer MLP | — |
 | `featherkey-personalization` | domain | Learn the user's vocabulary/whitelist and own the user dictionary — the sole writer of the lexical learned-data domain (`Namespace::UserDict`, ADR-14). | contracts |
@@ -279,7 +279,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 ### featherkey-neural-ranker
 
 - **Path:** `core/crates/neural-ranker` — **Layer:** domain
-- **One job:** Tiny neural re-ranker: an 8-slot feature vector and a cold-start prior that reproduces the linear candidate ranking.
+- **One job:** Tiny neural re-ranker: a 9-slot feature vector (including the confidence-gated lm_logprob LM term) and a cold-start prior that reproduces the linear candidate ranking.
 - **Depends on:** `featherkey-contracts`, `featherkey-nn`
 - **Structs:** `NeuralRanker`, `RankFeatures`
 - **Constants:** `INPUTS`
