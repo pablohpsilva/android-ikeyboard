@@ -473,6 +473,7 @@ Behaviour specs in `core/features/`, tagged to requirement IDs and gated by
 | `neural-reranker.feature` | The suggestion strip learns which word I mean | 1 | BR-11 |
 | `neural-tap-decoder.feature` | The tap decoder learns the user's systematic aim and generalizes it | 4 | BR-7 |
 | `neural_lm.feature` | On-device neural next-word language model (foundation) | 4 | BR-10, BR-11 |
+| `neural_lm_integration.feature` | Neural next-word LM wired into the live suggestion strip | 4 | BR-10, BR-11, BR-26 |
 | `personalization.feature` | On-device personal vocabulary learning | 3 | BR-7, BR-13 |
 | `prediction.feature` | Relevant autocomplete completions for the in-progress word | 4 | BR-10 |
 | `secure-store.feature` | Encrypted persistence of personal data | 4 | BR-8, BR-23, BR-62 |

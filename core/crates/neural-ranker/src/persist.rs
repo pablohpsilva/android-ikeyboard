@@ -64,7 +64,7 @@ mod tests {
     use std::cell::RefCell;
     use std::collections::HashMap;
 
-    const PRIOR: [f32; INPUTS] = [1.0, 1.0, 0.2, 0.0, 1.0, -1.0, 0.35, 0.0];
+    const PRIOR: [f32; INPUTS] = [1.0, 1.0, 0.2, 0.0, 1.0, -1.0, 0.35, 0.0, 0.0];
 
     /// `(namespace, key) -> value` backing map for the test store.
     type StoreData = HashMap<(String, Vec<u8>), Vec<u8>>;
@@ -100,6 +100,7 @@ mod tests {
             correction_promote: 0.2,
             correction_demote: -0.1,
             spatial: 0.4,
+            lm_logprob: 0.0,
         }
     }
 
@@ -147,6 +148,27 @@ mod tests {
         assert_ne!(wrong_shape.inputs(), INPUTS);
         store
             .put(Namespace::RankerModel, BLOB_KEY, &wrong_shape.to_bytes())
+            .unwrap();
+
+        let loaded = NeuralRanker::load(&store, &PRIOR).unwrap();
+        let prior = NeuralRanker::from_prior(&PRIOR);
+        for p in [-2.0_f32, -1.0, 0.0, 0.5] {
+            let f = feat(p);
+            assert_eq!(loaded.score(&f), prior.score(&f));
+        }
+    }
+
+    #[test]
+    fn an_eight_slot_persisted_blob_migrates_to_the_nine_wide_prior() {
+        // A stored ranker whose inputs()==8 (the shipped shape before this
+        // change) must load as the 9-wide prior, not adopt misaligned
+        // weights: `load` falls back on `inputs() != INPUTS`.
+        let store = FakeStore::default();
+        let eight_slot =
+            Mlp::from_linear(&[1.0, 1.0, 0.2, 0.0, 1.0, -1.0, 0.35, 0.0], 0.0, 1.0, 64.0);
+        assert_ne!(eight_slot.inputs(), INPUTS);
+        store
+            .put(Namespace::RankerModel, BLOB_KEY, &eight_slot.to_bytes())
             .unwrap();
 
         let loaded = NeuralRanker::load(&store, &PRIOR).unwrap();
