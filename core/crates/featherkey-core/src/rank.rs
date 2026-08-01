@@ -112,13 +112,18 @@ impl FeatherKeyCore {
                 });
             }
         }
+        // Computed once per query: the LM's 2-word context for `preceding`, owned
+        // here so `rank_by`'s closure and `snapshot_shown` can both borrow it as
+        // `&[&str]` without re-deriving it per candidate.
+        let ctx_owned = self.recent.two_word_context(preceding);
+        let ctx: Vec<&str> = ctx_owned.iter().map(String::as_str).collect();
         let ranked = featherkey_candidate_ranker::rank_by(&cands, MAX_SUGGESTIONS, |c| {
             self.neural_ranker
-                .score(&self.rank_features(c, prefix, &spatial))
+                .score(&self.rank_features(c, prefix, &spatial, &ctx))
         });
         // Cache the shown set so a later strip pick can train the net against what
         // the user saw (Task 12); bounded to one snapshot, overwritten each query.
-        self.last_ranked = Some(self.snapshot_shown(prefix, &ranked, &cands, &spatial));
+        self.last_ranked = Some(self.snapshot_shown(prefix, &ranked, &cands, &spatial, &ctx));
         self.guarantee_fold_variant(prefix, ranked)
     }
 

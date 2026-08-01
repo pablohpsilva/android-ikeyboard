@@ -172,6 +172,39 @@ fn an_eight_slot_persisted_blob_migrates_to_the_nine_wide_prior() {
 
 ---
 
+## Task 2b: Make `featherkey-core` compile against the 9-slot ranker (parity stopgap)
+
+**Why:** Task 2 bumped `RankFeatures` to 9 slots, which breaks `featherkey-core`
+compilation (its `rank_features` builds a 7-field literal; `PRIOR_COEFFS` is `[f32;
+8]`). The real `lm_logprob` value needs the `lm`/`recent` fields (Tasks 3–5), so this
+task restores compilation with a **constant `0.0`** stopgap — which is also the exact
+cold-start value, so the strip order stays **byte-identical** to pre-LM (parity holds
+trivially). Task 5 replaces the `0.0` with the real computation.
+
+**Files:** Modify `core/crates/featherkey-core/src/rank_features.rs`, `src/rank.rs`
+
+- [ ] **Step 1:** In `rank_features` (the method in `rank_features.rs`), add
+  `lm_logprob: 0.0,` to the `RankFeatures { … }` it constructs (after `spatial`).
+- [ ] **Step 2:** In `rank.rs`, add `const LM_LOGPROB_COEFF: f32 = 1.0;` and grow
+  `PRIOR_COEFFS` to `[f32; 9]` = `[1.0, LM_WEIGHT_LANG as f32, SOURCE_PRIOR_LEXICON as
+  f32, SOURCE_PRIOR_DEVICE as f32, 1.0, -1.0, SPATIAL_WEIGHT as f32, LM_LOGPROB_COEFF,
+  0.0]` (the LM coeff at index 7, the `0.0` bias moves to index 8). Update the
+  `prior_coeffs_match_the_source_constants` drift-guard test's literal to the 9-slot
+  `[1.0, 1.0, 0.2, 0.0, 1.0, -1.0, 0.35, 1.0, 0.0]`.
+- [ ] **Step 3:** Confirm the parity golden still holds — add/keep a test that a fresh
+  core ranks `["tea","team","teal"]` for prefix `"te"` (byte-identical to pre-LM). The
+  existing `rank_features.rs` tests assert individual fields and are unaffected (they
+  don't build `RankFeatures` literals), but confirm they compile and pass.
+- [ ] **Step 4:** `cd core && cargo test -p featherkey-core` → GREEN (core compiles
+  again; behaviour unchanged because every `lm_logprob` is 0.0). `cargo fmt`. Regenerate
+  CODEMAP.
+- [ ] **Step 5: Commit** `feat(core): compile against 9-slot ranker; lm_logprob stopgap 0.0 (parity)`
+
+**DoD:** `featherkey-core` compiles and ALL its tests pass; parity golden byte-identical;
+`PRIOR_COEFFS` 9-wide + drift-guard updated. **Rollback:** revert the two files.
+
+---
+
 ## Task 3: `featherkey-core::RecentWords` — the no-FFI 2-word buffer
 
 **Files:** Create `core/crates/featherkey-core/src/recent.rs`; modify `lib.rs` (`mod recent;`)
@@ -300,7 +333,8 @@ fn a_warm_lm_reorders_completions_by_two_word_context() {
 - [ ] **Step 2: Run — fail.**
 - [ ] **Step 3: Implement.**
   - `NextWordLm::log_uniform`.
-  - `rank_features(cand, prefix, spatial, context)`: add
+  - `rank_features(cand, prefix, spatial, context)`: **replace the Task-2b
+    `lm_logprob: 0.0` stopgap** with
     ```rust
     lm_logprob: {
         let c = self.lm.confidence();
@@ -323,9 +357,10 @@ fn a_warm_lm_reorders_completions_by_two_word_context() {
     two in `rank.rs`/`rank_features.rs` that call `rank_features`/`rank_suggestions`).
     An inference/cold call passes the real 2-word context (empty `&[]` in the
     minimal unit tests); `snapshot_shown` forwards the same context it was given.
-  - `rank.rs`: grow `PRIOR_COEFFS` to 9 (insert `LM_LOGPROB_COEFF` before the bias);
-    update the drift-guard test literal (`prior_coeffs_match_the_source_constants`)
-    to the 9-slot `[1.0, 1.0, 0.2, 0.0, 1.0, -1.0, 0.35, LM_LOGPROB_COEFF, 0.0]`.
+  - `rank.rs`: `PRIOR_COEFFS`/`LM_LOGPROB_COEFF`/the drift-guard were already grown
+    to 9 in Task 2b — leave them; only re-tune `LM_LOGPROB_COEFF` here **if** the
+    warm-reorder test needs it (staying within `|coeff|·20 < 64`), updating the
+    drift-guard literal in lockstep if you change it.
 - [ ] **Step 4: Run — green** (parity + warm-reorder). If parity fails, the 9th coeff or the `confidence()==0` shortcut is wrong — fix, don't weaken the golden.
 - [ ] **Step 5: Commit** `feat(core): lm_logprob re-ranker feature (confidence-gated, cold-start parity)`
 

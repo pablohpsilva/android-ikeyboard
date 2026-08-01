@@ -48,8 +48,11 @@ impl RecentWords {
     ///   and an older word exists (coherent 2-word context).
     /// - `[preceding]` otherwise (safe k=1 degradation — never a WRONG 2-word context).
     ///
-    /// Not yet called from `FeatherKeyCore` (Task 5/7); see `push`'s note.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// Wired into `FeatherKeyCore::rank_suggestions` (Task 5): called once per
+    /// query to build the LM feature's context. `push` itself is not yet called
+    /// on the commit path (Task 7), so today this always falls through to the
+    /// `[preceding]`/`[]` branches — the LM feature's math is fully wired, but a
+    /// real 2-word context won't appear until Task 7 wires `push`.
     pub fn two_word_context(&self, preceding: &str) -> Vec<String> {
         // Empty preceding is a boundary — no context
         if preceding.is_empty() {

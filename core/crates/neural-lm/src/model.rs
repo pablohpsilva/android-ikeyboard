@@ -241,6 +241,16 @@ impl NextWordLm {
         n / (n + WARMUP_HALF)
     }
 
+    /// `ln(1 / OUTPUTS)`: the log-probability every class would have under a
+    /// perfectly uniform distribution. The single source of the output class
+    /// count (`2 + MAX_VOCAB`), so a caller centering a raw [`Self::score_next`]
+    /// (e.g. the `featherkey-core` re-ranker's `lm_logprob` feature) never
+    /// re-derives `OUTPUTS` itself.
+    #[must_use]
+    pub fn log_uniform(&self) -> f32 {
+        -((2 + MAX_VOCAB) as f32).ln()
+    }
+
     /// Forward + softmax over the assembled context.
     fn predict(&self, context: &[&str]) -> Vec<f32> {
         let (x, _indices) = self.assemble(context);

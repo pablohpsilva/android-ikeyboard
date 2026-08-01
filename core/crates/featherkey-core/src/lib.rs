@@ -388,11 +388,29 @@ impl FeatherKeyCore {
         &self.tap_warp
     }
 
-    /// The held next-word LM. Test-only accessor for persist/restore probes;
-    /// production ranking does not yet reach it (Task 5).
+    /// The held next-word LM. Test-only accessor for persist/restore probes.
     #[cfg(test)]
     pub(crate) fn lm(&self) -> &NextWordLm {
         &self.lm
+    }
+
+    /// Mutable access to the held next-word LM. Test-only seam: `learn_word`
+    /// does not yet drive `NextWordLm::observe` on the commit path (that is
+    /// Task 7), so a test that needs a *warm* LM to exercise the `lm_logprob`
+    /// re-ranker feature trains it directly through this accessor instead of
+    /// waiting on the not-yet-built wiring.
+    #[cfg(test)]
+    pub(crate) fn lm_mut(&mut self) -> &mut NextWordLm {
+        &mut self.lm
+    }
+
+    /// Mutable access to the ephemeral 2-word context buffer. Test-only seam:
+    /// `learn_word` does not yet call `RecentWords::push` on the commit path
+    /// (Task 7), so a test that needs the buffer positioned at a specific
+    /// 2-word boundary drives it directly through this accessor.
+    #[cfg(test)]
+    pub(crate) fn recent_mut(&mut self) -> &mut RecentWords {
+        &mut self.recent
     }
 
     /// The active layout. Test-only accessor for decode-path probes.

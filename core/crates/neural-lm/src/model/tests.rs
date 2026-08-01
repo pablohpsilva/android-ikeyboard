@@ -89,3 +89,11 @@ fn score_and_assemble_never_panic_on_a_short_or_empty_context() {
     assert!(lm.score_next(&[], "anything").is_finite());
     assert!(lm.score_next(&["only-one"], "anything").is_finite());
 }
+
+#[test]
+fn log_uniform_is_the_negative_log_of_the_output_class_count() {
+    // Single source of the class count (2 reserved + MAX_VOCAB == 2002), so a
+    // caller can center a raw score without re-deriving OUTPUTS itself.
+    let lm = NextWordLm::new();
+    assert_eq!(lm.log_uniform(), -(2002f32).ln());
+}

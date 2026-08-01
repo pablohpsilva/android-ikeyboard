@@ -274,7 +274,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Serves:** BR-10, BR-11
 - **Structs:** `NextWordLm`, `Vocab`
 - **Constants:** `BOS` *(internal)*, `MAX_VOCAB` *(internal)*, `UNK` *(internal)*
-- **Methods:** `NextWordLm::confidence`, `NextWordLm::load`, `NextWordLm::new`, `NextWordLm::observe`, `NextWordLm::persist`, `NextWordLm::rank_next`, `NextWordLm::score_next`, `Vocab::index_of`, `Vocab::intern`, `Vocab::is_empty`, `Vocab::len`, `Vocab::new`, `Vocab::word_of`
+- **Methods:** `NextWordLm::confidence`, `NextWordLm::load`, `NextWordLm::log_uniform`, `NextWordLm::new`, `NextWordLm::observe`, `NextWordLm::persist`, `NextWordLm::rank_next`, `NextWordLm::score_next`, `Vocab::index_of`, `Vocab::intern`, `Vocab::is_empty`, `Vocab::len`, `Vocab::new`, `Vocab::word_of`
 
 ### featherkey-neural-ranker
 
@@ -949,6 +949,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `NextWordLm` | struct — `featherkey-neural-lm::model` |
 | `NextWordLm::confidence` | method — `featherkey-neural-lm` |
 | `NextWordLm::load` | method — `featherkey-neural-lm` |
+| `NextWordLm::log_uniform` | method — `featherkey-neural-lm` |
 | `NextWordLm::new` | method — `featherkey-neural-lm` |
 | `NextWordLm::observe` | method — `featherkey-neural-lm` |
 | `NextWordLm::persist` | method — `featherkey-neural-lm` |
