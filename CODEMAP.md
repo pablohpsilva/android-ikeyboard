@@ -405,7 +405,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 ### :ffi-bridge
 
 - **Path:** `apps/android/ffi-bridge`
-- `FeatherKeyBridge.kt` — `class Language`; `class LayoutKeyDto`; `enum class LayoutPage`; `enum class LatinLayout`; `enum class AutocorrectOutcome`; `fun interface FieldSensitivity`; `class FeatherKeyBridge` — fun `FeatherKeyBridge.activeLanguages`, `FeatherKeyBridge.addToDictionary`, `FeatherKeyBridge.chooseCorrection`, `FeatherKeyBridge.close`, `FeatherKeyBridge.decode`, `FeatherKeyBridge.importContext`, `FeatherKeyBridge.importFrequencies`, `FeatherKeyBridge.layoutKeys`, `FeatherKeyBridge.learnWord`, `FeatherKeyBridge.learnedFrequencies`, `FeatherKeyBridge.observeAutocorrectOutcome`, `FeatherKeyBridge.observeDeleteRetype`, `FeatherKeyBridge.observeLanguage`, `FeatherKeyBridge.observeStripPick`, `FeatherKeyBridge.observeTap`, `FeatherKeyBridge.open`, `FeatherKeyBridge.persist`, `FeatherKeyBridge.rank`, `FeatherKeyBridge.rankSuggestions`, `FeatherKeyBridge.setActiveLanguages`, `FeatherKeyBridge.setLatinLayout`, `FeatherKeyBridge.setPage`, `FeatherKeyBridge.suggest`, `FeatherKeyBridge.tapOffsets`, `FieldSensitivity.isSensitive` — val/var `LayoutKeyDto.height`, `LayoutKeyDto.label`, `LayoutKeyDto.width`, `LayoutKeyDto.x`, `LayoutKeyDto.y`
+- `FeatherKeyBridge.kt` — `class Language`; `class LayoutKeyDto`; `enum class LayoutPage`; `enum class LatinLayout`; `enum class AutocorrectOutcome`; `fun interface FieldSensitivity`; `class FeatherKeyBridge` — fun `FeatherKeyBridge.activeLanguages`, `FeatherKeyBridge.addToDictionary`, `FeatherKeyBridge.chooseCorrection`, `FeatherKeyBridge.close`, `FeatherKeyBridge.decode`, `FeatherKeyBridge.importContext`, `FeatherKeyBridge.importFrequencies`, `FeatherKeyBridge.layoutKeys`, `FeatherKeyBridge.learnWord`, `FeatherKeyBridge.learnedFrequencies`, `FeatherKeyBridge.observeAutocorrectOutcome`, `FeatherKeyBridge.observeDeleteRetype`, `FeatherKeyBridge.observeLanguage`, `FeatherKeyBridge.observeStripPick`, `FeatherKeyBridge.observeTap`, `FeatherKeyBridge.open`, `FeatherKeyBridge.persist`, `FeatherKeyBridge.properCase`, `FeatherKeyBridge.rank`, `FeatherKeyBridge.rankSuggestions`, `FeatherKeyBridge.setActiveLanguages`, `FeatherKeyBridge.setLatinLayout`, `FeatherKeyBridge.setPage`, `FeatherKeyBridge.suggest`, `FeatherKeyBridge.tapOffsets`, `FieldSensitivity.isSensitive` — val/var `LayoutKeyDto.height`, `LayoutKeyDto.label`, `LayoutKeyDto.width`, `LayoutKeyDto.x`, `LayoutKeyDto.y`
 
 ### :ime-service
 
@@ -416,7 +416,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - `GestureDecoder.kt` — `object GestureDecoder` — fun `GestureDecoder.decode`, `GestureDecoder.keyPath`
 - `GestureGeometry.kt` — `object GestureGeometry` — fun `GestureGeometry.shiftCenters`
 - `LegacyMigration.kt` — `object LegacyMigration` — fun `LegacyMigration.isPending`, `LegacyMigration.migrate`, `LegacyMigration.parseContext`, `LegacyMigration.parseUsage`
-- `TypingRules.kt` — `object PunctuationRules`; `object AutoCaps`; `object FieldLayout`; `object EnterKey`; `object TapDisambiguator`; `object SuggestionStrip`; `object GraphemeDeletion`; `object CaseMatch` — fun `AutoCaps.isCapitalizableTextField`, `AutoCaps.shouldCapitalize`, `CaseMatch.matchCase`, `CaseMatch.matchLeading`, `EnterKey.insertsNewline`, `FieldLayout.affixKeys`, `FieldLayout.initialPage`, `GraphemeDeletion.lastClusterLength`, `PunctuationRules.doubleSpaceMakesPeriod`, `SuggestionStrip.withGuaranteedVariant`, `TapDisambiguator.choose`
+- `TypingRules.kt` — `object PunctuationRules`; `object AutoCaps`; `object FieldLayout`; `object EnterKey`; `object TapDisambiguator`; `object SuggestionStrip`; `object GraphemeDeletion`; `object CaseMatch` — fun `AutoCaps.isCapitalizableTextField`, `AutoCaps.precedingWordStartsSentence`, `AutoCaps.shouldCapitalize`, `CaseMatch.matchCase`, `CaseMatch.matchLeading`, `EnterKey.insertsNewline`, `FieldLayout.affixKeys`, `FieldLayout.initialPage`, `GraphemeDeletion.lastClusterLength`, `PunctuationRules.doubleSpaceMakesPeriod`, `SuggestionStrip.withGuaranteedVariant`, `TapDisambiguator.choose`
 - `Vocabulary.kt` — `class Vocabulary` — fun `Vocabulary.accentVariantsOf`, `Vocabulary.accentedCanonical`, `Vocabulary.empty`, `Vocabulary.forTest`, `Vocabulary.hasWordPrefix`, `Vocabulary.languagesOf`, `Vocabulary.load`, `Vocabulary.rankOf` — val/var `Vocabulary.words`
 - **Tests:** 7 file(s) — `CorrectionDetectorTest.kt`, `DiacriticsTest.kt`, `GestureDecoderTest.kt`, `GestureGeometryTest.kt`, `LegacyMigrationTest.kt`, `TypingRulesTest.kt`, `VocabularyAccentTest.kt`
 
@@ -517,6 +517,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `auto_capitalize` | fn — `featherkey-smart-typing` |
 | `AutoCaps` | kotlin object — `:ime-service` |
 | `AutoCaps.isCapitalizableTextField` | kotlin fun — `:ime-service` |
+| `AutoCaps.precedingWordStartsSentence` | kotlin fun — `:ime-service` |
 | `AutoCaps.shouldCapitalize` | kotlin fun — `:ime-service` |
 | `AutoCorrect` | trait — `featherkey-contracts` |
 | `AutoCorrect::correct` | method — `featherkey-contracts` |
@@ -658,6 +659,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `FeatherKeyBridge.observeTap` | kotlin fun — `:ffi-bridge` |
 | `FeatherKeyBridge.open` | kotlin fun — `:ffi-bridge` |
 | `FeatherKeyBridge.persist` | kotlin fun — `:ffi-bridge` |
+| `FeatherKeyBridge.properCase` | kotlin fun — `:ffi-bridge` |
 | `FeatherKeyBridge.rank` | kotlin fun — `:ffi-bridge` |
 | `FeatherKeyBridge.rankSuggestions` | kotlin fun — `:ffi-bridge` |
 | `FeatherKeyBridge.setActiveLanguages` | kotlin fun — `:ffi-bridge` |

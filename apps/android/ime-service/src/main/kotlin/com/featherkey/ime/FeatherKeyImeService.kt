@@ -787,7 +787,7 @@ class FeatherKeyImeService : InputMethodService() {
             // im → I'm); only if that finds nothing do we fall back to the core's
             // edit-distance typo fix — otherwise a contraction like "ive" would be
             // "corrected" to a near lexicon word ("ice") before it could become "I've".
-            val out = accentUpgrade(word) ?: correctedWord(word) ?: word
+            val out = properCase(ic, word) ?: accentUpgrade(word) ?: correctedWord(word) ?: word
             if (out != word) {
                 ic.deleteSurroundingText(word.length, 0)
                 ic.commitText(out, 1)
@@ -857,6 +857,27 @@ class FeatherKeyImeService : InputMethodService() {
         if (word.length < 3 && !isContraction) return null
         return CaseMatch.matchLeading(word, canon)
     }
+
+    /**
+     * The canonical proper-noun spelling to auto-apply for a fully-typed word at
+     * a boundary (BR-69), or null to leave it as typed. Delegates the decision
+     * (bundled lexicon + common-word guard) to the core; passes whether the word
+     * began a sentence so auto-caps keeps that position. Null-safe: any bridge
+     * error leaves the word untouched.
+     */
+    private fun properCase(ic: InputConnection, word: String): String? {
+        if (word.isEmpty()) return null
+        val sentenceStart = precedingIsSentenceStart(ic, word)
+        val out = runCatching { bridge?.properCase(word, sentenceStart) }.getOrNull() ?: return null
+        return if (out != word) out else null
+    }
+
+    /** True if the pending [word] began a new sentence — i.e. the text before it
+     *  is empty or ends a sentence ('.'/'!'/'?' optionally + space, or newline).
+     *  The word's own characters are already in the field, so they are stripped
+     *  from the tail before inspecting what precedes them. */
+    private fun precedingIsSentenceStart(ic: InputConnection, word: String): Boolean =
+        AutoCaps.precedingWordStartsSentence(ic.getTextBeforeCursor(word.length + 3, 0), word.length)
 
     /**
      * The word to commit at a boundary, or `null` to keep what was typed.
@@ -1047,11 +1068,17 @@ class FeatherKeyImeService : InputMethodService() {
 object Lexicons {
     fun load(context: Context, tags: List<String>): List<Language> =
         tags.map { tag ->
-            val words = runCatching {
-                context.assets.open("lexicons/$tag.txt").bufferedReader().useLines { lines ->
-                    lines.map { it.trim() }.filter { it.isNotEmpty() }.toList()
-                }
-            }.getOrDefault(emptyList())
-            Language(tag, words)
+            // `words` keep asset LINE ORDER (= frequency rank); `proper` (BR-69) is
+            // an unordered canonical-cased set. A missing file degrades to empty.
+            val words = readAsset(context, "lexicons/$tag.txt")
+            val proper = readAsset(context, "proper/$tag.txt")
+            Language(tag, words, proper)
         }
+
+    private fun readAsset(context: Context, path: String): List<String> =
+        runCatching {
+            context.assets.open(path).bufferedReader().useLines { lines ->
+                lines.map { it.trim() }.filter { it.isNotEmpty() }.toList()
+            }
+        }.getOrDefault(emptyList())
 }

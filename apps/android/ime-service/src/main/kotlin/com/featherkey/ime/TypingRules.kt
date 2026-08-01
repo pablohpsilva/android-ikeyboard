@@ -60,6 +60,24 @@ object AutoCaps {
             else -> false
         }
     }
+
+    /**
+     * Whether the word being committed *began* a new sentence, given the text
+     * before the caret ([before], whose tail still holds the word's own
+     * [wordLen] characters). True at field start, or when the text preceding the
+     * word ends a sentence ('.'/'!'/'?', optionally + trailing spaces, or a
+     * newline). Proper-noun capitalization (BR-69) uses this to defer sentence
+     * starts to auto-capitalization rather than fight it.
+     */
+    fun precedingWordStartsSentence(before: CharSequence?, wordLen: Int): Boolean {
+        if (before.isNullOrEmpty()) return true
+        val prefix = before.dropLast(wordLen).trimEnd(' ')
+        if (prefix.isEmpty()) return true
+        return when (prefix.last()) {
+            '\n', '.', '!', '?' -> true
+            else -> false
+        }
+    }
 }
 
 /** Which initial layout a field should present, from its inputType. Pure so it

@@ -57,6 +57,26 @@ class TypingRulesTest {
         assertFalse(AutoCaps.shouldCapitalize(email, 0, ". "))
     }
 
+    // --- BR-69: sentence-start detection for proper-noun capitalization ------
+
+    @Test fun word_at_field_start_is_a_sentence_start() {
+        assertTrue(AutoCaps.precedingWordStartsSentence(null, 5))
+        assertTrue(AutoCaps.precedingWordStartsSentence("", 0))
+        assertTrue(AutoCaps.precedingWordStartsSentence("paris", 5)) // only the word
+    }
+
+    @Test fun word_after_another_word_is_not_a_sentence_start() {
+        assertFalse(AutoCaps.precedingWordStartsSentence("hi paris", 5)) // "hi " precedes
+        assertFalse(AutoCaps.precedingWordStartsSentence("met paris", 5))
+    }
+
+    @Test fun word_after_a_terminator_is_a_sentence_start() {
+        assertTrue(AutoCaps.precedingWordStartsSentence("Hi. paris", 5)) // '.' before
+        assertTrue(AutoCaps.precedingWordStartsSentence("Hi! paris", 5))
+        assertTrue(AutoCaps.precedingWordStartsSentence("ok?  paris", 5)) // extra space
+        assertTrue(AutoCaps.precedingWordStartsSentence("line\nparis", 5)) // newline
+    }
+
     // --- Bug: Enter is a dead key --------------------------------------------
 
     @Test fun enter_is_a_newline_in_a_no_action_field() {

@@ -27,8 +27,8 @@ import com.featherkey.ffi.generated.KeyboardCore
 import com.featherkey.ffi.generated.LanguagePack
 import com.featherkey.ffi.generated.SensitiveField
 
-/** A language and its sorted lexicon, shell-side. */
-data class Language(val tag: String, val words: List<String>)
+/** A language, its sorted lexicon, and its canonical-cased proper nouns (BR-69). */
+data class Language(val tag: String, val words: List<String>, val proper: List<String> = emptyList())
 
 /** One layout key for the shell to render, in the layout's logical space. */
 data class LayoutKeyDto(
@@ -67,7 +67,7 @@ class FeatherKeyBridge private constructor(private val core: KeyboardCore) : Aut
          */
         fun open(dbPath: String, deviceKey: ByteArray, languages: List<Language>): FeatherKeyBridge {
             require(deviceKey.size == 32) { "device key must be 32 bytes" }
-            val packs = languages.map { LanguagePack(it.tag, it.words) }
+            val packs = languages.map { LanguagePack(it.tag, it.words, it.proper) }
             return FeatherKeyBridge(KeyboardCore.open(dbPath, deviceKey, packs))
         }
     }
@@ -98,6 +98,11 @@ class FeatherKeyBridge private constructor(private val core: KeyboardCore) : Aut
      *  bigram/context model lives entirely in the core. */
     fun learnWord(preceding: String, word: String, field: FieldSensitivity) =
         core.learnWord(preceding, word, field.asForeign())
+
+    /** The canonical proper-noun spelling to apply for [word] at a boundary, or
+     *  null to leave it as typed (BR-69). The core owns the lexicon + guard. */
+    fun properCase(word: String, isSentenceStart: Boolean): String? =
+        core.properCase(word, isSentenceStart)
 
     /**
      * Rank the suggestion strip in one core call. With a non-empty [prefix] the
@@ -171,7 +176,7 @@ class FeatherKeyBridge private constructor(private val core: KeyboardCore) : Aut
     fun activeLanguages(): List<String> = core.activeLanguages()
 
     fun setActiveLanguages(languages: List<Language>) =
-        core.setActiveLanguages(languages.map { LanguagePack(it.tag, it.words) })
+        core.setActiveLanguages(languages.map { LanguagePack(it.tag, it.words, it.proper) })
 
     /** Persist learned vocabulary. Call off the input thread (debounced). */
     fun persist() = core.persist()
