@@ -447,6 +447,7 @@ Behaviour specs in `core/features/`, tagged to requirement IDs and gated by
 | `layout-engine.feature` | Non-alphabetic pages and RTL-ready layouts | 6 | BR-47, BR-53, BR-68 |
 | `locale-manager.feature` | Concurrent multilingual typing with automatic per-word detection | 5 | BR-16, BR-17, BR-18, BR-19 |
 | `neural-reranker.feature` | The suggestion strip learns which word I mean | 1 | BR-11 |
+| `neural-tap-decoder.feature` | The tap decoder learns the user's systematic aim and generalizes it | 4 | BR-7 |
 | `personalization.feature` | On-device personal vocabulary learning | 3 | BR-7, BR-13 |
 | `prediction.feature` | Relevant autocomplete completions for the in-progress word | 4 | BR-10 |
 | `secure-store.feature` | Encrypted persistence of personal data | 4 | BR-8, BR-23, BR-62 |
