@@ -160,6 +160,24 @@ def _scan_rust_file(file: Path, module: str) -> tuple[list[dict], list[dict]]:
     for line in lines:
         stripped = line.strip()
         if in_test_mod:
+            # `#[cfg(test)]` doesn't always decorate a brace-opening item
+            # (`mod`/`fn`/`impl`): it can gate a single brace-less leaf, e.g.
+            # a struct field (`#[cfg(test)] foo: bool,`) or a field in a
+            # struct literal (`#[cfg(test)] foo: false,`). Such a line has no
+            # closing brace of its own to wait for, so the depth-based exit
+            # below would never fire before the *enclosing* item's brace
+            # closes — silently swallowing everything after it as "test code"
+            # for the rest of the file. Detect that shape (no braces, not
+            # another stacked attribute, ends the statement) and exit
+            # immediately after it instead.
+            if (
+                not stripped.startswith("#[")
+                and "{" not in line
+                and "}" not in line
+                and stripped.endswith((",", ";"))
+            ):
+                in_test_mod = False
+                continue
             depth += line.count("{") - line.count("}")
             # Only leave once the test module's braces have actually opened and
             # closed again — the `#[cfg(test)]` attribute line itself is still at

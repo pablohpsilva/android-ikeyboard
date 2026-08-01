@@ -3,6 +3,13 @@
 use super::*;
 
 #[test]
+fn default_matches_new() {
+    let lm = NextWordLm::default();
+    assert_eq!(lm.confidence(), 0.0);
+    assert_eq!(lm.embed, NextWordLm::new().embed);
+}
+
+#[test]
 fn fresh_model_has_zero_confidence_and_uniform_ranking() {
     let lm = NextWordLm::new();
     assert_eq!(lm.confidence(), 0.0);

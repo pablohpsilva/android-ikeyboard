@@ -123,6 +123,44 @@ class RustFileScan(unittest.TestCase):
                                  "SecureStore::helper"})
         self.assertNotIn("Internal::hidden", names, "a private trait is not surface")
 
+    def test_cfg_test_field_does_not_swallow_the_rest_of_the_file(self) -> None:
+        """`#[cfg(test)]` doesn't always decorate a brace-opening item: it can
+        gate a brace-less leaf, e.g. a test-only struct field, or a matching
+        field in a struct literal (the `NextWordLm::freeze_embeddings`
+        pattern used by the neural-lm crate's contamination-guard twin). Such
+        a line has no closing brace of its own for the depth tracker to wait
+        for, so a naive scanner gets stuck in "skip test code" mode for the
+        rest of the file — silently dropping every real `pub fn` declared
+        after it, which is exactly the false negative this index exists to
+        prevent."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = _write(
+                Path(tmp),
+                "lib.rs",
+                "pub struct Real {\n"
+                "    pub field: bool,\n"
+                "    #[cfg(test)]\n"
+                "    only_for_tests: bool,\n"
+                "}\n"
+                "\n"
+                "impl Real {\n"
+                "    pub fn new() -> Self {\n"
+                "        Self {\n"
+                "            field: true,\n"
+                "            #[cfg(test)]\n"
+                "            only_for_tests: false,\n"
+                "        }\n"
+                "    }\n"
+                "\n"
+                "    pub fn after_the_cfg_field(&self) -> bool {\n"
+                "        self.field\n"
+                "    }\n"
+                "}\n",
+            )
+            _, methods = codemap._scan_rust_file(src, "")
+        names = {m["name"] for m in methods}
+        self.assertEqual(names, {"Real::new", "Real::after_the_cfg_field"})
+
     def test_inherent_methods_are_captured_but_trait_impls_are_not(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             src = _write(
