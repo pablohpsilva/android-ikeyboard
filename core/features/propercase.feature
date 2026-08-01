@@ -47,3 +47,16 @@ Feature: Proper-noun capitalization
     Given the proper-noun lexicon contains "Paris"
     When the word "florp" is committed mid-sentence
     Then it is left unchanged
+
+  @BR-69 @mvp
+  Scenario: A habitually capitalized mid-sentence name is learned
+    Given the field permits learning
+    When "Zoe" is committed mid-sentence
+    And "zoe" is later committed mid-sentence
+    Then "zoe" is recased to "Zoe"
+
+  @BR-69 @mvp
+  Scenario: Names in a sensitive field are never learned
+    Given the field is a password field
+    When "Zoe" is committed mid-sentence in that field
+    Then "zoe" is not learned as a proper noun

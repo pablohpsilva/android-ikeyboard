@@ -792,6 +792,8 @@ internal open class UniffiVTableCallbackInterfaceSensitiveField(
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -843,6 +845,8 @@ internal interface UniffiLib : Library {
     fun uniffi_featherkey_core_fn_method_keyboardcore_observe_delete_retype(`ptr`: Pointer,`word`: RustBuffer.ByValue,`field`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_featherkey_core_fn_method_keyboardcore_observe_language(`ptr`: Pointer,`recognizers`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_featherkey_core_fn_method_keyboardcore_observe_proper_noun(`ptr`: Pointer,`word`: RustBuffer.ByValue,`isSentenceStart`: Byte,`field`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_featherkey_core_fn_method_keyboardcore_observe_strip_pick(`ptr`: Pointer,`prefix`: RustBuffer.ByValue,`picked`: RustBuffer.ByValue,`field`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
@@ -1016,6 +1020,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_observe_language(
     ): Short
+    fun uniffi_featherkey_core_checksum_method_keyboardcore_observe_proper_noun(
+    ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_observe_strip_pick(
     ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_observe_tap(
@@ -1100,6 +1106,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_observe_language() != 19234.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_observe_proper_noun() != 17556.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_observe_strip_pick() != 52327.toShort()) {
@@ -1586,6 +1595,12 @@ public interface KeyboardCoreInterface {
     fun `observeLanguage`(`recognizers`: List<kotlin.String>)
     
     /**
+     * Record `word` as a personal proper noun if it is a habitual mid-sentence
+     * capital (BR-69), gated by consent + field sensitivity (BR-22/BR-26).
+     */
+    fun `observeProperNoun`(`word`: kotlin.String, `isSentenceStart`: kotlin.Boolean, `field`: SensitiveField)
+    
+    /**
      * Record a strip pick (`prefix -> picked`) — unless `field` is sensitive.
      */
     fun `observeStripPick`(`prefix`: kotlin.String, `picked`: kotlin.String, `field`: SensitiveField)
@@ -1943,6 +1958,21 @@ open class KeyboardCore: Disposable, AutoCloseable, KeyboardCoreInterface {
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_featherkey_core_fn_method_keyboardcore_observe_language(
         it, FfiConverterSequenceString.lower(`recognizers`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Record `word` as a personal proper noun if it is a habitual mid-sentence
+     * capital (BR-69), gated by consent + field sensitivity (BR-22/BR-26).
+     */override fun `observeProperNoun`(`word`: kotlin.String, `isSentenceStart`: kotlin.Boolean, `field`: SensitiveField)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_featherkey_core_fn_method_keyboardcore_observe_proper_noun(
+        it, FfiConverterString.lower(`word`),FfiConverterBoolean.lower(`isSentenceStart`),FfiConverterTypeSensitiveField.lower(`field`),_status)
 }
     }
     

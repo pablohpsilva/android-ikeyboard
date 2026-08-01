@@ -141,6 +141,18 @@ impl KeyboardCore {
         self.lock().proper_case(&word, is_sentence_start)
     }
 
+    /// Record `word` as a personal proper noun if it is a habitual mid-sentence
+    /// capital (BR-69), gated by consent + field sensitivity (BR-22/BR-26).
+    pub fn observe_proper_noun(
+        &self,
+        word: String,
+        is_sentence_start: bool,
+        field: std::sync::Arc<dyn SensitiveField>,
+    ) {
+        let mut core = self.lock();
+        core.observe_proper_noun(&word, is_sentence_start, &FieldSource(field.as_ref()));
+    }
+
     /// The whole suggestion-strip blend, core-owned: predictor completions +
     /// `device` candidates → momentum ranking → dictionary fold-group variant
     /// guarantee. The shell renders the returned words in order.
