@@ -40,7 +40,7 @@ silence about something real is the one answer this index must never give.
 
 ## 1. Rust core — crate map
 
-28 crates in the `core/` Cargo workspace. Layers run inward:
+29 crates in the `core/` Cargo workspace. Layers run inward:
 `foundation` → `port` → `domain` → `adapter` → `composition`; a crate may
 only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 
@@ -68,6 +68,7 @@ only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 | `featherkey-nn` | domain | Tiny, dependency-free neural substrate — 1-hidden-layer MLP | — |
 | `featherkey-personalization` | domain | Learn the user's vocabulary/whitelist and own the user dictionary — the sole writer of the lexical learned-data domain (`Namespace::UserDict`, ADR-14). | contracts |
 | `featherkey-prediction` | domain | Rank prefix-completion suggestions from the active-language lexicons behind the `Predictor` port. | context, contracts, dictionary, fold |
+| `featherkey-propercase` | domain | Proper-noun capitalization decision: fold-keyed lexicon lookup with a common-word guard. | fold |
 | `featherkey-sensitive-context` | domain | Decide whether the current editor field is sensitive and must therefore suppress learning and prediction (the BR-26 gate). | contracts |
 | `featherkey-smart-typing` | domain | Apply auto-capitalization, double-space-period, and smart-quote punctuation as pure, deterministic functions of the text preceding the caret and the character just typed. | — |
 | `featherkey-tap-sequence` | domain | decide which real words a *sequence* of ambiguous taps explains. | — |
@@ -326,6 +327,16 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Constants:** `MAX_SUGGESTIONS`
 - **Methods:** `StatisticalPredictor::new`, `StatisticalPredictor::new_ranked`, `StatisticalPredictor::suggest_ranked`
 
+### featherkey-propercase
+
+- **Path:** `core/crates/propercase` — **Layer:** domain
+- **One job:** Proper-noun capitalization decision: fold-keyed lexicon lookup with a common-word guard.
+- **Depends on:** `featherkey-fold`
+- **Serves:** BR-69
+- **Structs:** `ProperCaser`
+- **Methods:** `ProperCaser::case`, `ProperCaser::new`
+- **Integration tests:** `tests/propercase_spec.rs`
+
 ### featherkey-secure-store
 
 - **Path:** `core/crates/secure-store` — **Layer:** adapter
@@ -476,6 +487,7 @@ Behaviour specs in `core/features/`, tagged to requirement IDs and gated by
 | `neural_lm_integration.feature` | Neural next-word LM wired into the live suggestion strip | 4 | BR-10, BR-11, BR-26 |
 | `personalization.feature` | On-device personal vocabulary learning | 3 | BR-7, BR-13 |
 | `prediction.feature` | Relevant autocomplete completions for the in-progress word | 4 | BR-10 |
+| `propercase.feature` | Proper-noun capitalization | 6 | BR-69 |
 | `secure-store.feature` | Encrypted persistence of personal data | 4 | BR-8, BR-23, BR-62 |
 | `sensitive-context.feature` | Suppress learning in sensitive fields | 2 | BR-26 |
 | `smart-typing.feature` | Smart typing assistance | 7 | BR-48 |
@@ -981,6 +993,9 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `positional_score` | fn — `featherkey-candidate-ranker` |
 | `Predictor` | trait — `featherkey-contracts` |
 | `Predictor::suggest` | method — `featherkey-contracts` |
+| `ProperCaser` | struct — `featherkey-propercase` |
+| `ProperCaser::case` | method — `featherkey-propercase` |
+| `ProperCaser::new` | method — `featherkey-propercase` |
 | `PunctuationRules` | kotlin object — `:ime-service` |
 | `PunctuationRules.doubleSpaceMakesPeriod` | kotlin fun — `:ime-service` |
 | `rank` | fn — `featherkey-candidate-ranker` |

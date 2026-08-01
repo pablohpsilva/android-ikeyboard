@@ -42,6 +42,7 @@ members = [
     "crates/autocorrect-gate",
     "crates/neural-tap",
     "crates/neural-lm",
+    "crates/propercase",
 ]
 
 [workspace.package]

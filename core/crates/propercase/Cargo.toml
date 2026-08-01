@@ -1,0 +1,17 @@
+[package]
+name = "featherkey-propercase"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Proper-noun capitalization decision: fold-keyed lexicon lookup with a common-word guard."
+
+[package.metadata.featherkey]
+layer = "domain"
+
+[dependencies]
+featherkey-fold = { path = "../fold" }
+
+[lints]
+workspace = true
