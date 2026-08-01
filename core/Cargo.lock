@@ -418,6 +418,7 @@ dependencies = [
  "featherkey-layout-engine",
  "featherkey-locale-manager",
  "featherkey-neural-ranker",
+ "featherkey-neural-tap",
  "featherkey-personalization",
  "featherkey-prediction",
  "featherkey-secure-store",

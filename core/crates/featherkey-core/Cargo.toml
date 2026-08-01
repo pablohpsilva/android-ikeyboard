@@ -44,6 +44,7 @@ featherkey-language-momentum = { path = "../language-momentum" }
 featherkey-candidate-ranker = { path = "../candidate-ranker" }
 featherkey-neural-ranker = { path = "../neural-ranker" }
 featherkey-autocorrect-gate = { path = "../autocorrect-gate" }
+featherkey-neural-tap = { path = "../neural-tap" }
 
 [lints.rust]
 unsafe_code = "deny"
