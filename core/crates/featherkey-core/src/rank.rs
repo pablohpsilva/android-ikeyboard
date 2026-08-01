@@ -26,14 +26,21 @@ use crate::{FeatherKeyCore, CORRECTION_STICKY_WEIGHT, CORRECTION_UNWANTED_WEIGHT
 /// decide.
 const SPATIAL_WEIGHT: f64 = 0.35;
 
+/// Cold-start weight of the `lm_logprob` feature slot. `lm_logprob` is a
+/// stopgap literal `0.0` until Task 5 fills in the real value, so this
+/// coefficient has no observable effect yet; kept within
+/// `|coeff| * FEATURE_BOUND(20) < PRIOR_OFFSET_C(64)`.
+const LM_LOGPROB_COEFF: f32 = 1.0;
+
 /// Cold-start coefficients for the neural re-ranker, one per feature slot in
 /// `RankFeatures::to_array` order: `[positional, ln_momentum, is_lexicon,
-/// is_device, correction_promote, correction_demote, spatial, bias]`. Assembled
-/// from the *same* source consts the classic linear ranking uses (via `as f32`
-/// casts, so a change there can never silently drift the prior — pinned by
-/// `prior_coeffs_match_the_source_constants`), so the net reproduces today's
-/// order until trained (Task 11+). The unit `1.0`/`-1.0` slots are for features
-/// pre-weighted at their call sites; the trailing `0.0` is the bias slot.
+/// is_device, correction_promote, correction_demote, spatial, lm_logprob,
+/// bias]`. Assembled from the *same* source consts the classic linear ranking
+/// uses (via `as f32` casts, so a change there can never silently drift the
+/// prior — pinned by `prior_coeffs_match_the_source_constants`), so the net
+/// reproduces today's order until trained (Task 11+). The unit `1.0`/`-1.0`
+/// slots are for features pre-weighted at their call sites; the trailing
+/// `0.0` is the bias slot.
 pub(crate) const PRIOR_COEFFS: [f32; featherkey_neural_ranker::INPUTS] = [
     1.0,
     LM_WEIGHT_LANG as f32,
@@ -42,6 +49,7 @@ pub(crate) const PRIOR_COEFFS: [f32; featherkey_neural_ranker::INPUTS] = [
     1.0,
     -1.0,
     SPATIAL_WEIGHT as f32,
+    LM_LOGPROB_COEFF,
     0.0,
 ];
 
@@ -458,12 +466,16 @@ mod tests {
                 1.0,
                 -1.0,
                 SPATIAL_WEIGHT as f32,
+                LM_LOGPROB_COEFF,
                 0.0,
             ]
         );
         // Pin the concrete literals too, so a change to any source const is caught
         // even if the assembly expression above were edited in lockstep with it.
-        assert_eq!(PRIOR_COEFFS, [1.0, 1.0, 0.2, 0.0, 1.0, -1.0, 0.35, 0.0]);
+        assert_eq!(
+            PRIOR_COEFFS,
+            [1.0, 1.0, 0.2, 0.0, 1.0, -1.0, 0.35, 1.0, 0.0]
+        );
     }
 
     #[test]

@@ -62,6 +62,8 @@ impl FeatherKeyCore {
                 .iter()
                 .find(|(w, _)| *w == cand.word)
                 .map_or(0.0, |(_, s)| *s),
+            // stopgap; Task 5 fills the real confidence-gated value
+            lm_logprob: 0.0,
         }
     }
 

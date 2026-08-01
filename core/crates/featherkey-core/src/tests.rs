@@ -56,6 +56,8 @@ fn sample_feat() -> RankFeatures {
         correction_promote: 0.2,
         correction_demote: 0.1,
         spatial: 0.4,
+        // stopgap; production never produces anything but 0.0 (Task 5 fills it in)
+        lm_logprob: 0.0,
     }
 }
 

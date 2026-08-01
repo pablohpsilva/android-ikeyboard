@@ -82,6 +82,8 @@ fn probe() -> RankFeatures {
         correction_promote: 0.1,
         correction_demote: 0.0,
         spatial: 0.3,
+        // stopgap; production never produces anything but 0.0 (Task 5 fills it in)
+        lm_logprob: 0.0,
     }
 }
 
