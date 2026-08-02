@@ -61,3 +61,14 @@ missing_debug_implementations = "warn"
 unwrap_used = "warn"
 expect_used = "warn"
 panic = "warn"
+
+# Release build: strip symbols and LTO for a smaller, faster shipped .so.
+# The default release profile ships the full symbol table (~815 KB on arm64)
+# and no LTO. See docs/superpowers/specs/2026-08-02-perf-size-safety-hardening-design.md.
+[profile.release]
+opt-level = 3        # keep speed — typing latency is sensitive; do NOT lower to "s"/"z"
+strip = true         # drop .symtab/.strtab; dynamic (FFI) symbols are unaffected
+lto = "thin"         # cross-crate inlining; lengthens build time only
+codegen-units = 1    # smaller/faster codegen; lengthens build time only
+# DO NOT add `panic = "abort"`: it turns UniFFI's catch_unwind FFI panic
+# containment into a no-op (crash-guard is not wired). See design §G3.

@@ -30,4 +30,8 @@ cargo ndk \
   build --release --locked --features uniffi
 
 echo "Done. Built (uncommitted) libraries:"
+# redb declares crate-type=["cdylib","rlib"] for its optional Python bindings, so
+# cargo-ndk emits a standalone libredb-*.so that nothing links or loads (redb is
+# compiled statically into libfeatherkey_core.so). Drop the dead weight (~498 KB arm64).
+find "$out_dir" -name 'libredb*.so' -delete
 find "$out_dir" -name '*.so' -exec ls -la {} +
