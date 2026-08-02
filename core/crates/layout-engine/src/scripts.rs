@@ -136,6 +136,7 @@ fn grid_row(keys: &mut Vec<Key>, chars: &str, row: usize) {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
 

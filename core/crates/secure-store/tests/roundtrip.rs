@@ -4,6 +4,8 @@
 //! executable checks (BR-8, BR-23, BR-62): round-trip, absent-key, wrong-key,
 //! and namespace isolation.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use featherkey_contracts::{Namespace, SecureStore, StoreError};
 use featherkey_secure_store::RedbSecureStore;
 use tempfile::TempDir;

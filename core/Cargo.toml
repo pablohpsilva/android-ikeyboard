@@ -58,9 +58,9 @@ unsafe_code = "forbid"
 missing_debug_implementations = "warn"
 
 [workspace.lints.clippy]
-unwrap_used = "warn"
-expect_used = "warn"
-panic = "warn"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
 
 # Release build: strip symbols and LTO for a smaller, faster shipped .so.
 # The default release profile ships the full symbol table (~815 KB on arm64)

@@ -49,6 +49,7 @@ fn push_row(keys: &mut Vec<Key>, chars: &[char], row: usize, x0: f32) {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use featherkey_kernel::TouchPoint;

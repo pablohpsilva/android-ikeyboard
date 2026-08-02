@@ -5,6 +5,8 @@
 //! They stand in for the executable BDD steps until the cucumber harness is
 //! wired up (SEDD §12), and are tagged in comments to the BR each closes.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use featherkey_dictionary::{Dictionary, DictionaryError, MAX_COMPLETIONS};
 
 /// The shared lexicon from the feature file's `Background`.

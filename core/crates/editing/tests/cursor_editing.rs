@@ -7,6 +7,8 @@
 //! offset, get back the next offset (or the word range) to send through
 //! `InputConnection` (BR-49).
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use featherkey_editing::{move_left, move_right, select_word, word_left, word_right, EditError};
 
 #[test]

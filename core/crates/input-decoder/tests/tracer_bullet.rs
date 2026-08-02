@@ -9,6 +9,8 @@
 //! This is the executable form of the BDD scenario in
 //! `features/keystroke_decoding.feature`.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use featherkey_input_decoder::{InputDecoder, NearestKeyDecoder};
 use featherkey_kernel::TouchPoint;
 use featherkey_layout_engine::Layout;

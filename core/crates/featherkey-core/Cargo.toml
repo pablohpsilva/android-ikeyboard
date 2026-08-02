@@ -53,9 +53,9 @@ unsafe_code = "deny"
 missing_debug_implementations = "warn"
 
 [lints.clippy]
-unwrap_used = "warn"
-expect_used = "warn"
-panic = "warn"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
 
 [dev-dependencies]
 proptest = "1.11.0"
