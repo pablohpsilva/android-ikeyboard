@@ -43,6 +43,7 @@ members = [
     "crates/neural-tap",
     "crates/neural-lm",
     "crates/propercase",
+    "tools/uniffi-bindgen-tool",
 ]
 
 [workspace.package]

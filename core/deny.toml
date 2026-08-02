@@ -3,6 +3,17 @@
 # The privacy/security posture (EP-1, EP-8) makes dependency provenance and
 # license compatibility a hard requirement, not a nicety.
 
+[graph]
+# `uniffi-bindgen-tool` (core/tools/) is a dev-time-only CLI: it generates the
+# committed Kotlin bindings from a built .so and is never linked into, shipped
+# in, or reachable from the Android app. Its `uniffi/cli` feature drags in
+# `uniffi_bindgen`, whose transitive `bincode`/`paste` deps carry
+# unmaintained-crate advisories (RUSTSEC-2025-0141, RUSTSEC-2024-0436) with no
+# safe upgrade. Excluding the crate (not its advisories globally) keeps the
+# gate strict for everything actually shipped while not blocking on a
+# build-tool dependency with no runtime exposure.
+exclude = ["uniffi-bindgen-tool"]
+
 [advisories]
 version = 2
 # Fail on any crate with a known RustSec advisory or that has been yanked.

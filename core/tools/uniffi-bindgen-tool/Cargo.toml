@@ -1,0 +1,18 @@
+[package]
+name = "uniffi-bindgen-tool"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Standalone UniFFI bindgen CLI, split out of featherkey-core so the shipped crate does not carry the cli feature tree."
+
+[package.metadata.featherkey]
+layer = "tooling"   # display-only; fitness scopes layer checks to core/crates/*, not tools/
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/main.rs"
+
+[dependencies]
+uniffi = { version = "0.28", features = ["cli"] }

@@ -40,7 +40,7 @@ silence about something real is the one answer this index must never give.
 
 ## 1. Rust core — crate map
 
-29 crates in the `core/` Cargo workspace. Layers run inward:
+30 crates in the `core/` Cargo workspace. Layers run inward:
 `foundation` → `port` → `domain` → `adapter` → `composition`; a crate may
 only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 
@@ -75,6 +75,7 @@ only depend on the same or an inner layer (ARCHITECTURE.md §3.2, ADR-12).
 | `featherkey-touch-model` | domain | Maintain the per-user adaptive tap-distribution model — the sole writer of tap geometry (ADR-14). | contracts, kernel |
 | `featherkey-kernel` | foundation | Define shared value objects and error types that cross module boundaries — no logic, no dependencies. | — |
 | `featherkey-contracts` | port | Define the port traits (driven & driving) that domain crates depend on instead of adapters — no logic, no dependencies beyond `kernel` (ADR-12). | kernel |
+| `uniffi-bindgen-tool` | tooling | Standalone UniFFI bindgen CLI, split out of featherkey-core so the shipped crate does not carry the cli feature tree. | — |
 
 ## 2. Android app — module map
 
@@ -389,6 +390,14 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - **Enums:** `TouchModelError`
 - **Methods:** `TouchModel::covariance`, `TouchModel::is_unbiased`, `TouchModel::load`, `TouchModel::observations`, `TouchModel::observe`, `TouchModel::offset`, `TouchModel::offsets`, `TouchModel::persist`, `TouchModel::unbiased`
 - **Integration tests:** `tests/learning_improves_targeting.rs`
+
+### uniffi-bindgen-tool
+
+- **Path:** `core/tools/uniffi-bindgen-tool` — **Layer:** tooling
+- **One job:** Standalone UniFFI bindgen CLI, split out of featherkey-core so the shipped crate does not carry the cli feature tree.
+- **Depends on:** nothing (leaf) — **external:** `uniffi`
+- *(no public items yet)*
+- ⚠️ **No README.md** — add one (ARCHITECTURE.md §5.2 crate anatomy).
 
 ## 4. Android modules — declarations
 

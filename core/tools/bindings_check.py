@@ -48,7 +48,8 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 #: is invoked from here; the shared build artifacts land under `core/target/`.
 CORE_ROOT = os.path.normpath(os.path.join(_HERE, os.pardir))
 
-#: The crate that carries the UniFFI overlay and the `uniffi-bindgen` bin.
+#: The crate that carries the UniFFI overlay (the `uniffi-bindgen` bin lives in
+#: the standalone `tools/uniffi-bindgen-tool` workspace member instead).
 CRATE_DIR = os.path.join(CORE_ROOT, "crates", "featherkey-core")
 
 #: The committed generated bindings, resolved from this file (CI runs the gate
@@ -122,7 +123,7 @@ def regenerate_to(out_dir):
             "  (is `crate-type = [\"lib\", \"cdylib\"]` still set on featherkey-core?)"
         )
     _run([
-        "cargo", "run", "--quiet", "--features", "uniffi", "--bin", "uniffi-bindgen",
+        "cargo", "run", "--quiet", "-p", "uniffi-bindgen-tool",
         "--", "generate",
         "--library", lib,
         "--language", "kotlin",

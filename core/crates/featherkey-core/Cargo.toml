@@ -16,13 +16,8 @@ crate-type = ["lib", "cdylib"]
 [features]
 uniffi = ["dep:uniffi", "dep:thiserror"]
 
-[[bin]]
-name = "uniffi-bindgen"
-path = "uniffi-bindgen.rs"
-required-features = ["uniffi"]
-
 [dependencies]
-uniffi = { version = "0.28", features = ["cli"], optional = true }
+uniffi = { version = "0.28", optional = true }
 thiserror = { version = "2", optional = true }
 featherkey-kernel = { path = "../kernel" }
 featherkey-contracts = { path = "../contracts" }

@@ -32,7 +32,7 @@ NOT copy it over the committed sources.
 
 - JDK 17, Android Studio (Ladybug+) or Gradle 8.9+, Android SDK (API 35), **NDK** (r27+).
 - Rust targets: `rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android`
-- `cargo install cargo-ndk` and `cargo install uniffi-bindgen` (or use the in-crate `uniffi-bindgen` bin from §3).
+- `cargo install cargo-ndk` and `cargo install uniffi-bindgen` (or use the workspace's own `uniffi-bindgen-tool` crate from §3).
 
 ## 2. Generate the Gradle wrapper
 
@@ -62,7 +62,11 @@ to apply, no manual step:
 - `#[cfg(feature = "uniffi")] mod ffi;` in `src/lib.rs`
 - `build.rs`, `uniffi.toml`
 - `Cargo.toml`: the `uniffi`/`thiserror` optional deps, the `uniffi` feature,
-  `crate-type = ["lib", "cdylib"]`, and the `uniffi-bindgen` bin
+  and `crate-type = ["lib", "cdylib"]`
+- `core/tools/uniffi-bindgen-tool/` — the standalone `uniffi-bindgen` bin, split
+  out of `featherkey-core` so the shipped crate does not carry the `cli` feature
+  tree (it generates from the built `.so` via `--library`, so it has no Rust
+  dependency on `featherkey-core`)
 - the crate's own `unsafe_code = "deny"` relaxation (**ADR-19**) — UniFFI
   scaffolding needs FFI `unsafe`, confined to this one seam crate
 
@@ -87,7 +91,7 @@ cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 \
 # Generate the Kotlin bindings from the built library.
 # NOTE: the workspace target dir is core/target/, NOT this crate's own dir — pass an
 # ABSOLUTE --library path (a relative target/... resolves wrong and fails to open).
-cargo run --features uniffi --bin uniffi-bindgen -- generate \
+cargo run -p uniffi-bindgen-tool -- generate \
   --library "$(git rev-parse --show-toplevel)/core/target/aarch64-linux-android/release/libfeatherkey_core.so" \
   --language kotlin \
   --out-dir ../../../apps/android/ffi-bridge/src/main/kotlin
