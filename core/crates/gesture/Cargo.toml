@@ -1,0 +1,17 @@
+[package]
+name = "featherkey-gesture"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Decode a swipe/glide path into ranked words — SHARK²-style location+shape scoring over a prebuilt vocabulary index."
+
+[package.metadata.featherkey]
+layer = "domain"
+
+[dependencies]
+featherkey-fold = { path = "../fold" }
+
+[lints]
+workspace = true

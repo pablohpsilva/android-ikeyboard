@@ -27,6 +27,7 @@
 
 mod correct;
 mod error;
+mod gesture;
 mod learn;
 mod packs;
 mod propercase;
@@ -189,6 +190,12 @@ pub struct FeatherKeyCore {
     /// Cached merged proper-noun set (bundled + personal), rebuilt lazily and
     /// invalidated on language or personal-set changes (BR-69).
     proper_caser: Option<featherkey_propercase::ProperCaser>,
+    /// Prebuilt swipe-gesture index over the active lexicons and the merged
+    /// `word → rank` map it scores with. Rebuilt only on a language switch (never
+    /// per gesture — the perf trap); learned words are discounted at decode time,
+    /// not indexed here. See `gesture.rs`.
+    gesture_index: featherkey_gesture::GestureIndex,
+    gesture_rank: std::collections::HashMap<String, u32>,
 }
 
 impl FeatherKeyCore {
@@ -219,6 +226,7 @@ impl FeatherKeyCore {
         let packs = build_packs(languages)?;
         let primary = primary_tag(&packs);
         let tags: Vec<String> = packs.iter().map(|p| p.lang.as_str().to_owned()).collect();
+        let (gesture_index, gesture_rank) = gesture::build_gesture_index(&packs);
         Ok(Self {
             layout: Layout::alpha_for(&primary, None),
             decoder: NearestKeyDecoder::new(),
@@ -239,6 +247,8 @@ impl FeatherKeyCore {
             lm: NextWordLm::new(),
             recent: RecentWords::new(),
             proper_caser: None,
+            gesture_index,
+            gesture_rank,
         })
     }
 
@@ -267,6 +277,10 @@ impl FeatherKeyCore {
         self.packs = build_packs(languages)?;
         // The bundled proper-noun set changed with the language set.
         self.proper_caser = None;
+        // The swipe-gesture index is a function of the lexicons — rebuild it.
+        let (gesture_index, gesture_rank) = gesture::build_gesture_index(&self.packs);
+        self.gesture_index = gesture_index;
+        self.gesture_rank = gesture_rank;
         // The alpha script follows the (new) primary language.
         let primary = primary_tag(&self.packs);
         let tags: Vec<String> = self

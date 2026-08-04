@@ -131,7 +131,7 @@ Users report that current Android keyboards suffer from the following recurring 
 ### 5.2 Out of Scope (for this release / this document)
 
 - Physical/hardware keyboards.
-- Non-Android platforms (iOS, desktop, web) — reference targets only, not deliverables.
+- Desktop and web remain reference targets only; **iOS is a delivery platform** (see §8.16).
 - Handwriting recognition and stylus input (candidate for future roadmap).
 - Cloud-synced personalization across devices (candidate for future roadmap; gated on privacy design).
 - Third-party plugin/extension marketplace (future consideration).
@@ -332,6 +332,17 @@ Users report that current Android keyboards suffer from the following recurring 
 | BR-67 | The product will be **open-source**, so its privacy and security claims can be independently inspected and verified (directly satisfying BR-24), and will be funded through donations/sponsorship/grants rather than monetizing user data. | S | OBJ-3, OBJ-4 |
 | BR-68 | The user must be able to choose their alphabetic key layout (QWERTY, QWERTZ, AZERTY, …) independently of the selected language(s), and that layout is used for all Latin-script typing. The default matches the system's layout where detectable, falling back to the selected language's default (QWERTY for most). | S | OBJ-9 |
 | BR-69 | The keyboard should capitalize proper nouns automatically mid-sentence (people's names, countries, capital cities, demonyms) using a bundled, on-device proper-noun lexicon plus on-device learning of names the user habitually capitalizes — with no new permission and no network. It must not rewrite a word that is also a common lowercase word, must apply revertibly (an immediate backspace restores the typed form), and must respect consent and sensitive-field gating (BR-22/BR-26). | S | OBJ-1, OBJ-9 |
+
+### 8.16 iOS as a Delivery Platform
+
+> Supersedes the earlier "iOS is a reference target only" exclusion (§8 non-goals):
+> iOS is now a delivery platform. The whole point is **reuse** — the identical Rust
+> typing engine that powers Android, exposed to Swift through the same UniFFI
+> surface, so there is one engine and two thin platform shells.
+
+| ID | Requirement | Priority | Traces to |
+|---|---|---|---|
+| BR-70 | FeatherKey must ship as an iOS keyboard extension that **reuses the shared Rust core** — the typing engine is never reimplemented in Swift. The iOS shell holds only platform concerns (input-view lifecycle, touch→logical mapping, text-proxy commits); every typing decision comes from the shared core. | S | OBJ-2, OBJ-7 |
 
 ---
 

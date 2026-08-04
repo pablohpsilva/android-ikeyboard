@@ -41,6 +41,14 @@ pub struct FfiSuggestion {
     pub score: u32,
 }
 
+/// One point of a swipe/glide path, in the layout's logical coordinate frame — the
+/// same frame `layout_keys` reports and `decode` resolves against.
+#[derive(uniffi::Record)]
+pub struct FfiPoint {
+    pub x: f32,
+    pub y: f32,
+}
+
 /// An autocorrect decision.
 #[derive(uniffi::Record)]
 pub struct FfiCorrection {

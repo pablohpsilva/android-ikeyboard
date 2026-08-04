@@ -1,0 +1,110 @@
+name: FeatherKey
+options:
+  bundleIdPrefix: com.featherkey.ios
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+packages: {}
+targets:
+  FeatherKeyKit:
+    type: framework
+    platform: iOS
+    sources:
+      - path: FeatherKeyKit
+      - path: Generated            # UniFFI-generated Swift bindings
+    dependencies:
+      - framework: FeatherKeyCore.xcframework
+        embed: false
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: true
+        MACH_O_TYPE: staticlib     # STATIC framework — code links INTO consumers; no runtime load
+  FeatherKeyKitTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - FeatherKeyKitTests
+      - FeatherKeyKeyboard      # compile the keyboard UI in so we can snapshot it headlessly
+      # Same shared lexicons as the extension, so Bundle(for: CoreKeyboardEngine.self)
+      # (= this test bundle, since FeatherKeyKit links statically) finds them in tests.
+      - path: ../android/ime-service/src/main/assets/lexicons
+        type: folder
+        buildPhase: resources
+      - path: ../android/ime-service/src/main/assets/proper
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - target: FeatherKeyKit
+      - framework: FeatherKeyCore.xcframework   # FeatherKeyKit is static now → link core directly
+        embed: false
+      - target: FeatherKeyHost        # host app context so Keychain works in tests
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: true
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/FeatherKeyHost.app/FeatherKeyHost"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+  FeatherKeyKeyboard:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: FeatherKeyKeyboard
+      # Shared lexicons: the SAME word lists the Android app ships, referenced from a
+      # single on-disk copy so the two shells never drift (DRY). Folder refs preserve
+      # the lexicons/ & proper/ subdirectories inside the extension bundle.
+      - path: ../android/ime-service/src/main/assets/lexicons
+        type: folder
+        buildPhase: resources
+      - path: ../android/ime-service/src/main/assets/proper
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - target: FeatherKeyKit
+        embed: false          # linked; loaded from the HOST app's Frameworks/ at runtime
+      - framework: FeatherKeyCore.xcframework
+        embed: false
+    settings:
+      base:
+        # Apple requires an app-extension bundle ID to be a child of its host app's.
+        PRODUCT_BUNDLE_IDENTIFIER: com.featherkey.ios.FeatherKeyHost.Keyboard
+    info:
+      path: FeatherKeyKeyboard/Info.plist               # generated (full valid plist + NSExtension)
+      properties:
+        CFBundleDisplayName: FeatherKey                 # required: name shown in the keyboard list
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.keyboard-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
+          NSExtensionAttributes:
+            IsASCIICapable: true
+            PrefersRightToLeft: false
+            PrimaryLanguage: en-US
+            RequestsOpenAccess: false                    # on-device only; privacy win
+  FeatherKeyHost:
+    type: application
+    platform: iOS
+    sources: [FeatherKeyHost]
+    dependencies:
+      - target: FeatherKeyKeyboard
+        embed: true                                     # host installs the keyboard extension
+      # FeatherKeyKit is now a STATIC framework linked into the extension — the host
+      # neither links nor embeds it (no dynamic framework exists to ship).
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: true                   # host needs no special keys
+schemes:
+  FeatherKeyKit:
+    build:
+      targets:
+        FeatherKeyKit: all
+        FeatherKeyHost: all
+        FeatherKeyKitTests: [test]
+    test:
+      targets:
+        - FeatherKeyKitTests
+  FeatherKeyHost:
+    build:
+      targets:
+        FeatherKeyHost: all
+    run:
+      config: Debug

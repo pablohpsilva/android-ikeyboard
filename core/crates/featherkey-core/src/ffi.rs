@@ -101,6 +101,27 @@ impl KeyboardCore {
             .collect()
     }
 
+    /// Decode a swipe/glide path into ranked words, best first. `points` are in the
+    /// layout's logical frame (like [`decode`](Self::decode)). An empty return means
+    /// "not a gesture" (too few points, or no vocabulary word matched). The `score`
+    /// on each suggestion is its 0-based rank (0 = best), so the shell renders in
+    /// order without re-sorting.
+    pub fn decode_gesture(&self, points: Vec<FfiPoint>) -> Vec<FfiSuggestion> {
+        let core = self.lock();
+        let pts: Vec<featherkey_gesture::Point> = points
+            .into_iter()
+            .map(|p| featherkey_gesture::Point { x: p.x, y: p.y })
+            .collect();
+        core.decode_gesture(&pts)
+            .into_iter()
+            .enumerate()
+            .map(|(i, word)| FfiSuggestion {
+                word,
+                score: i as u32,
+            })
+            .collect()
+    }
+
     /// Uncalled alias of [`choose_correction`](Self::choose_correction), kept
     /// only because the committed UniFFI bindings cannot be regenerated offline
     /// (ADR-21). Signature frozen — argument names included.

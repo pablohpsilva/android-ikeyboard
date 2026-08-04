@@ -11,7 +11,7 @@ description = "Composition façade: wires the core crates behind the contracts p
 layer = "composition"
 
 [lib]
-crate-type = ["lib", "cdylib"]
+crate-type = ["lib", "cdylib", "staticlib"]
 
 [features]
 uniffi = ["dep:uniffi", "dep:thiserror"]
@@ -33,6 +33,7 @@ featherkey-personalization = { path = "../personalization" }
 featherkey-context = { path = "../context" }
 featherkey-corrections = { path = "../corrections" }
 featherkey-fold = { path = "../fold" }
+featherkey-gesture = { path = "../gesture" }
 featherkey-propercase = { path = "../propercase" }
 featherkey-sensitive-context = { path = "../sensitive-context" }
 featherkey-secure-store = { path = "../secure-store" }

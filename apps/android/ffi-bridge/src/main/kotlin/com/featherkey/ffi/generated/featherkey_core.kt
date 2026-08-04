@@ -794,6 +794,8 @@ internal open class UniffiVTableCallbackInterfaceSensitiveField(
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -829,6 +831,8 @@ internal interface UniffiLib : Library {
     fun uniffi_featherkey_core_fn_method_keyboardcore_correct(`ptr`: Pointer,`text`: RustBuffer.ByValue,`preceding`: RustBuffer.ByValue,`prefix`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_featherkey_core_fn_method_keyboardcore_decode(`ptr`: Pointer,`x`: Float,`y`: Float,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_featherkey_core_fn_method_keyboardcore_decode_gesture(`ptr`: Pointer,`points`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_featherkey_core_fn_method_keyboardcore_import_context(`ptr`: Pointer,`transitions`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
@@ -1004,6 +1008,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_decode(
     ): Short
+    fun uniffi_featherkey_core_checksum_method_keyboardcore_decode_gesture(
+    ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_import_context(
     ): Short
     fun uniffi_featherkey_core_checksum_method_keyboardcore_import_frequencies(
@@ -1082,6 +1088,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_decode() != 22687.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_decode_gesture() != 3285.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_featherkey_core_checksum_method_keyboardcore_import_context() != 7081.toShort()) {
@@ -1545,6 +1554,15 @@ public interface KeyboardCoreInterface {
     fun `decode`(`x`: kotlin.Float, `y`: kotlin.Float): FfiDecode
     
     /**
+     * Decode a swipe/glide path into ranked words, best first. `points` are in the
+     * layout's logical frame (like [`decode`](Self::decode)). An empty return means
+     * "not a gesture" (too few points, or no vocabulary word matched). The `score`
+     * on each suggestion is its 0-based rank (0 = best), so the shell renders in
+     * order without re-sorting.
+     */
+    fun `decodeGesture`(`points`: List<FfiPoint>): List<FfiSuggestion>
+    
+    /**
      * Migrate legacy `(prev, next, count)` bigram transitions into the encrypted
      * next-word model (set-semantics; idempotent). A deliberate one-time import.
      */
@@ -1833,6 +1851,25 @@ open class KeyboardCore: Disposable, AutoCloseable, KeyboardCoreInterface {
     uniffiRustCallWithError(FfiException) { _status ->
     UniffiLib.INSTANCE.uniffi_featherkey_core_fn_method_keyboardcore_decode(
         it, FfiConverterFloat.lower(`x`),FfiConverterFloat.lower(`y`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Decode a swipe/glide path into ranked words, best first. `points` are in the
+     * layout's logical frame (like [`decode`](Self::decode)). An empty return means
+     * "not a gesture" (too few points, or no vocabulary word matched). The `score`
+     * on each suggestion is its 0-based rank (0 = best), so the shell renders in
+     * order without re-sorting.
+     */override fun `decodeGesture`(`points`: List<FfiPoint>): List<FfiSuggestion> {
+            return FfiConverterSequenceTypeFfiSuggestion.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_featherkey_core_fn_method_keyboardcore_decode_gesture(
+        it, FfiConverterSequenceTypeFfiPoint.lower(`points`),_status)
 }
     }
     )
@@ -2709,6 +2746,42 @@ public object FfiConverterTypeFfiKey: FfiConverterRustBuffer<FfiKey> {
 
 
 /**
+ * One point of a swipe/glide path, in the layout's logical coordinate frame — the
+ * same frame `layout_keys` reports and `decode` resolves against.
+ */
+data class FfiPoint (
+    var `x`: kotlin.Float, 
+    var `y`: kotlin.Float
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiPoint: FfiConverterRustBuffer<FfiPoint> {
+    override fun read(buf: ByteBuffer): FfiPoint {
+        return FfiPoint(
+            FfiConverterFloat.read(buf),
+            FfiConverterFloat.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiPoint) = (
+            FfiConverterFloat.allocationSize(value.`x`) +
+            FfiConverterFloat.allocationSize(value.`y`)
+    )
+
+    override fun write(value: FfiPoint, buf: ByteBuffer) {
+            FfiConverterFloat.write(value.`x`, buf)
+            FfiConverterFloat.write(value.`y`, buf)
+    }
+}
+
+
+
+/**
  * One correction/suggestion candidate the shell gathered (e.g. from the device
  * spell-checker), tagged by language and its rank within its own source.
  */
@@ -3368,6 +3441,34 @@ public object FfiConverterSequenceTypeFfiKey: FfiConverterRustBuffer<List<FfiKey
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeFfiKey.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeFfiPoint: FfiConverterRustBuffer<List<FfiPoint>> {
+    override fun read(buf: ByteBuffer): List<FfiPoint> {
+        val len = buf.getInt()
+        return List<FfiPoint>(len) {
+            FfiConverterTypeFfiPoint.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<FfiPoint>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeFfiPoint.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<FfiPoint>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeFfiPoint.write(it, buf)
         }
     }
 }

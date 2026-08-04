@@ -1,0 +1,7 @@
+# Generated/binary artifacts — regenerable from source (mirrors the .so posture)
+*.xcodeproj/
+*.xcframework/
+DerivedData/
+build/
+build-*/
+.DS_Store

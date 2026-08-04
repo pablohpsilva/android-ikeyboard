@@ -43,6 +43,7 @@ members = [
     "crates/neural-tap",
     "crates/neural-lm",
     "crates/propercase",
+    "crates/gesture",
     "tools/uniffi-bindgen-tool",
 ]
 
