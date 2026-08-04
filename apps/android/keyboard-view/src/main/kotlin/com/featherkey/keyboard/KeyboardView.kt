@@ -2,9 +2,10 @@ package com.featherkey.keyboard
 
 /*
  * The keyboard surface (SEDD §5.1). It renders an iOS-style keyboard — a
- * collapsible prediction strip, letter/number/symbol pages on white keys, a
- * shift / page-switch and backspace flanking the last content row, a
- * `123|ABC / space / return` row, and a globe/mic bar — and captures touch.
+ * collapsible prediction strip that also hosts the settings (globe) and voice
+ * (mic) icons flanking the three suggestions, letter/number/symbol pages on
+ * white keys, a shift / page-switch and backspace flanking the last content row,
+ * and a `123|ABC / space / return` row — and captures touch.
  *
  * Letter taps are reported in the core layout's *logical* space for the core to
  * decode (the fuzzy touch model matters for letters). Number and symbol pages
@@ -246,7 +247,6 @@ class KeyboardView @JvmOverloads constructor(
     private val stripHeight get() = dp(42f) * animatedHeightScale
     private val rowHeight get() = dp(52f) * animatedHeightScale
     private val funcRowHeight get() = dp(54f) * animatedHeightScale
-    private val bottomBarHeight get() = dp(46f) * animatedHeightScale
     /** The reserved suggestion band's height — constant while a standard page is
      *  shown, so the keys stay put as suggestions come and go (they only repaint). */
     private val stripBand get() = stripHeight
@@ -283,6 +283,10 @@ class KeyboardView @JvmOverloads constructor(
     private var gestureCell: Cell.Letter? = null
     private var gesturing = false
     private var trailLen = 0f
+    // The pointer that owns the current letter press. A swipe is single-touch:
+    // only this pointer feeds the trail, so a second finger can never stitch a
+    // bogus glide onto it (BR-41 — swipe must not conflict with quick taps).
+    private var gesturePointerId = MotionEvent.INVALID_POINTER_ID
 
     // --- Long-press accent popup state ---
     private val accentSession = AccentSession()
@@ -361,7 +365,7 @@ class KeyboardView @JvmOverloads constructor(
         val stripReserved = page != Page.EMOJI
         val h = KeyboardGeometry.totalHeightPx(
             stripReserved = stripReserved,
-            rowPx = rowHeight, funcPx = if (showsFunctionRow) funcRowHeight else 0f, barPx = bottomBarHeight,
+            rowPx = rowHeight, funcPx = if (showsFunctionRow) funcRowHeight else 0f,
             insetPx = bottomInset.toFloat(), stripPx = stripBand,
             contentRows = if (page == Page.PHONE) 4 else 3,
         )
@@ -395,8 +399,14 @@ class KeyboardView @JvmOverloads constructor(
         // and the key grid starts just below it. The three Suggest cells span the
         // band; they take taps only where a suggestion is actually drawn.
         val band = stripBand
-        val cw = w / 3f
-        for (i in 0..2) out += Cell.Suggest(RectF(i * cw, 0f, (i + 1) * cw, band), i)
+        // Strip band: [settings] [sugg0] [sugg1] [sugg2] [voice]. iconW = band →
+        // square icons. The globe/mic reuse Sp.GLOBE/Sp.MIC, so their draw and
+        // onFunctionKey wiring is unchanged (globe → Settings, mic → voice).
+        val strip = KeyboardGeometry.stripSubRects(w.toFloat(), band, band)
+        fun rf(r: Rect4) = RectF(r.left, r.top, r.right, r.bottom)
+        out += Cell.Special(rf(strip.settings), Sp.GLOBE)
+        strip.suggestions.forEachIndexed { i, r -> out += Cell.Suggest(rf(r), i) }
+        out += Cell.Special(rf(strip.voice), Sp.MIC)
         var top = KeyboardGeometry.contentTopPx(stripReserved = true, stripPx = band)
 
         // A char/letter row of equal-width keys, centred.
@@ -516,12 +526,6 @@ class KeyboardView @JvmOverloads constructor(
             top += funcRowHeight
         }
 
-        // Bottom bar: globe (left) + mic (right), icon-only.
-        run {
-            val sz = bottomBarHeight
-            out += Cell.Special(RectF(sideMargin, top, sideMargin + sz, top + sz), Sp.GLOBE)
-            out += Cell.Special(RectF(w - sideMargin - sz, top, w - sideMargin, top + sz), Sp.MIC)
-        }
         return out
     }
 
@@ -793,6 +797,7 @@ class KeyboardView @JvmOverloads constructor(
                 // start tracking a path. Everything else fires immediately.
                 if (page == Page.ALPHA && hit is Cell.Letter) {
                     gestureCell = hit
+                    gesturePointerId = event.getPointerId(0)
                     gesturing = false
                     trailLen = 0f
                     trail.clear(); trail.add(PointF(event.x, event.y))
@@ -809,11 +814,43 @@ class KeyboardView @JvmOverloads constructor(
                 }
                 return true
             }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                // A second finger arrived. A swipe is single-touch: if the first
+                // finger is a pending letter that has NOT yet become a glide,
+                // commit it as a tap now and hand the press to the new finger
+                // (true two-finger fast typing). If a glide is already under way,
+                // or the accent popup is open, ignore the extra finger.
+                val g = gestureCell
+                if (page == Page.ALPHA && g != null && !gesturing && !accentActive()) {
+                    val down = trail.firstOrNull()
+                    removeCallbacks(longPressRunnable)
+                    fire(g, down?.x ?: g.rect.centerX(), down?.y ?: g.rect.centerY())
+                    val ai = event.actionIndex
+                    val nx = event.getX(ai); val ny = event.getY(ai)
+                    val hit = cells.firstOrNull { it.rect.contains(nx, ny) } ?: nearestCell(nx, ny)
+                    if (hit is Cell.Letter) {
+                        keyPressFeedback()
+                        gestureCell = hit
+                        gesturePointerId = event.getPointerId(ai)
+                        gesturing = false; trailLen = 0f
+                        trail.clear(); trail.add(PointF(nx, ny))
+                        pressed = hit; invalidate()
+                        if (Accents.hasVariants(hit.label.firstOrNull() ?: ' ')) {
+                            postDelayed(longPressRunnable, longPressTimeoutMs())
+                        }
+                    } else {
+                        resetGesture()
+                    }
+                }
+                return true
+            }
             MotionEvent.ACTION_MOVE -> {
                 if (accentActive()) { updateAccentSelection(event.x); return true }
                 val g = gestureCell ?: return true
+                val idx = event.findPointerIndex(gesturePointerId)
+                if (idx < 0) return true // the owning finger isn't in this event
+                val p = PointF(event.getX(idx), event.getY(idx))
                 val last = trail.lastOrNull()
-                val p = PointF(event.x, event.y)
                 if (last != null) trailLen += kotlin.math.hypot(p.x - last.x, p.y - last.y)
                 trail.add(p)
                 if (!gesturing && trailLen > gestureStartThreshold()) {
@@ -821,6 +858,16 @@ class KeyboardView @JvmOverloads constructor(
                     removeCallbacks(longPressRunnable) // finger moved: it's a swipe
                 }
                 if (gesturing) invalidate()
+                return true
+            }
+            MotionEvent.ACTION_POINTER_UP -> {
+                // The finger that owns the current press lifted: finalize it now.
+                // A non-owning finger lifting (e.g. one already committed as a
+                // tap) is a no-op — only the owner drives the gesture.
+                if (event.getPointerId(event.actionIndex) == gesturePointerId) {
+                    removeCallbacks(longPressRunnable)
+                    finalizeGestureOrTap()
+                }
                 return true
             }
             MotionEvent.ACTION_UP -> {
@@ -835,19 +882,7 @@ class KeyboardView @JvmOverloads constructor(
                     resetAccent(); resetGesture()
                     return true
                 }
-                val g = gestureCell
-                if (g != null) {
-                    if (gesturing && trail.size >= 3) {
-                        lastShiftTapAt = 0L // a glided word: breaks the shift double-tap window
-                        onGesture?.invoke(ArrayList(trail), letterCenters())
-                    } else {
-                        // A tap after all: report the finger-down point so the
-                        // core can learn this user's offset for the key.
-                        val down = trail.firstOrNull()
-                        fire(g, down?.x ?: g.rect.centerX(), down?.y ?: g.rect.centerY())
-                    }
-                }
-                resetGesture()
+                finalizeGestureOrTap()
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
@@ -856,6 +891,23 @@ class KeyboardView @JvmOverloads constructor(
             }
         }
         return super.onTouchEvent(event)
+    }
+
+    /** Commit the current press: a glide of ≥3 points fires a swipe; anything
+     *  shorter is reported as a tap at its finger-down point (so the core can
+     *  learn this user's offset for the key). Always resets gesture state. */
+    private fun finalizeGestureOrTap() {
+        val g = gestureCell
+        if (g != null) {
+            if (gesturing && trail.size >= 3) {
+                lastShiftTapAt = 0L // a glided word: breaks the shift double-tap window
+                onGesture?.invoke(ArrayList(trail), letterCenters())
+            } else {
+                val down = trail.firstOrNull()
+                fire(g, down?.x ?: g.rect.centerX(), down?.y ?: g.rect.centerY())
+            }
+        }
+        resetGesture()
     }
 
     private fun gestureStartThreshold() = dp(26f)
@@ -883,6 +935,7 @@ class KeyboardView @JvmOverloads constructor(
 
     private fun resetGesture() {
         gestureCell = null; gesturing = false; trailLen = 0f
+        gesturePointerId = MotionEvent.INVALID_POINTER_ID
         trail.clear()
         if (pressed != null) pressed = null
         invalidate()

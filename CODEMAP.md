@@ -437,7 +437,7 @@ concerns only; typing logic belongs in the Rust core (SEDD §5.5 rule 2).
 - `Dialpad.kt` — `class DialKey`; `object Dialpad` — val/var `Dialpad.ROWS`
 - `EmojiData.kt` — `class EmojiCategory`; `object EmojiData` — val/var `EmojiData.categories`
 - `KeyRepeat.kt` — `object KeyRepeat` — fun `KeyRepeat.next` — val/var `KeyRepeat.INITIAL_MS`, `KeyRepeat.MIN_MS`, `KeyRepeat.START_MS`, `KeyRepeat.STEP_MS`
-- `KeyboardGeometry.kt` — `object KeyboardGeometry`; `class CellLayoutKey` — fun `KeyboardGeometry.contentTopPx`, `KeyboardGeometry.totalHeightPx` — val/var `CellLayoutKey.affixKeys`, `CellLayoutKey.height`, `CellLayoutKey.keysVersion`, `CellLayoutKey.pageOrdinal`, `CellLayoutKey.width`
+- `KeyboardGeometry.kt` — `object KeyboardGeometry`; `class Rect4`; `class StripRects`; `class CellLayoutKey` — fun `KeyboardGeometry.contentTopPx`, `KeyboardGeometry.stripSubRects`, `KeyboardGeometry.totalHeightPx` — val/var `CellLayoutKey.affixKeys`, `CellLayoutKey.height`, `CellLayoutKey.keysVersion`, `CellLayoutKey.pageOrdinal`, `CellLayoutKey.width`
 - `KeyboardView.kt` — `class RenderKey`; `enum class FunctionKey`; `enum class InitialPage`; `class KeyboardView` — fun `KeyboardView.applyAppearance`, `KeyboardView.armShift`, `KeyboardView.consumeShift`, `KeyboardView.onAttachedToWindow`, `KeyboardView.onDetachedFromWindow`, `KeyboardView.onDraw`, `KeyboardView.onMeasure`, `KeyboardView.onTouchEvent`, `KeyboardView.resetPage` — val/var `KeyboardView.accentLangs`, `KeyboardView.affixKeys`, `KeyboardView.capsLocked`, `KeyboardView.hapticsEnabled`, `KeyboardView.heightScale`, `KeyboardView.keyOutlines`, `KeyboardView.keys`, `KeyboardView.onAccentKey`, `KeyboardView.onCharKey`, `KeyboardView.onEmoji`, `KeyboardView.onFunctionKey`, `KeyboardView.onGesture`, `KeyboardView.onKeyTouch`, `KeyboardView.onSuggestion`, `KeyboardView.recents`, `KeyboardView.shiftMode`, `KeyboardView.shifted`, `KeyboardView.spaceHint`, `KeyboardView.suggestions`
 - `ShiftKey.kt` — `enum class ShiftMode`; `object ShiftKey` — fun `ShiftKey.afterAutoCaps`, `ShiftKey.afterLetter`, `ShiftKey.onTap` — val/var `ShiftKey.DOUBLE_TAP_MS`
 - **Tests:** 6 file(s) — `AccentSessionTest.kt`, `AccentsTest.kt`, `DialpadTest.kt`, `KeyRepeatTest.kt`, `KeyboardGeometryTest.kt`, `ShiftKeyTest.kt`
@@ -818,6 +818,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `KeyboardCore::use_symbols_layout` | method — `featherkey-core` *(internal)* |
 | `KeyboardGeometry` | kotlin object — `:keyboard-view` |
 | `KeyboardGeometry.contentTopPx` | kotlin fun — `:keyboard-view` |
+| `KeyboardGeometry.stripSubRects` | kotlin fun — `:keyboard-view` |
 | `KeyboardGeometry.totalHeightPx` | kotlin fun — `:keyboard-view` |
 | `KeyboardHeight` | kotlin enum class — `:platform-services` |
 | `KeyboardHeight.fromTag` | kotlin fun — `:platform-services` |
@@ -1027,6 +1028,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `RecentWords::new` | method — `featherkey-core` *(internal)* |
 | `RecentWords::push` | method — `featherkey-core` *(internal)* |
 | `RecentWords::two_word_context` | method — `featherkey-core` *(internal)* |
+| `Rect4` | kotlin class — `:keyboard-view` |
 | `RedbSecureStore` | struct — `featherkey-secure-store` |
 | `RedbSecureStore::open` | method — `featherkey-secure-store` |
 | `RenderKey` | kotlin class — `:keyboard-view` |
@@ -1066,6 +1068,7 @@ a hit means it exists; extend it instead of writing a parallel implementation.
 | `StatisticalPredictor::new_ranked` | method — `featherkey-prediction` |
 | `StatisticalPredictor::suggest_ranked` | method — `featherkey-prediction` |
 | `StoreError` | enum — `featherkey-contracts` |
+| `StripRects` | kotlin class — `:keyboard-view` |
 | `Suggestion` | struct — `featherkey-contracts` |
 | `Suggestions` | struct — `featherkey-contracts` |
 | `SuggestionStrip` | kotlin object — `:ime-service` |

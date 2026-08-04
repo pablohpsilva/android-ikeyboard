@@ -5,19 +5,19 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 class KeyboardGeometryTest {
-    // px stand-ins (dp-independent): strip=42, row=52, func=54, bar=46, inset=10
+    // px stand-ins (dp-independent): strip=42, row=52, func=54, inset=10
     @Test fun strip_bearing_height_includes_the_strip_band() {
         val h = KeyboardGeometry.totalHeightPx(
-            stripReserved = true, rowPx = 52f, funcPx = 54f, barPx = 46f, insetPx = 10f, stripPx = 42f,
+            stripReserved = true, rowPx = 52f, funcPx = 54f, insetPx = 10f, stripPx = 42f,
         )
-        assertEquals(42f + 52f * 3 + 54f + 46f + 10f, h, 0.001f)
+        assertEquals(42f + 52f * 3 + 54f + 10f, h, 0.001f)
     }
 
     @Test fun emoji_height_excludes_the_strip_band() {
         val h = KeyboardGeometry.totalHeightPx(
-            stripReserved = false, rowPx = 52f, funcPx = 54f, barPx = 46f, insetPx = 10f, stripPx = 42f,
+            stripReserved = false, rowPx = 52f, funcPx = 54f, insetPx = 10f, stripPx = 42f,
         )
-        assertEquals(52f * 3 + 54f + 46f + 10f, h, 0.001f)
+        assertEquals(52f * 3 + 54f + 10f, h, 0.001f)
     }
 
     @Test fun content_top_offset_matches_the_reserved_band() {
@@ -28,10 +28,10 @@ class KeyboardGeometryTest {
 
     @Test fun dialpad_reserves_a_fourth_content_row() {
         val three = KeyboardGeometry.totalHeightPx(
-            stripReserved = true, rowPx = 52f, funcPx = 54f, barPx = 46f, insetPx = 10f, stripPx = 42f,
+            stripReserved = true, rowPx = 52f, funcPx = 54f, insetPx = 10f, stripPx = 42f,
         )
         val four = KeyboardGeometry.totalHeightPx(
-            stripReserved = true, rowPx = 52f, funcPx = 54f, barPx = 46f, insetPx = 10f, stripPx = 42f,
+            stripReserved = true, rowPx = 52f, funcPx = 54f, insetPx = 10f, stripPx = 42f,
             contentRows = 4,
         )
         assertEquals(three + 52f, four, 0.001f) // exactly one extra row
@@ -40,16 +40,40 @@ class KeyboardGeometryTest {
     @Test fun dialpad_has_no_function_row() {
         // Fully-numeric dialpad: 4 content rows, NO shared function row (funcPx = 0).
         val dialpad = KeyboardGeometry.totalHeightPx(
-            stripReserved = true, rowPx = 52f, funcPx = 0f, barPx = 46f, insetPx = 10f, stripPx = 42f,
+            stripReserved = true, rowPx = 52f, funcPx = 0f, insetPx = 10f, stripPx = 42f,
             contentRows = 4,
         )
-        assertEquals(42f + 52f * 4 + 46f + 10f, dialpad, 0.001f) // strip + 4 rows + bar + inset, no func row
+        assertEquals(42f + 52f * 4 + 10f, dialpad, 0.001f) // strip + 4 rows + inset, no func row
         // And it is exactly one function-row shorter than a dialpad that still had one:
         val withFuncRow = KeyboardGeometry.totalHeightPx(
-            stripReserved = true, rowPx = 52f, funcPx = 54f, barPx = 46f, insetPx = 10f, stripPx = 42f,
+            stripReserved = true, rowPx = 52f, funcPx = 54f, insetPx = 10f, stripPx = 42f,
             contentRows = 4,
         )
         assertEquals(withFuncRow - 54f, dialpad, 0.001f)
+    }
+
+    @Test fun strip_places_square_icons_left_and_right_with_three_middle_cells() {
+        val s = KeyboardGeometry.stripSubRects(width = 300f, band = 42f, iconW = 42f)
+        assertEquals(Rect4(0f, 0f, 42f, 42f), s.settings)      // left square
+        assertEquals(Rect4(258f, 0f, 300f, 42f), s.voice)      // right square
+        assertEquals(3, s.suggestions.size)
+        // middle [42,258] split into three equal 72-wide cells, contiguous:
+        assertEquals(Rect4(42f, 0f, 114f, 42f), s.suggestions[0])
+        assertEquals(Rect4(114f, 0f, 186f, 42f), s.suggestions[1])
+        assertEquals(Rect4(186f, 0f, 258f, 42f), s.suggestions[2])
+        // no gaps/overlap at the icon boundaries:
+        assertEquals(s.settings.right, s.suggestions.first().left, 0.001f)
+        assertEquals(s.voice.left, s.suggestions.last().right, 0.001f)
+    }
+
+    @Test fun strip_clamps_icon_width_so_the_middle_never_collapses() {
+        // iconW larger than a third of the width is clamped to width/3.
+        val s = KeyboardGeometry.stripSubRects(width = 90f, band = 42f, iconW = 42f)
+        assertEquals(30f, s.settings.right, 0.001f)            // clamped to 90/3
+        assertEquals(60f, s.voice.left, 0.001f)
+        assertEquals(3, s.suggestions.size)
+        assertEquals(30f, s.suggestions.first().left, 0.001f)
+        assertEquals(60f, s.suggestions.last().right, 0.001f)
     }
 
     @Test fun memo_key_is_equal_for_identical_inputs_and_differs_per_field() {
